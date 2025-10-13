@@ -63,7 +63,7 @@ st.markdown(f"""
     background: {BLUE_SMBG};
     width: 275px !important;
     min-width: 275px !important;
-    padding: 6px 10px 10px 10px !important;
+    padding: 6px 10px 8px 10px !important;
   }}
   /* bouton de repli masqué */
   [data-testid="collapsedControl"] {{ display:none !important; }}
@@ -72,35 +72,47 @@ st.markdown(f"""
   [data-testid="stSidebar"]::before {{
     content: "";
     display:block;
-    height: 6px;
+    height: 4px;
   }}
 
-  /* Logo : centré, ~50% plus petit, collé en haut avec petite marge */
+  /* Logo : centré, ~40% de la largeur, collé en haut */
   .smbg-logo-wrap {{
     display:flex; justify-content:center; align-items:flex-start;
-    margin-top: 4px; margin-bottom: 8px;
+    margin-top: 0; margin-bottom: 6px;
   }}
   [data-testid="stSidebar"] img {{
-    width: 42% !important;          /* ~50% plus petit */
-    max-width: 130px !important;    /* borne */
+    width: 40% !important;
+    max-width: 120px !important;
     height: auto !important;
-    margin: 0 auto 0 auto !important; /* collé au sommet */
+    margin: 4px auto 0 auto !important;
     display: block;
   }}
 
   /* Titres & labels : cuivré */
-  .smbg-title, .smbg-label, .smbg-actions-title, .smbg-counter {{
-    color: {COPPER} !important;
-  }}
-  /* Labels des checkboxes/radios dans la sidebar */
-  [data-testid="stSidebar"] label p {{
+  .smbg-title, .smbg-actions-title, .smbg-counter {{ color: {COPPER} !important; }}
+  /* Labels des checkboxes/radios/inputs dans la sidebar */
+  [data-testid="stSidebar"] label p,
+  [data-testid="stSidebar"] .stMarkdown p,
+  [data-testid="stSidebar"] .stTextInput label p {{
     color: {COPPER} !important;
     margin: 0 0 4px 0 !important;
     font-size: 13px !important;
   }}
+  /* inputs compacts */
+  [data-testid="stSidebar"] input[type="text"] {{
+    padding: 6px 8px !important;
+    font-size: 13px !important;
+    min-height: 32px !important;
+  }}
+  [data-testid="stSidebar"] button {{
+    padding: 4px 8px !important;
+    min-height: 32px !important;
+    line-height: 1.2 !important;
+    font-size: 13px !important;
+  }}
 
   /* Indentation hiérarchique (titre -> options) */
-  .smbg-indent {{ margin-left: 14px; }}
+  .smbg-indent {{ margin-left: 16px; }}
 
   /* Grilles compactes (Région/Département) : 2 colonnes + mini-scroll */
   .smbg-chip-grid {{
@@ -288,7 +300,7 @@ with st.sidebar:
     # ---- Département (lié à Région, même UI compacte, SANS recherche)
     if COL_DEPT in df.columns:
         st.markdown("<div class='smbg-title'><b>Département</b></div>", unsafe_allow_html=True)
-        base = filtered if (COL_REGION in df.columns and 'reg_0' in st.session_state) else df
+        base = filtered if (COL_REGION in df.columns and len([k for k in st.session_state if k.startswith("reg_")])>0) else df
         depts = sorted([str(x) for x in base[COL_DEPT].dropna().unique()])
         st.markdown("<div class='smbg-indent smbg-chip-grid'>", unsafe_allow_html=True)
         sel_depts = []
@@ -299,7 +311,7 @@ with st.sidebar:
         if sel_depts:
             filtered = filtered[filtered[COL_DEPT].astype(str).isin(sel_depts)]
 
-    # ---- Emplacement (compact, SANS recherche)
+    # ---- Emplacement (compact)
     if COL_EMPLACEMENT in df.columns:
         st.markdown("<div class='smbg-title'><b>Emplacement</b></div>", unsafe_allow_html=True)
         vals = sorted([str(x) for x in df[COL_EMPLACEMENT].dropna().unique()])
@@ -312,7 +324,7 @@ with st.sidebar:
         if sel_vals:
             filtered = filtered[filtered[COL_EMPLACEMENT].astype(str).isin(sel_vals)]
 
-    # ---- Typologie (compact, SANS recherche)
+    # ---- Typologie (compact)
     if COL_TYPOLOGIE in df.columns:
         st.markdown("<div class='smbg-title'><b>Typologie</b></div>", unsafe_allow_html=True)
         vals = sorted([str(x) for x in df[COL_TYPOLOGIE].dropna().unique()])
@@ -445,18 +457,18 @@ with st.sidebar:
 left, right = st.columns([1, 0.0001], gap="large")
 
 with left:
-    if "Latitude" in filtered.columns and "Longitude" in filtered.columns:
-        df_map = filtered.dropna(subset=["Latitude", "Longitude"]).copy()
+    if COL_LAT in filtered.columns and COL_LON in filtered.columns:
+        df_map = filtered.dropna(subset=[COL_LAT, COL_LON]).copy()
     else:
         df_map = filtered.iloc[0:0].copy()
 
-    center = [df_map["Latitude"].astype(float).mean(), df_map["Longitude"].astype(float).mean()] if not df_map.empty else [46.6, 2.5]
+    center = [df_map[COL_LAT].astype(float).mean(), df_map[COL_LON].astype(float).mean()] if not df_map.empty else [46.6, 2.5]
     m = folium.Map(location=center, zoom_start=6, control_scale=True, tiles="OpenStreetMap")
 
     for idx, row in df_map.iterrows():
         ref_txt = str(row.get(COL_REF, f"Annonce {idx}"))
         folium.Marker(
-            location=[float(row["Latitude"]), float(row["Longitude"])],
+            location=[float(row[COL_LAT]), float(row[COL_LON])],
             tooltip=ref_txt,
             popup=ref_txt
         ).add_to(m)
