@@ -355,7 +355,7 @@ with st.sidebar:
         rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA)
         if rmin is not None: mins.append(rmin)
         if rmax is not None: maxs.append(rmax)
-    if mins and maxs and min(mins) < max(maxs)):
+    if mins and maxs and min(mins) < max(maxs):
         smin_glob = int(math.floor(min(mins))); smax_glob = int(math.ceil(max(maxs)))
         ssel = st.slider(" ", min_value=smin_glob, max_value=smax_glob, value=(smin_glob, smax_glob),
                          label_visibility="collapsed", key="sl_gla")
