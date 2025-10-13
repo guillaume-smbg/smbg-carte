@@ -1,363 +1,374 @@
-# app.py — SMBG Carte (version finale)
-# - G→AF affichées (H = bouton "Cliquer ici")
-# - AG..AM = technique : Latitude (AG), Longitude (AH), Géocode statut (AI), Géocode date (AJ),
-#   Référence annonce (AK), Photos annonce (AL), Actif (AM)
-# - Filtres dynamiques Région/Département + compteurs
-# - Mode client : N/O/P -> "Demander le loyer"
-# - Carte OSM, photos empilées, géocodage auto Nominatim
-# - Police Futura auto depuis assets/*.ttf|*.otf
+import os
+import io
+import re
+import math
+import datetime as dt
+from typing import List, Optional
 
-import os, io, time, base64, pathlib
-from typing import List, Tuple, Dict
-import requests
 import pandas as pd
+import numpy as np
 import streamlit as st
-import yaml
-import folium
+
+# Carte
 from streamlit_folium import st_folium
+import folium
+from folium.plugins import MarkerCluster
 
-st.set_page_config(page_title="SMBG Carte", layout="wide", page_icon="📍")
+# =========================
+# THEME & BRANDING
+# =========================
+THEME_BLUE = "#0B2D3F"   # Bleu du logo (ajuste si besoin)
+THEME_COPPER = "#B87333" # Accent cuivré
+LOGO_BLEU_PATHS = [
+    "Logo bleu.png", "assets/Logo bleu.png", "static/Logo bleu.png",
+    "data/Logo bleu.png", "images/Logo bleu.png"
+]
 
-# ---------- Charger schema.yaml ----------
-SCHEMA_PATH = pathlib.Path("schema.yaml")
-if not SCHEMA_PATH.exists():
-    st.error("Fichier schema.yaml introuvable à la racine du dépôt.")
-    st.stop()
-with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-    SCHEMA = yaml.safe_load(f)
+st.set_page_config(page_title="SMBG Carte — Sélection d’annonces", layout="wide")
 
-# ---------- Secrets ----------
-EXCEL_URL = os.environ.get("EXCEL_URL") or st.secrets.get("EXCEL_URL", "")
-R2_BASE_URL = os.environ.get("R2_BASE_URL") or st.secrets.get("R2_BASE_URL", "")
-
-# ---------- Helpers ----------
-def excel_letter_to_index(letter: str) -> int:
-    s = 0
-    for c in letter.strip().upper():
-        if "A" <= c <= "Z":
-            s = s * 26 + (ord(c) - 64)
-    return s - 1
-
-def slice_by_letters(df: pd.DataFrame, start_letter: str, end_letter: str) -> pd.DataFrame:
-    start_idx = excel_letter_to_index(start_letter)
-    end_idx = excel_letter_to_index(end_letter)
-    return df.iloc[:, start_idx:end_idx+1]
-
-def clean_value(v):
-    if pd.isna(v): return ""
-    return str(v).strip()
-
-def value_is_hidden(v) -> bool:
-    return clean_value(v) in set(SCHEMA["right_panel"]["hide_values"])
-
-def safe_col(df: pd.DataFrame, idx: int) -> pd.Series:
-    return df.iloc[:, idx] if 0 <= idx < len(df.columns) else pd.Series([], dtype=object)
-
-# ---------- Fonts Futura depuis assets/ ----------
-def load_font_face(name: str, file_path: pathlib.Path, weight="normal", style="normal") -> str:
-    if not file_path.exists(): return ""
-    data = file_path.read_bytes()
-    b64 = base64.b64encode(data).decode("utf-8")
-    mime = "font/ttf" if file_path.suffix.lower()==".ttf" else "font/otf"
-    return f"""
-    @font-face {{
-      font-family: '{name}';
-      src: url(data:{mime};base64,{b64}) format('truetype');
-      font-weight: {weight};
-      font-style: {style};
-      font-display: swap;
-    }}
-    """
-
-def infer_weight_style(filename: str) -> Tuple[str,str]:
-    f = filename.lower()
-    style = "normal"
-    if "italic" in f or "oblique" in f or ("it" in f and "bold" in f): style = "italic"
-    weight = "400"
-    if "thin" in f or "hairline" in f: weight="100"
-    elif "extralight" in f or "ultralight" in f: weight="200"
-    elif "light" in f: weight="300"
-    elif "regular" in f or "book" in f or "roman" in f: weight="400"
-    elif "medium" in f: weight="500"
-    elif "semibold" in f or "demibold" in f or "sb" in f: weight="600"
-    elif "bold" in f or "bd" in f: weight="700"
-    elif "extrabold" in f or "ultrabold" in f or "heavy" in f: weight="800"
-    elif "black" in f: weight="900"
-    return weight, style
-
-def inject_futura_fonts():
-    assets = pathlib.Path("assets")
-    css_blocks = []
-    if assets.exists():
-        files = sorted(list(assets.glob("*.ttf")) + list(assets.glob("*.otf")))
-        for p in files:
-            w,s = infer_weight_style(p.name)
-            css_blocks.append(load_font_face("Futura SMBG", p, w, s))
-    css = f"""
+# CSS: sidebar pleine hauteur + fond bleu + centrage logo
+st.markdown(
+    f"""
     <style>
-    {''.join(css_blocks)}
-    html, body, [class*="css"], .stMarkdown, .stText, .stButton, .stSelectbox, .stMultiSelect,
-    .stDataFrame, .stMetric, .stCheckbox, .stRadio, .stTextInput, .stNumberInput, .stDateInput, .stLinkButton {{
-      font-family: 'Futura SMBG', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-    }}
-    /* anti-capture soft */
-    * {{ user-select: none; -webkit-user-select:none; -ms-user-select:none; }}
-    img {{ -webkit-user-drag: none; user-drag: none; }}
-    @media print {{ body::before {{ content:"Impression désactivée"; }} body {{ display:none; }} }}
+      [data-testid="stSidebar"] {{
+        background: {THEME_BLUE};
+      }}
+      /* Enlever padding horizontal de la page pour agrandir la carte */
+      .block-container {{
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
+      }}
+      /* Bannières / badges */
+      .ref-banner {{
+        background:{THEME_BLUE}; color:white; padding:8px 12px; border-radius:10px; display:inline-block;
+        font-weight:600; letter-spacing:.2px;
+      }}
+      .badge-new {{
+        background:{THEME_COPPER}; color:white; padding:2px 8px; border-radius:999px; margin-left:8px;
+        font-size:12px; font-weight:600;
+      }}
+      .field-label {{
+        color:#333; font-weight:600;
+      }}
+      .gmaps-btn > a {{
+        text-decoration:none !important;
+      }}
     </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =========================
+# UTILS
+# =========================
+@st.cache_data(show_spinner=False)
+def load_excel() -> pd.DataFrame:
     """
-    st.markdown(css, unsafe_allow_html=True)
+    Charge l'Excel depuis, dans cet ordre :
+    1) un fichier local 'annonces.xlsx' à la racine du repo (ou 'data/annonces.xlsx')
+    2) st.secrets['EXCEL_URL'] (URL raw GitHub)
+    3) os.environ['EXCEL_URL']
+    """
+    candidates = ["annonces.xlsx", "data/annonces.xlsx"]
+    for p in candidates:
+        if os.path.exists(p):
+            return pd.read_excel(p)
 
-inject_futura_fonts()
+    url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL", "")).strip()
+    if url:
+        # stream via pandas
+        return pd.read_excel(url)
 
-# ---------- Header branding ----------
-def show_header():
-    c1, c2 = st.columns([1,4], vertical_alignment="center")
-    with c1:
-        for cand in ["assets/Logo bleu.png","assets/logo_bleu.png","assets/Logo transparent.png","assets/logo_transparent.png","assets/Icône bleu.png"]:
-            p = pathlib.Path(cand)
-            if p.exists():
-                st.image(str(p), use_container_width=True)
-                break
-    with c2:
-        st.markdown("<div style='padding-top:4px; font-size:28px; font-weight:700;'>SMBG Carte — Sélection d’annonces</div>", unsafe_allow_html=True)
-        for sc in ["assets/Slogan bleu.png","assets/slogan_bleu.png","assets/Slogan transparent.png"]:
-            sp = pathlib.Path(sc)
-            if sp.exists():
-                st.image(str(sp), width=240)
-                break
+    st.error("Aucun fichier Excel trouvé. Place ‘annonces.xlsx’ dans le repo ou définis EXCEL_URL dans secrets.")
+    return pd.DataFrame()
 
-show_header()
+def find_col(df: pd.DataFrame, *keywords) -> Optional[str]:
+    """Trouve la première colonne dont le nom contient tous les keywords (insensibles à la casse)."""
+    low = {c: c.lower() for c in df.columns}
+    for c, lc in low.items():
+        if all(k.lower() in lc for k in keywords):
+            return c
+    return None
 
-# ---------- Mode (client/interne) ----------
-DEFAULT_MODE = SCHEMA.get("modes",{}).get("default_mode","client")
-mode_param = st.query_params.get("mode", DEFAULT_MODE)
-MODE = mode_param if mode_param in ("client","interne") else DEFAULT_MODE
-st.sidebar.markdown(f"**Mode :** `{MODE}`")
-
-# ---------- Charger Excel ----------
-def load_excel(url: str) -> pd.DataFrame:
-    if not url:
-        st.error("EXCEL_URL manquant (à renseigner dans *Settings → Secrets* de Streamlit Cloud).")
-        st.stop()
+def coerce_number(x):
+    """Convertit proprement en nombre (retire €, espaces, etc.). Renvoie NaN si non numérique classique."""
+    if pd.isna(x):
+        return np.nan
+    s = str(x).strip()
+    if s == "" or s in {"/", "-", "—"}:
+        return np.nan
+    # Cas textuels connus
+    if "demander" in s.lower():
+        return np.nan  # traité via case à cocher
+    if s.lower() == "néant":
+        return 0
+    # Retirer tout sauf chiffres, virgule, point et signe -
+    s = re.sub(r"[^\d,.\-]", "", s)
+    # Remplacer virgule par point si besoin
+    if s.count(",") == 1 and s.count(".") == 0:
+        s = s.replace(",", ".")
     try:
-        return pd.read_excel(url, engine="openpyxl")
-    except Exception as e:
-        st.error(f"Impossible de lire l'Excel depuis EXCEL_URL. Détail : {e}")
-        st.stop()
+        return float(s)
+    except:
+        return np.nan
 
-df_all = load_excel(EXCEL_URL)
+def is_truthy_yes(x):
+    return str(x).strip().lower() in {"oui","yes","true","1","y"}
 
-# ---------- Indices colonnes techniques ----------
-lat_col   = excel_letter_to_index(SCHEMA["technical_columns"]["latitude"])     # AG
-lon_col   = excel_letter_to_index(SCHEMA["technical_columns"]["longitude"])    # AH
-geos_col  = excel_letter_to_index(SCHEMA["technical_columns"]["geocode_status"])  # AI
-geod_col  = excel_letter_to_index(SCHEMA["technical_columns"]["geocode_date"])    # AJ
-ref_col   = excel_letter_to_index(SCHEMA["technical_columns"]["reference"])    # AK
-photos_col= excel_letter_to_index(SCHEMA["technical_columns"]["photos"])       # AL
-active_col= excel_letter_to_index(SCHEMA["technical_columns"]["active"])       # AM
+def pretty_k(x):
+    try:
+        x = float(x)
+    except:
+        return "-"
+    if x >= 1_000_000:
+        return f"{int(round(x/1_000_000))} M€"
+    if x >= 1_000:
+        return f"{int(round(x/1_000))} k€"
+    return f"{int(round(x))} €"
 
-# ---------- Filtrer Actif = oui ----------
-if 0 <= active_col < len(df_all.columns):
-    actives = df_all.iloc[:, active_col].fillna("").astype(str).str.strip().str.lower() == "oui"
-    df = df_all[actives].reset_index(drop=True)
+# =========================
+# DATA
+# =========================
+df = load_excel()
+if df.empty:
+    st.stop()
+
+# Colonnes clefs (robustes aux variations d’intitulés)
+col_region = find_col(df, "région") or find_col(df, "region")
+col_dept   = find_col(df, "département") or find_col(df, "departement")
+col_lat    = find_col(df, "lat")
+col_lon    = find_col(df, "lon") or find_col(df, "lng")
+col_ref    = find_col(df, "référence","annonce") or find_col(df, "reference","annonce")
+col_maps   = find_col(df, "google","map") or find_col(df, "lien","map")
+col_actif  = find_col(df, "actif")
+
+# Numériques pour filtres
+col_surface = find_col(df, "surface")  # ex: "Surface", "Surface utile", "Surface GLA" — on prendra la plus globale
+col_loyer   = find_col(df, "loyer")
+col_pp      = find_col(df, "pas de porte") or find_col(df, "droit au bail") or find_col(df, "cession")
+
+# Dates publication (pour badge Nouveau)
+col_date_pub = find_col(df, "publication") or find_col(df, "publi")
+
+# Colonnes techniques AG→AM (on veillera à ne pas les afficher en mode client)
+# Ici on s’appuie sur leurs noms détectés (lat/lon/réf/actif), le reste est ignoré côté UI.
+
+# Filtrer Actif = oui
+if col_actif and col_actif in df.columns:
+    df = df[df[col_actif].apply(is_truthy_yes)].copy()
+
+# Préparer colonnes numériques pour filtres
+if col_surface and col_surface in df.columns:
+    df["_surface_num"] = df[col_surface].apply(coerce_number)
 else:
-    df = df_all.copy()
+    df["_surface_num"] = np.nan
 
-# ---------- Détection Région / Département ----------
-region_col = None
-dept_col = None
-for c in df.columns:
-    cl = str(c).lower()
-    if ("région" in cl) or ("region" in cl): region_col = region_col or c
-    if ("départ" in cl) or ("depart" in cl) or ("dept" in cl): dept_col = dept_col or c
+if col_loyer and col_loyer in df.columns:
+    df["_loyer_num"] = df[col_loyer].apply(coerce_number)
+else:
+    df["_loyer_num"] = np.nan
 
-# ---------- Géocodage automatique ----------
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-HEADERS = {"User-Agent": "SMBG-Carte/1.0 (contact: guillaume.kettenmeyer@smbg-conseil.fr)"}
+if col_pp and col_pp in df.columns:
+    df["_pp_num"] = df[col_pp].apply(coerce_number)
+else:
+    df["_pp_num"] = np.nan
 
-@st.cache_data(show_spinner=False, ttl=60*60*24)
-def geocode_cached(address: str) -> Tuple[str,str,str]:
-    if not address: return ("","","")
-    params = {"q": address, "format":"json", "limit":1, "countrycodes":"fr"}
-    r = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=15)
-    if r.status_code != 200:
-        return ("","","")
-    js = r.json()
-    if not js: return ("","","")
-    lat = js[0].get("lat",""); lon = js[0].get("lon","")
-    return (lat, lon, "ok")
+# =========================
+# SIDEBAR = LOGO SEUL
+# =========================
+with st.sidebar:
+    # Tenter d’afficher le logo bleu
+    logo_shown = False
+    for p in LOGO_BLEU_PATHS:
+        if os.path.exists(p):
+            st.image(p, use_container_width=True)
+            logo_shown = True
+            break
+    if not logo_shown:
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        st.markdown("<h3 style='color:white; text-align:center;'>SMBG CONSEIL</h3>", unsafe_allow_html=True)
 
-def compute_lat_lon(df_in: pd.DataFrame) -> Tuple[List[float], List[float], List[str], List[str]]:
-    """Retourne latitudes, longitudes, statut, date (en mémoire) sans modifier l'Excel."""
-    import datetime
-    lats, lons, stats, dates = [], [], [], []
-    # Adresse utilisée pour géocoder = colonne G (début de la zone affichée)
-    addr_idx = excel_letter_to_index("G")
-    for i, row in df_in.iterrows():
-        lat_v = clean_value(row.iloc[lat_col]) if 0 <= lat_col < len(df_in.columns) else ""
-        lon_v = clean_value(row.iloc[lon_col]) if 0 <= lon_col < len(df_in.columns) else ""
-        if lat_v and lon_v:
-            lats.append(float(lat_v)); lons.append(float(lon_v))
-            stats.append("déjà fourni"); dates.append("")
+# =========================
+# ENTÊTE
+# =========================
+c1, = st.columns([1])
+with c1:
+    st.markdown("## SMBG Carte — Sélection d’annonces")
+
+# =========================
+# BARRE DE FILTRES (dans le contenu principal)
+# =========================
+with st.expander("Filtres", expanded=True):
+    # Filtres Région / Département (dynamiques)
+    filtered = df.copy()
+    if col_region and col_region in df.columns:
+        # Compteurs dynamiques
+        reg_counts = df.groupby(col_region).size().sort_values(ascending=False)
+        reg_options = [f"{r} ({n})" for r, n in reg_counts.items()]
+        sel_regs = st.multiselect("Régions", reg_options, placeholder="Choisir…")
+        if sel_regs:
+            keep_regs = {x.split(" (")[0] for x in sel_regs}
+            filtered = filtered[filtered[col_region].isin(keep_regs)]
+
+    if col_dept and col_dept in df.columns:
+        dept_counts = filtered.groupby(col_dept).size().sort_values(ascending=False)
+        dept_options = [f"{d} ({n})" for d, n in dept_counts.items()]
+        sel_depts = st.multiselect("Départements", dept_options, placeholder="Choisir…")
+        if sel_depts:
+            keep_depts = {x.split(" (")[0] for x in sel_depts}
+            filtered = filtered[filtered[col_dept].isin(keep_depts)]
+
+    # Filtres numériques
+    st.markdown("---")
+
+    # Surface
+    if filtered["_surface_num"].notna().any():
+        smin = math.floor(filtered["_surface_num"].min())
+        smax = math.ceil(filtered["_surface_num"].max())
+        smin, smax = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax))
+        filtered = filtered[filtered["_surface_num"].between(smin, smax) | filtered["_surface_num"].isna()]
+
+    # Loyer
+    incl_demander = False
+    if filtered["_loyer_num"].notna().any() or (col_loyer and filtered[col_loyer].astype(str).str.contains("demander", case=False, na=False).any()):
+        # bornes sur les valeurs numériques
+        if filtered["_loyer_num"].notna().any():
+            lmin = int(math.floor(filtered["_loyer_num"].min()))
+            lmax = int(math.ceil(filtered["_loyer_num"].max()))
+            lmin, lmax = st.slider("Loyer mensuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax))
+            mask_num = filtered["_loyer_num"].between(lmin, lmax)
         else:
-            # géocoder à partir de l'adresse G
-            addr = clean_value(row.iloc[addr_idx]) if 0 <= addr_idx < len(df_in.columns) else ""
-            la, lo, stt = geocode_cached(addr)
-            # Respect minimal du rate-limit (1 req/s quand pas en cache)
-            time.sleep(1/3)
-            if la and lo:
-                lats.append(float(la)); lons.append(float(lo))
-                stats.append("géocodé"); dates.append(datetime.date.today().isoformat())
-            else:
-                lats.append(None); lons.append(None)
-                stats.append("échec"); dates.append(datetime.date.today().isoformat())
-    return lats, lons, stats, dates
+            mask_num = pd.Series(False, index=filtered.index)
 
-lats, lons, geostats, geodates = compute_lat_lon(df)
+        incl_demander = st.checkbox("Inclure les annonces « Demander le loyer »", value=True)
+        mask_dem = pd.Series(False, index=filtered.index)
+        if col_loyer:
+            mask_dem = filtered[col_loyer].astype(str).str.contains("demander", case=False, na=False)
 
-# ---------- Filtres Région / Département (avec compteurs dynamiques) ----------
-def current_other_filters(df_in: pd.DataFrame) -> pd.DataFrame:
-    return df_in
+        filtered = filtered[mask_num | (incl_demander & mask_dem) | filtered["_loyer_num"].isna()]
 
-def region_counts(df_in: pd.DataFrame, selected_depts: List[str]) -> Dict[str,int]:
-    base = current_other_filters(df_in)
-    if dept_col and selected_depts:
-        base = base[base[dept_col].astype(str).str.strip().isin(selected_depts)]
-    out={}
-    if region_col:
-        for v, sub in base.groupby(region_col, dropna=True):
-            vv = clean_value(v)
-            if vv and vv != "/": out[vv] = len(sub)
-    return out
+    # Pas de porte / Droit au bail
+    only_neant = False
+    if filtered["_pp_num"].notna().any() or (col_pp and filtered[col_pp].astype(str).str.fullmatch(r"(?i)\s*néant\s*", na=False).any()):
+        if filtered["_pp_num"].notna().any():
+            pmin = int(math.floor(filtered["_pp_num"].min()))
+            pmax = int(math.ceil(filtered["_pp_num"].max()))
+            pmin, pmax = st.slider("Pas de porte / Droit au bail (€)", min_value=pmin, max_value=pmax, value=(pmin, pmax))
+            mask_pp = filtered["_pp_num"].between(pmin, pmax)
+        else:
+            mask_pp = pd.Series(False, index=filtered.index)
 
-def dept_counts(df_in: pd.DataFrame, selected_regions: List[str]) -> Dict[str,int]:
-    base = current_other_filters(df_in)
-    if region_col and selected_regions:
-        base = base[base[region_col].astype(str).str.strip().isin(selected_regions)]
-    out={}
-    if dept_col:
-        for v, sub in base.groupby(dept_col, dropna=True):
-            vv = clean_value(v)
-            if vv and vv != "/": out[vv] = len(sub)
-    return out
+        only_neant = st.checkbox("Uniquement « Néant »", value=False)
+        mask_neant = pd.Series(False, index=filtered.index)
+        if col_pp:
+            mask_neant = filtered[col_pp].astype(str).str.fullmatch(r"(?i)\s*néant\s*", na=False)
 
-st.sidebar.header("Filtres")
+        if only_neant:
+            filtered = filtered[mask_neant]
+        else:
+            filtered = filtered[mask_pp | mask_neant | filtered["_pp_num"].isna()]
 
-regions_all = sorted([r for r in (df[region_col].dropna().astype(str).str.strip().unique().tolist() if region_col else []) if r and r!="/"])
-depts_all   = sorted([d for d in (df[dept_col].dropna().astype(str).str.strip().unique().tolist()   if dept_col   else []) if d and d!="/"])
+    st.caption(f"**{len(filtered)}** annonces après filtres.")
 
-# régions (compteurs initiaux)
-rc0 = region_counts(df, selected_depts=[])
-fmt_region = (lambda x: f"{x} ({rc0.get(x,0)})")
-selected_regions = st.sidebar.multiselect("Régions", options=regions_all, default=[], format_func=fmt_region)
+# =========================
+# LAYOUT PRINCIPAL : Carte large + volet droit rétractable
+# =========================
+col_map, col_detail = st.columns([7, 5], gap="large")
 
-# restreindre par régions
-df_region = df.copy()
-if region_col and selected_regions:
-    df_region = df_region[df_region[region_col].astype(str).str.strip().isin(selected_regions)]
-
-# départements dépendants
-dc0 = dept_counts(df, selected_regions=selected_regions)
-depts_filtered = sorted([d for d in (df_region[dept_col].dropna().astype(str).str.strip().unique().tolist() if dept_col else []) if d and d!="/"])
-fmt_dept = (lambda x: f"{x} ({dc0.get(x,0)})")
-selected_depts = st.sidebar.multiselect("Départements", options=depts_filtered, default=[], format_func=fmt_dept)
-
-# restreindre final
-df_filtered = df_region.copy()
-if dept_col and selected_depts:
-    df_filtered = df_filtered[df_filtered[dept_col].astype(str).str.strip().isin(selected_depts)]
-
-st.sidebar.caption(f"**{len(df_filtered)}** annonces après filtres Région / Département.")
-
-# ---------- Layout principal ----------
-left, right = st.columns([1.1, 1.9], gap="large")
-
-with left:
-    st.subheader("Carte")
-    # centrage France ou moyenne des points valides
-    pts = [(la,lo) for la,lo in zip(lats,lons) if la is not None and lo is not None]
-    if pts:
-        c_lat = sum(p[0] for p in pts)/len(pts); c_lon = sum(p[1] for p in pts)/len(pts)
+# --- Carte ---
+with col_map:
+    # Centre de la carte (moyenne des points valides), sinon France
+    df_map = filtered.dropna(subset=[col_lat, col_lon]) if (col_lat and col_lon) else filtered.iloc[0:0]
+    if not df_map.empty:
+        center = [df_map[col_lat].astype(float).mean(), df_map[col_lon].astype(float).mean()]
     else:
-        c_lat, c_lon = 46.6, 2.45
+        center = [46.6, 2.5]
 
-    m = folium.Map(location=[c_lat, c_lon], zoom_start=6, tiles="OpenStreetMap")
+    m = folium.Map(location=center, zoom_start=6, control_scale=True, tiles="OpenStreetMap")
+    cluster = MarkerCluster().add_to(m)
 
-    # séries Réf & Adresse
-    ref_s  = safe_col(df, ref_col).astype(str)
-    addr_i = excel_letter_to_index("G")
-    addr_s = safe_col(df, addr_i).astype(str)
+    # Clé d'index pour sélectionner
+    st.session_state.setdefault("selected_idx", None)
 
-    # marquer uniquement les lignes visibles après filtres
-    visible_idx = set(df_filtered.index.tolist())
-    for i,(la,lo) in enumerate(zip(lats,lons)):
-        if i not in visible_idx: continue
-        if la is None or lo is None: continue
-        ref_val  = clean_value(ref_s.iloc[i]) if i < len(ref_s) else ""
-        addr_val = clean_value(addr_s.iloc[i]) if i < len(addr_s) else ""
+    for idx, row in df_map.iterrows():
+        popup_ref = str(row[col_ref]) if col_ref else f"Annonce {idx}"
         folium.Marker(
-            [la,lo],
-            tooltip=f"{ref_val} — {addr_val}",
-            icon=folium.Icon(color="blue", icon="info-sign")
-        ).add_to(m)
+            location=[float(row[col_lat]), float(row[col_lon])],
+            tooltip=popup_ref,
+            popup=popup_ref
+        ).add_to(cluster)
 
-    st_folium(m, width=None, height=520)
+    out = st_folium(m, height=650, width=None)
+    # Sélection via popup/clique : streamlit-folium ne remonte pas l’index de façon stable.
+    # On ajoute une petite liste pour sélectionner manuellement l’annonce visible (option pratique).
+    with st.expander("Sélectionner une annonce (si besoin)"):
+        ref_series = (filtered[col_ref].astype(str) if col_ref else pd.Series([f"Annonce {i}" for i in filtered.index], index=filtered.index))
+        choice = st.selectbox("Référence annonce :", options=list(ref_series.index), format_func=lambda i: ref_series.loc[i] if i in ref_series.index else str(i))
+        st.session_state["selected_idx"] = choice
 
-    # mini-liste
-    ref_series = safe_col(df_filtered, ref_col).astype(str)
-    addr_series= safe_col(df_filtered, addr_i).astype(str)
-    mini = pd.DataFrame({"Référence": ref_series, "Adresse": addr_series})
-    st.markdown("### Liste des annonces (filtres appliqués)")
-    st.dataframe(mini, use_container_width=True, hide_index=True)
+# --- Volet droit (rétractable) ---
+with col_detail:
+    show_details = st.toggle("Afficher le volet de détails", value=True)
+    if show_details:
+        selected_idx = st.session_state.get("selected_idx", None)
+        # Par défaut : premier résultat filtré
+        if selected_idx is None or selected_idx not in filtered.index:
+            if not filtered.empty:
+                selected_idx = filtered.index[0]
 
-with right:
-    st.subheader("Volet droit — Détails")
-    st.caption("Affiche G→AF (H devient bouton “Cliquer ici”). Masque `/`, `-` et vides. Référence annonce en en-tête.")
+        if selected_idx is not None and selected_idx in filtered.index:
+            row = filtered.loc[selected_idx]
+            # Bannière Référence + badge Nouveau
+            ref_val = str(row.get(col_ref, f"Annonce {selected_idx}"))
+            st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
 
-    # range G..AF et Google Maps (H)
-    start_idx = excel_letter_to_index("G")
-    end_idx   = excel_letter_to_index("AF")
-    gmaps_idx = excel_letter_to_index(SCHEMA["right_panel"]["google_maps_column_letter"])
-    rent_letters = SCHEMA.get("modes",{}).get("rent_columns_letters", [])
-    rent_idx = [excel_letter_to_index(x) for x in rent_letters]
+            # Badge "Nouveau" si date récente
+            if col_date_pub and pd.notna(row.get(col_date_pub, None)):
+                try:
+                    d = pd.to_datetime(row[col_date_pub], dayfirst=True, errors="coerce")
+                    if pd.notna(d) and (pd.Timestamp.now().tz_localize(None) - d.to_pydatetime().replace(tzinfo=None) <= pd.Timedelta(days=30)):
+                        st.markdown("<span class='badge-new'>Nouveau</span>", unsafe_allow_html=True)
+                except:
+                    pass
 
-    # prévisualiser toutes les annonces filtrées (tu peux limiter à n=10 si nécessaire)
-    for _, row in df_filtered.iterrows():
-        ref_val = clean_value(row.iloc[ref_col]) if 0 <= ref_col < len(df_filtered.columns) else ""
-        if ref_val:
-            st.markdown(f"**Référence annonce : {ref_val}**")
+            st.write("")  # espace
 
-        for col_idx in range(start_idx, end_idx+1):
-            header = df_filtered.columns[col_idx]
-            val = row.iloc[col_idx]
+            # Bouton Google Maps
+            if col_maps and pd.notna(row.get(col_maps, None)) and str(row[col_maps]).strip() not in {"", "-", "/"}:
+                url = str(row[col_maps]).strip()
+                st.link_button("Cliquer ici", url, type="primary")
 
-            # bouton maps
-            if col_idx == gmaps_idx:
-                url = clean_value(val)
-                if url and url != "/":
-                    st.link_button(SCHEMA["branding"]["google_maps_button_label"], url, type="secondary")
-                continue
+            st.write("")
 
-            # loyers masqués en mode client
-            if MODE == "client" and col_idx in rent_idx:
-                st.write(f"**{header}** : Demander le loyer")
-                continue
+            # Affichage des champs G→AF dans l’ordre :
+            # Comme on n’a pas les lettres ici, on affiche toutes les colonnes "métier" en filtrant :
+            technical_like = {c for c in df.columns if any(k in c.lower() for k in ["lat","lon","géocod","geocod","date","photo","actif","reference","référence"])}
+            to_hide_exact = {col_maps, col_lat, col_lon, col_actif, col_date_pub}
+            candidates = [c for c in df.columns if c not in technical_like and c not in to_hide_exact]
 
-            if value_is_hidden(val):
-                continue
+            def is_empty_val(v):
+                if pd.isna(v): return True
+                s = str(v).strip()
+                return s == "" or s in {"/", "-", "—"}
 
-            st.write(f"**{header}** : {clean_value(val)}")
+            for c in candidates:
+                v = row.get(c, None)
+                if is_empty_val(v):
+                    continue
+                label = c
+                # Mise en forme propre pour certains champs
+                if c == col_loyer and pd.notna(row["_loyer_num"]):
+                    st.markdown(f"**{label}** : {pretty_k(row['_loyer_num'])}")
+                elif c == col_pp and pd.notna(row["_pp_num"]):
+                    st.markdown(f"**{label}** : {pretty_k(row['_pp_num'])}")
+                elif c == col_surface and pd.notna(row["_surface_num"]):
+                    st.markdown(f"**{label}** : {int(round(row['_surface_num']))} m²")
+                else:
+                    st.markdown(f"**{label}** : {v}")
 
-        # photos empilées (AL)
-        photos_val = clean_value(row.iloc[photos_col]) if 0 <= photos_col < len(df_filtered.columns) else ""
-        if photos_val:
-            urls = [u.strip() for u in photos_val.split("|") if u.strip()]
-            if urls:
-                st.markdown("**Photos :**")
-                for u in urls:
-                    st.image(u, use_container_width=True)
+        else:
+            st.info("Aucune annonce sélectionnée.")
 
-        st.divider()
-
-st.success("SMBG Carte opérationnelle. Mettez à jour votre Excel (et photos) pour alimenter la carte.")
+# Pied de page compteur
+st.caption(f"{len(filtered)} annonces affichées.")
