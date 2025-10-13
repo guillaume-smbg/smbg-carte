@@ -1,7 +1,5 @@
-import os
-import re
-import math
-from typing import Optional, Tuple
+import os, re, math
+from typing import Optional, Tuple, List
 
 import pandas as pd
 import numpy as np
@@ -9,88 +7,169 @@ import streamlit as st
 
 from streamlit_folium import st_folium
 import folium
-from PIL import Image
 
-# ---------------------------
-# THEME / BRANDING
-# ---------------------------
-THEME_BLUE_DEFAULT = "#0B2D3F"
-THEME_COPPER = "#B87333"
-
-LOGO_CANDIDATES = [
-    "logo bleu crop.png", "logo bleu crop.jpg", "logo bleu crop.jpeg",
-    "Logo bleu crop.png", "Logo bleu crop.jpg", "Logo bleu crop.jpeg",
-    "Logo bleu.png", "assets/Logo bleu.png", "static/Logo bleu.png",
-    "data/Logo bleu.png", "images/Logo bleu.png"
+# =========================
+# CONFIG & THEME
+# =========================
+BLUE_SMBG = "#0A2942"     # Bleu validé (figé)
+COPPER    = "#B87333"     # Accent
+LOGO_PATH_CANDIDATES = [
+    "logo bleu crop.png", "Logo bleu crop.png",
+    "assets/logo bleu crop.png", "assets/Logo bleu crop.png",
+    "images/logo bleu crop.png", "static/logo bleu crop.png",
 ]
 
 st.set_page_config(page_title="SMBG Carte — Sélection d’annonces", layout="wide")
 
-# ---------------------------
-# UTILS
-# ---------------------------
-def get_existing_path(candidates) -> Optional[str]:
-    for p in candidates:
+# CSS global: volets fixés à 300px, logo centré, légère marge top
+st.markdown(f"""
+<style>
+  /* Volet gauche (sidebar Streamlit) */
+  [data-testid="stSidebar"] {{
+    background: {BLUE_SMBG};
+    width: 300px !important;
+    min-width: 300px !important;
+    padding-top: 12px !important;  /* légère marque top */
+  }}
+  [data-testid="stSidebar"] .stMarkdown p {{ margin: 0; }}
+  [data-testid="stSidebar"] img {{
+    display:block; margin: 0 auto 12px auto; max-width: 90%;
+  }}
+  /* cacher le bouton de repli de la sidebar */
+  [data-testid="collapsedControl"] {{ display:none !important; }}
+
+  /* Contenu principal largeur étendue */
+  .block-container {{ max-width: 1600px; padding-top: 0.75rem; }}
+
+  /* Colonne droite "volet de détails" à 300px */
+  .details-panel {{
+    width: 300px;
+    min-width: 300px;
+  }}
+  /* Bannières et champs */
+  .ref-banner {{
+    background:{BLUE_SMBG}; color:white; padding:8px 12px; border-radius:10px; display:inline-block;
+    font-weight:600; letter-spacing:.2px;
+  }}
+  .field {{ margin-bottom: 6px; }}
+  .field b {{ color:#333; }}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# HELPERS
+# =========================
+def get_first_existing(paths: List[str]) -> Optional[str]:
+    for p in paths:
         if os.path.exists(p):
             return p
     return None
 
-def hex_from_rgb(rgb) -> str:
-    r, g, b = [int(x) for x in rgb]
-    return "#{:02X}{:02X}{:02X}".format(r, g, b)
+def truthy_yes(x) -> bool:
+    return str(x).strip().lower() in {"oui","yes","true","1","y"}
 
-def get_dominant_color(path: str) -> str:
-    try:
-        with Image.open(path).convert("RGBA") as im:
-            im = im.resize((80, 80))
-            data = np.array(im)
-            mask = data[:, :, 3] > 10
-            if not mask.any():
-                return THEME_BLUE_DEFAULT
-            rgb = data[:, :, :3][mask]
-            med = np.median(rgb, axis=0)
-            return hex_from_rgb(med)
-    except Exception:
-        return THEME_BLUE_DEFAULT
+def is_empty_cell(v) -> bool:
+    if pd.isna(v): return True
+    s = str(v).strip()
+    return s == "" or s in {"/", "-", "—"}
 
-def find_col(df: pd.DataFrame, *keywords) -> Optional[str]:
-    low = {c: c.lower() for c in df.columns}
-    for c, lc in low.items():
-        if all(k.lower() in lc for k in keywords):
-            return c
-    return None
-
-def coerce_number(x):
-    if pd.isna(x): return np.nan
-    s = str(x).strip()
-    if s == "" or s in {"/", "-", "—"}: return np.nan
-    if "demander" in s.lower(): return np.nan
-    if s.lower() == "néant": return 0
+def to_float_clean(x) -> Optional[float]:
+    """Retourne un float si possible (retire € espaces etc.), sinon None."""
+    if pd.isna(x): return None
+    s = str(x).strip().lower()
+    if s in {"", "/", "-", "—"}: return None
+    if "selon surface" in s: return None
     s = re.sub(r"[^\d,.\-]", "", s)
     if s.count(",") == 1 and s.count(".") == 0:
         s = s.replace(",", ".")
     try:
         return float(s)
     except:
-        return np.nan
+        return None
 
-def is_truthy_yes(x):
-    return str(x).strip().lower() in {"oui","yes","true","1","y"}
+def parse_surface_range(text: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Extrait (min,max) depuis du texte type "de 30 à 200 m²" / "30-200" / "30 à 200".
+    Retourne (None,None) si rien d'exploitable.
+    """
+    if pd.isna(text): return (None, None)
+    s = str(text).lower()
+    nums = re.findall(r"[\d]+(?:[.,]\d+)?", s)
+    if not nums:
+        # peut-être que c'est une valeur simple numérique
+        v = to_float_clean(s)
+        return (v, v) if v is not None else (None, None)
+    vals = []
+    for n in nums:
+        n = n.replace(",", ".")
+        try:
+            vals.append(float(n))
+        except:
+            pass
+    if not vals:
+        return (None, None)
+    if len(vals) == 1:
+        return (vals[0], vals[0])
+    return (min(vals), max(vals))
 
-def pretty_k_eur(x):
-    try:
-        v = float(x)
-    except:
-        return "-"
-    if v >= 1_000_000: return f"{int(round(v/1_000_000))} M€"
-    if v >= 1_000:     return f"{int(round(v/1_000))} k€"
-    return f"{int(round(v))} €"
+def row_surface_interval(row, col_gla: Optional[str], col_rep_gla: Optional[str], col_nb_lots: Optional[str]) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Retourne (min,max) de surface GLA pour une ligne en tenant compte :
+    - Surface GLA (N) si numérique
+    - Répartition Surface GLA (O) si fourchette "de 30 à 200"
+    - Nombre de lots (M) > 1 => on garde la fourchette la plus large trouvée
+    """
+    mins, maxs = [], []
+    # Surface GLA brute
+    if col_gla and col_gla in row.index:
+        v = to_float_clean(row[col_gla])
+        if v is not None:
+            mins.append(v); maxs.append(v)
+    # Répartition GLA
+    if col_rep_gla and col_rep_gla in row.index and not is_empty_cell(row[col_rep_gla]):
+        rmin, rmax = parse_surface_range(row[col_rep_gla])
+        if rmin is not None: mins.append(rmin)
+        if rmax is not None: maxs.append(rmax)
+    if mins and maxs:
+        return (min(mins), max(maxs))
+    return (None, None)
 
-def is_empty_val(v):
-    if pd.isna(v): return True
-    s = str(v).strip()
-    return s == "" or s in {"/", "-", "—"}
+def build_checkbox_group(label: str, options: List[str], key_prefix: str) -> List[str]:
+    """Affiche une liste de cases à cocher (pas de menu déroulant) et retourne la liste sélectionnée."""
+    st.markdown(f"**{label}**")
+    selected = []
+    for i, opt in enumerate(options):
+        checked = st.checkbox(opt, key=f"{key_prefix}_{i}")
+        if checked:
+            selected.append(opt)
+    st.markdown("<hr>", unsafe_allow_html=True)
+    return selected
 
+def normalize_extraction(value: str) -> str:
+    """Oui / Non / Faisable → Oui compte comme capacité; 'faisable' => Oui."""
+    if is_empty_cell(value): return "NR"
+    s = str(value).strip().lower()
+    if any(k in s for k in ["oui", "faisable", "possible", "ok"]):
+        return "OUI"
+    if "non" in s:
+        return "NON"
+    return "NR"
+
+def dab_is_yes(value) -> Optional[bool]:
+    """Pour Cession/DAB: True=Oui, False=Non, None=Non renseigné."""
+    if is_empty_cell(value): return None
+    s = str(value).strip().lower()
+    if s in {"néant", "neant", "0", "0€", "0 €"}:
+        return False
+    f = to_float_clean(s)
+    if f is not None and f > 0:
+        return True
+    # texte non 'néant' mais renseigné => on considère "Oui"
+    return True
+
+# =========================
+# DATA LOADING
+# =========================
 @st.cache_data(show_spinner=False)
 def load_excel() -> pd.DataFrame:
     # 1) local  2) secrets.EXCEL_URL  3) env.EXCEL_URL
@@ -103,264 +182,273 @@ def load_excel() -> pd.DataFrame:
     st.error("Aucun Excel trouvé. Place ‘annonces.xlsx’ à la racine (ou data/) ou définis EXCEL_URL.")
     return pd.DataFrame()
 
-def safe_slider_num(series: pd.Series, label: str, key: str):
-    """
-    Affiche un slider UNIQUEMENT si:
-      - au moins 2 valeurs numériques distinctes,
-      - min < max.
-    Sinon, pas de slider; renvoie (None, False).
-    -> Blinde avec try/except pour qu'aucune exception Streamlit n'arrête l'app.
-    """
-    try:
-        s = pd.to_numeric(series, errors="coerce")
-        s = s[np.isfinite(s)]
-        if s.empty:
-            st.caption(f"*(Aucune valeur numérique pour « {label} » — filtre désactivé)*")
-            return None, False
-        uniques = np.unique(np.round(s.astype(float), 8))
-        if len(uniques) < 2:
-            st.caption(f"*(Pas assez de valeurs distinctes pour « {label} » — filtre désactivé)*")
-            return None, False
-        vmin = int(math.floor(float(np.min(uniques))))
-        vmax = int(math.ceil(float(np.max(uniques))))
-        if vmin >= vmax:
-            st.caption(f"*(Intervalle nul pour « {label} » — filtre désactivé)*")
-            return None, False
-        a, b = st.slider(label, min_value=vmin, max_value=vmax, value=(vmin, vmax), key=key)
-        return series.between(a, b), True
-    except Exception as e:
-        st.caption(f"*(Filtre « {label} » désactivé — valeurs incohérentes)*")
-        return None, False
-
-# ---------------------------
-# Couleur exacte depuis le logo + CSS
-# ---------------------------
-LOGO_PATH = get_existing_path(LOGO_CANDIDATES)
-THEME_BLUE = get_dominant_color(LOGO_PATH) if LOGO_PATH else THEME_BLUE_DEFAULT
-
-st.markdown(
-    f"""
-    <style>
-      /* Sidebar = fond EXACT + aucune marge au-dessus */
-      [data-testid="stSidebar"] {{
-        background: {THEME_BLUE};
-        padding-top: 0 !important;
-      }}
-      /* Container principal plus large */
-      .block-container {{
-        padding-top: 1rem;
-        padding-bottom: 2rem;
-        max-width: 1400px;
-      }}
-      /* Masquer le bouton de repli de la sidebar (non rétractable) */
-      [data-testid="collapsedControl"] {{ display:none !important; }}
-      /* Bandeau référence + badge */
-      .ref-banner {{
-        background:{THEME_BLUE}; color:white; padding:8px 12px; border-radius:10px; display:inline-block;
-        font-weight:600; letter-spacing:.2px;
-      }}
-      .badge-new {{
-        background:{THEME_COPPER}; color:white; padding:2px 8px; border-radius:999px; margin-left:8px;
-        font-size:12px; font-weight:600;
-      }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ---------------------------
-# DATA
-# ---------------------------
 df = load_excel()
 if df.empty:
     st.stop()
 
-col_region   = find_col(df, "région") or find_col(df, "region")
-col_dept     = find_col(df, "département") or find_col(df, "departement")
-col_lat      = find_col(df, "lat")
-col_lon      = find_col(df, "lon") or find_col(df, "lng")
-col_ref      = find_col(df, "référence","annonce") or find_col(df, "reference","annonce")
-col_maps     = find_col(df, "google","map") or find_col(df, "lien","map")
-col_actif    = find_col(df, "actif")
-col_surface  = find_col(df, "surface")
-col_loyer    = find_col(df, "loyer")
-col_pp       = find_col(df, "pas de porte") or find_col(df, "droit au bail") or find_col(df, "cession")
-col_date_pub = find_col(df, "publication") or find_col(df, "publi")
+# =========================
+# COLUMN MAP (selon ta V2 mise à jour)
+# =========================
+COL_REGION        = "Région"
+COL_DEPT          = "Département"
+COL_EMPLACEMENT   = "Emplacement"
+COL_TYPOLOGIE     = "Typologie"
+COL_DAB           = "Cession / Droit au bail"
+COL_NB_LOTS       = "Nombre de lots"          # (M)
+COL_GLA           = "Surface GLA"              # (N)
+COL_REP_GLA       = "Répartition surface GLA"  # (O)
+COL_UTILE         = "Surface Utile"            # (P)
+COL_REP_UTILE     = "Répartition surface utile"# (Q)
+COL_LOYER_ANNUEL  = "Loyer annuel"             # (R)
+COL_EXTRACTION    = "Extraction"
+COL_GOOGLE        = "Lien Google Maps"
+COL_REF           = "Référence annonce"
+COL_LAT           = "Latitude"
+COL_LON           = "Longitude"
+COL_ACTIF         = "Actif"
 
-# Actif = oui
-if col_actif and col_actif in df.columns:
-    df = df[df[col_actif].apply(is_truthy_yes)].copy()
+# Filtre Actif = oui
+if COL_ACTIF in df.columns:
+    df = df[df[COL_ACTIF].apply(truthy_yes)].copy()
 
-# Numériques pour filtres (sans altérer l’affichage d’origine)
-df["_surface_num"] = df[col_surface].apply(coerce_number) if (col_surface and col_surface in df.columns) else np.nan
-df["_loyer_num"]   = df[col_loyer].apply(coerce_number)   if (col_loyer and col_loyer in df.columns) else np.nan
-df["_pp_num"]      = df[col_pp].apply(coerce_number)      if (col_pp and col_pp in df.columns) else np.nan
-
-# ---------------------------
-# SIDEBAR : LOGO en haut (vraiment collé)
-# ---------------------------
+# =========================
+# SIDEBAR (volet gauche) : logo + filtres + actions
+# =========================
 with st.sidebar:
-    # On force un conteneur tout en haut, sans marge
-    top = st.container()
-    with top:
-        if LOGO_PATH:
-            st.image(LOGO_PATH, use_container_width=True)
-        else:
-            st.markdown("<h3 style='color:white; text-align:center; margin:8px 0;'>SMBG CONSEIL</h3>", unsafe_allow_html=True)
+    # Logo
+    logo = get_first_existing(LOGO_PATH_CANDIDATES)
+    if logo:
+        st.image(logo, use_container_width=True)
+    else:
+        st.markdown("<p style='text-align:center;color:white;font-weight:600;'>SMBG CONSEIL</p>", unsafe_allow_html=True)
 
-# ---------------------------
-# ENTÊTE
-# ---------------------------
-st.markdown("## SMBG Carte — Sélection d’annonces")
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-# ---------------------------
-# FILTRES (contenu principal)
-# ---------------------------
-with st.expander("Filtres", expanded=True):
+    # ---- Filtres (ordre imposé) ----
     filtered = df.copy()
 
-    # Régions (dynamiques + compteurs)
-    if col_region and col_region in df.columns:
-        reg_counts = df.groupby(col_region).size().sort_values(ascending=False)
-        reg_options = [f"{r} ({n})" for r, n in reg_counts.items()]
-        sel_regs = st.multiselect("Régions", reg_options, placeholder="Choisir…", key="f_regions")
-        if sel_regs:
-            keep_regs = {x.split(" (")[0] for x in sel_regs}
-            filtered = filtered[filtered[col_region].isin(keep_regs)]
+    # Régions (cases à cocher)
+    if COL_REGION in df.columns:
+        regions = sorted([str(x) for x in filtered[COL_REGION].dropna().unique()])
+        sel_regions = build_checkbox_group("Région", regions, "reg")
+        if sel_regions:
+            filtered = filtered[filtered[COL_REGION].astype(str).isin(sel_regions)]
 
-    # Départements (dépend des régions sélectionnées)
-    if col_dept and col_dept in df.columns:
-        dept_counts = filtered.groupby(col_dept).size().sort_values(ascending=False)
-        dept_options = [f"{d} ({n})" for d, n in dept_counts.items()]
-        sel_depts = st.multiselect("Départements", dept_options, placeholder="Choisir…", key="f_depts")
+    # Départements (dépend des régions)
+    if COL_DEPT in df.columns:
+        depts_source = filtered if sel_regions else df
+        depts = sorted([str(x) for x in depts_source[COL_DEPT].dropna().unique()])
+        sel_depts = build_checkbox_group("Département", depts, "dep")
         if sel_depts:
-            keep_depts = {x.split(" (")[0] for x in sel_depts}
-            filtered = filtered[filtered[col_dept].isin(keep_depts)]
+            filtered = filtered[filtered[COL_DEPT].astype(str).isin(sel_depts)]
 
-    st.markdown("---")
+    # Emplacement (indépendant)
+    if COL_EMPLACEMENT in df.columns:
+        emps = sorted([str(x) for x in df[COL_EMPLACEMENT].dropna().unique()])
+        sel_emps = build_checkbox_group("Emplacement", emps, "emp")
+        if sel_emps:
+            filtered = filtered[filtered[COL_EMPLACEMENT].astype(str).isin(sel_emps)]
 
-    # Surface (m²) — blindé
-    if "_surface_num" in filtered.columns:
-        mask_s, used_s = safe_slider_num(filtered["_surface_num"], "Surface (m²)", key="sl_surface")
-        if used_s and mask_s is not None:
-            filtered = filtered[mask_s | filtered["_surface_num"].isna()]
+    # Typologie (indépendant)
+    if COL_TYPOLOGIE in df.columns:
+        typs = sorted([str(x) for x in df[COL_TYPOLOGIE].dropna().unique()])
+        sel_typs = build_checkbox_group("Typologie", typs, "typ")
+        if sel_typs:
+            filtered = filtered[filtered[COL_TYPOLOGIE].astype(str).isin(sel_typs)]
 
-    # Loyer (€) — blindé + “Demander le loyer”
-    has_demander = col_loyer and (col_loyer in filtered.columns) and filtered[col_loyer].astype(str).str.contains("demander", case=False, na=False).any()
-    if "_loyer_num" in filtered.columns:
-        mask_l, used_l = safe_slider_num(filtered["_loyer_num"], "Loyer mensuel (€)", key="sl_loyer")
-        incl_demander = st.checkbox("Inclure les annonces « Demander le loyer »", value=True, key="cb_demander") if has_demander else False
-        if used_l and mask_l is not None:
-            mask_dem = pd.Series(False, index=filtered.index)
-            if incl_demander and col_loyer and (col_loyer in filtered.columns):
-                mask_dem = filtered[col_loyer].astype(str).str.contains("demander", case=False, na=False)
-            filtered = filtered[mask_l | (incl_demander & mask_dem) | filtered["_loyer_num"].isna()]
+    # Cession / Droit au bail (n'afficher le filtre que si la colonne contient au moins une valeur non vide)
+    show_dab_filter = False
+    if COL_DAB in df.columns:
+        non_empty_mask = ~df[COL_DAB].apply(is_empty_cell)
+        show_dab_filter = bool(non_empty_mask.any())
 
-    # Pas de porte / DAB (€) — blindé + “Uniquement Néant”
-    has_neant = col_pp and (col_pp in filtered.columns) and filtered[col_pp].astype(str).str.fullmatch(r"(?i)\s*néant\s*", na=False).any()
-    if "_pp_num" in filtered.columns:
-        mask_p, used_p = safe_slider_num(filtered["_pp_num"], "Pas de porte / Droit au bail (€)", key="sl_pp")
-        only_neant = st.checkbox("Uniquement « Néant »", value=False, key="cb_neant") if has_neant else False
-        if used_p and mask_p is not None:
-            if only_neant and col_pp and (col_pp in filtered.columns):
-                mask_neant = filtered[col_pp].astype(str).str.fullmatch(r"(?i)\s*néant\s*", na=False)
-                filtered = filtered[mask_neant]
+    dab_choice = "Les deux"
+    if show_dab_filter:
+        st.markdown("**Cession / Droit au bail**")
+        dab_choice = st.radio(" ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="dab_radio")
+        st.markdown("<hr>", unsafe_allow_html=True)
+        if dab_choice != "Les deux":
+            dab_flags = df[COL_DAB].apply(dab_is_yes)
+            if dab_choice == "Oui":
+                mask = dab_flags.eq(True)
             else:
-                mask_neant = pd.Series(False, index=filtered.index)
-                if col_pp and (col_pp in filtered.columns):
-                    mask_neant = filtered[col_pp].astype(str).str.fullmatch(r"(?i)\s*néant\s*", na=False)
-                filtered = filtered[mask_p | mask_neant | filtered["_pp_num"].isna()]
+                # "Non" => False OU None (non renseigné) considérés comme Non
+                mask = dab_flags.ne(True)
+            filtered = filtered[mask.reindex(filtered.index).fillna(True)]
 
-    st.caption(f"**{len(filtered)}** annonces après filtres.")
+    # Surface GLA (slider par recouvrement d'intervalle)
+    st.markdown("**Surface GLA (m²)**")
+    # calcul bornes globales
+    mins, maxs = [], []
+    for _, row in df.iterrows():
+        rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA, COL_NB_LOTS)
+        if rmin is not None: mins.append(rmin)
+        if rmax is not None: maxs.append(rmax)
+    if mins and maxs and min(mins) < max(maxs):
+        smin_glob = int(math.floor(min(mins)))
+        smax_glob = int(math.ceil(max(maxs)))
+        ssel = st.slider(" ", min_value=smin_glob, max_value=smax_glob, value=(smin_glob, smax_glob),
+                         label_visibility="collapsed", key="sl_gla")
+        st.markdown("<hr>", unsafe_allow_html=True)
 
-# ---------------------------
-# LAYOUT : Carte large + Volet détails rétractable
-# ---------------------------
-col_map, col_detail = st.columns([7, 5], gap="large")
+        # filtre par recouvrement: (row_max >= sel_min) & (row_min <= sel_max)
+        keep_idx = []
+        for idx, row in filtered.iterrows():
+            rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA, COL_NB_LOTS)
+            if rmin is None and rmax is None:
+                keep_idx.append(idx)  # non renseigné: ne pas exclure
+            else:
+                if (rmax >= ssel[0]) and (rmin <= ssel[1]):
+                    keep_idx.append(idx)
+        filtered = filtered.loc[keep_idx]
+    else:
+        st.caption("*(Pas assez de valeurs numériques exploitables — filtre inactif)*")
+        st.markdown("<hr>", unsafe_allow_html=True)
 
-with col_map:
-    if col_lat and col_lon and (col_lat in filtered.columns) and (col_lon in filtered.columns):
-        df_map = filtered.dropna(subset=[col_lat, col_lon]).copy()
+    # Loyer annuel (slider numérique — “selon surface” non exclus)
+    if COL_LOYER_ANNUEL in df.columns:
+        st.markdown("**Loyer annuel (€)**")
+        vals = [to_float_clean(x) for x in df[COL_LOYER_ANNUEL].tolist()]
+        nums = [v for v in vals if v is not None]
+        if nums and min(nums) < max(nums):
+            lmin = int(math.floor(min(nums)))
+            lmax = int(math.ceil(max(nums)))
+            lsel = st.slider("  ", min_value=lmin, max_value=lmax, value=(lmin, lmax),
+                             label_visibility="collapsed", key="sl_loy")
+            st.markdown("<hr>", unsafe_allow_html=True)
+            # Appliquer uniquement aux lignes avec valeur numérique
+            mask_num = filtered[COL_LOYER_ANNUEL].apply(to_float_clean)
+            keep = (mask_num.isna()) | ((mask_num >= lsel[0]) & (mask_num <= lsel[1]))
+            filtered = filtered[keep]
+        else:
+            st.caption("*(Pas assez de valeurs numériques exploitables — filtre inactif)*")
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Extraction (Oui / Non / Les deux)
+    if COL_EXTRACTION in df.columns:
+        st.markdown("**Extraction**")
+        ext_choice = st.radio("  ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="ext_radio")
+        st.markdown("<hr>", unsafe_allow_html=True)
+        if ext_choice != "Les deux":
+            norm = df[COL_EXTRACTION].apply(normalize_extraction)
+            if ext_choice == "Oui":
+                mask = norm.eq("OUI")
+            else:
+                mask = norm.eq("NON")
+            filtered = filtered[mask.reindex(filtered.index).fillna(False if ext_choice=="Non" else True)]
+
+    # Actions (en bas du volet)
+    st.markdown("**Actions**")
+    if st.button("🔄 Réinitialiser les filtres"):
+        for k in list(st.session_state.keys()):
+            if k.startswith(("reg_", "dep_", "emp_", "typ_", "dab_", "sl_", "ext_")):
+                del st.session_state[k]
+        st.rerun()
+
+    st.caption(f"{len(filtered)} annonces visibles.")
+
+# =========================
+# COLONNES CENTRALES : Carte + Volet droit (300px, rétractable)
+# =========================
+left, right = st.columns([1, 0.0001], gap="large")
+
+with left:
+    # Carte
+    if COL_LAT in filtered.columns and COL_LON in filtered.columns:
+        df_map = filtered.dropna(subset=[COL_LAT, COL_LON]).copy()
     else:
         df_map = filtered.iloc[0:0].copy()
 
     if not df_map.empty:
-        center = [df_map[col_lat].astype(float).mean(), df_map[col_lon].astype(float).mean()]
+        center = [df_map[COL_LAT].astype(float).mean(), df_map[COL_LON].astype(float).mean()]
     else:
         center = [46.6, 2.5]  # France
 
     m = folium.Map(location=center, zoom_start=6, control_scale=True, tiles="OpenStreetMap")
 
-    st.session_state.setdefault("selected_idx", None)
-
+    # Markers
     for idx, row in df_map.iterrows():
-        popup_ref = str(row[col_ref]) if col_ref and (col_ref in df_map.columns) else f"Annonce {idx}"
+        ref_txt = str(row.get(COL_REF, f"Annonce {idx}"))
         folium.Marker(
-            location=[float(row[col_lat]), float(row[col_lon])],
-            tooltip=popup_ref,
-            popup=popup_ref
+            location=[float(row[COL_LAT]), float(row[COL_LON])],
+            tooltip=ref_txt,
+            popup=ref_txt
         ).add_to(m)
 
-    st_folium(m, height=650, width=None)
+    st_folium(m, height=680, width=None)
 
-    # Sélection manuelle pour piloter le volet droit
-    with st.expander("Sélectionner une annonce (si besoin)"):
-        if col_ref and (col_ref in filtered.columns):
-            ref_series = filtered[col_ref].astype(str)
-            choice = st.selectbox("Référence annonce :", options=list(ref_series.index),
-                                  format_func=lambda i: ref_series.loc[i] if i in ref_series.index else str(i),
-                                  key="sel_ref")
-        else:
-            choice = st.selectbox("Annonce :", options=list(filtered.index), format_func=lambda i: f"Annonce {i}", key="sel_idx")
-        st.session_state["selected_idx"] = choice
-
-with col_detail:
-    show_details = st.toggle("Afficher le volet de détails", value=True, key="tg_details")
+# --- Volet droit (rétractable, 300px)
+with right:
+    st.markdown("<div class='details-panel'>", unsafe_allow_html=True)
+    show_details = st.toggle("Afficher le volet de détails", value=True)
     if show_details:
-        selected_idx = st.session_state.get("selected_idx")
-        if selected_idx is None or selected_idx not in filtered.index:
-            if not filtered.empty:
-                selected_idx = filtered.index[0]
-
-        if selected_idx is not None and selected_idx in filtered.index:
-            row = filtered.loc[selected_idx]
-            ref_val = str(row.get(col_ref, f"Annonce {selected_idx}"))
-            st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
-
-            # Badge "Nouveau"
-            if col_date_pub and (col_date_pub in filtered.columns) and pd.notna(row.get(col_date_pub, None)):
-                try:
-                    d = pd.to_datetime(row[col_date_pub], dayfirst=True, errors="coerce")
-                    if pd.notna(d) and (pd.Timestamp.now().tz_localize(None) - d.to_pydatetime().replace(tzinfo=None) <= pd.Timedelta(days=30)):
-                        st.markdown("<span class='badge-new'>Nouveau</span>", unsafe_allow_html=True)
-                except:
-                    pass
-
-            st.write("")
+        # Sélection par défaut: première ligne filtrée
+        if not filtered.empty:
+            row = filtered.iloc[0]
+            # Référence
+            ref_val = str(row.get(COL_REF, ""))
+            if ref_val:
+                st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
+                st.write("")
 
             # Bouton Google Maps
-            if col_maps and (col_maps in filtered.columns) and not is_empty_val(row.get(col_maps, None)):
-                st.link_button("Cliquer ici", str(row[col_maps]).strip(), type="primary")
+            gm = row.get(COL_GOOGLE, "")
+            if gm and not is_empty_cell(gm):
+                st.link_button("Ouvrir Google Maps", str(gm).strip(), type="primary")
 
             st.write("")
 
-            # Champs métier (exclure techniques & déjà traités)
-            technical_keywords = ["lat","lon","géocod","geocod","date géocod","photo","actif","internal","technique"]
-            technical_like = {c for c in df.columns if any(k in c.lower() for k in technical_keywords)}
-            to_hide_exact = {col_maps, col_lat, col_lon, col_actif, col_date_pub, col_ref}
-            candidates = [c for c in df.columns if c not in technical_like and c not in to_hide_exact]
+            # Adresse
+            adresse_parts = []
+            for col in ["Rue", "Code Postal", "Ville"]:
+                if col in filtered.columns and not is_empty_cell(row.get(col, None)):
+                    adresse_parts.append(str(row[col]))
+            if adresse_parts:
+                st.markdown(f"<div class='field'><b>Adresse</b> : {' — '.join(adresse_parts)}</div>", unsafe_allow_html=True)
 
-            for c in candidates:
-                v = row.get(c, None)
-                if is_empty_val(v):
-                    continue
-                if c == col_surface and pd.notna(row.get("_surface_num", np.nan)):
-                    st.markdown(f"**{c}** : {int(round(row['_surface_num']))} m²")
-                elif c == col_loyer and pd.notna(row.get("_loyer_num", np.nan)):
-                    st.markdown(f"**{c}** : {pretty_k_eur(row['_loyer_num'])}")
-                elif c == col_pp and pd.notna(row.get("_pp_num", np.nan)):
-                    st.markdown(f"**{c}** : {pretty_k_eur(row['_pp_num'])}")
-                else:
-                    st.markdown(f"**{c}** : {v}")
+            # Emplacement / Typologie / Type
+            for col in [COL_EMPLACEMENT, COL_TYPOLOGIE, "Type"]:
+                if col in filtered.columns and not is_empty_cell(row.get(col, None)):
+                    st.markdown(f"<div class='field'><b>{col}</b> : {row[col]}</div>", unsafe_allow_html=True)
 
-st.caption(f"{len(filtered)} annonces affichées.")
+            # Surfaces
+            # GLA + répartition (info)
+            gla_val = row.get(COL_GLA, None)
+            if not is_empty_cell(gla_val):
+                st.markdown(f"<div class='field'><b>Surface GLA</b> : {gla_val}</div>", unsafe_allow_html=True)
+            rep_gla = row.get(COL_REP_GLA, None)
+            if not is_empty_cell(rep_gla):
+                st.markdown(f"<div class='field'><b>Répartition Surface GLA</b> : {rep_gla}</div>", unsafe_allow_html=True)
+
+            # Utile + répartition (info)
+            utile_val = row.get(COL_UTILE, None)
+            if not is_empty_cell(utile_val):
+                st.markdown(f"<div class='field'><b>Surface Utile</b> : {utile_val}</div>", unsafe_allow_html=True)
+            rep_utile = row.get(COL_REP_UTILE, None)
+            if not is_empty_cell(rep_utile):
+                st.markdown(f"<div class='field'><b>Répartition Surface Utile</b> : {rep_utile}</div>", unsafe_allow_html=True)
+
+            # Cession / Droit au bail
+            if COL_DAB in filtered.columns and not is_empty_cell(row.get(COL_DAB, None)):
+                st.markdown(f"<div class='field'><b>Cession / Droit au bail</b> : {row[COL_DAB]}</div>", unsafe_allow_html=True)
+
+            # Loyer annuel (montant ou "Selon surface")
+            if COL_LOYER_ANNUEL in filtered.columns:
+                ly = row.get(COL_LOYER_ANNUEL, None)
+                if not is_empty_cell(ly):
+                    s = str(ly)
+                    if "selon surface" in s.lower():
+                        st.markdown(f"<div class='field'><b>Loyer annuel</b> : Selon surface</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<div class='field'><b>Loyer annuel</b> : {s}</div>", unsafe_allow_html=True)
+
+            # Extraction
+            if COL_EXTRACTION in filtered.columns and not is_empty_cell(row.get(COL_EXTRACTION, None)):
+                st.markdown(f"<div class='field'><b>Extraction</b> : {row[COL_EXTRACTION]}</div>", unsafe_allow_html=True)
+
+            # Région / Département
+            for col in [COL_DEPT, COL_REGION]:
+                if col in filtered.columns and not is_empty_cell(row.get(col, None)):
+                    st.markdown(f"<div class='field'><b>{col}</b> : {row[col]}</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
