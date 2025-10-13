@@ -1,11 +1,10 @@
 import os, re, math
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 
 import pandas as pd
 import numpy as np
 import streamlit as st
 from PIL import Image
-
 from streamlit_folium import st_folium
 import folium
 
@@ -17,7 +16,7 @@ st.set_page_config(page_title="SMBG Carte — Sélection d’annonces", layout="
 # =========================
 # ASSETS & COLORS
 # =========================
-COPPER = "#B87333"  # orangé cuivré du logo
+COPPER = "#B87333"  # orangé cuivré
 
 LOGO_PATH_CANDIDATES = [
     "logo bleu crop.png", "Logo bleu crop.png",
@@ -36,7 +35,6 @@ def hex_from_rgb(rgb) -> str:
     return "#{:02X}{:02X}{:02X}".format(r, g, b)
 
 def get_dominant_color(path: str) -> str:
-    """Couleur exacte du logo (dominante robuste, médiane)."""
     try:
         with Image.open(path).convert("RGBA") as im:
             im = im.resize((80, 80))
@@ -54,51 +52,60 @@ LOGO_PATH = get_first_existing(LOGO_PATH_CANDIDATES)
 BLUE_SMBG = get_dominant_color(LOGO_PATH) if LOGO_PATH else "#0A2942"
 
 # =========================
-# CSS — volets 275px, logo petit & collé, texte cuivre, grilles compactes
+# CSS — volets 275px, logo, cuivré, nested Region→Dept
 # =========================
 st.markdown(f"""
 <style>
-  /* Sidebar (volet gauche) : largeur fixe 275px, fond = bleu du logo */
+  /* Sidebar (volet gauche) */
   [data-testid="stSidebar"] {{
     background: {BLUE_SMBG};
     width: 275px !important;
     min-width: 275px !important;
     padding: 6px 10px 8px 10px !important;
   }}
-  /* bouton de repli masqué */
   [data-testid="collapsedControl"] {{ display:none !important; }}
 
-  /* petite marge top esthétique */
-  [data-testid="stSidebar"]::before {{
-    content: "";
-    display:block;
-    height: 4px;
-  }}
-
-  /* Logo : centré, ~40% de la largeur, collé en haut */
+  /* Logo : centré, taille maîtrisée, collé haut */
   .smbg-logo-wrap {{
     display:flex; justify-content:center; align-items:flex-start;
-    margin-top: 0; margin-bottom: 6px;
+    margin: 0 0 8px 0;
   }}
   [data-testid="stSidebar"] img {{
-    width: 40% !important;
-    max-width: 120px !important;
+    width: 38% !important;
+    max-width: 110px !important;
     height: auto !important;
-    margin: 4px auto 0 auto !important;
-    display: block;
+    margin: 2px auto 0 auto !important;
+    display:block;
   }}
 
-  /* Titres & labels : cuivré */
+  /* Titres & labels cuivrés */
   .smbg-title, .smbg-actions-title, .smbg-counter {{ color: {COPPER} !important; }}
-  /* Labels des checkboxes/radios/inputs dans la sidebar */
   [data-testid="stSidebar"] label p,
-  [data-testid="stSidebar"] .stMarkdown p,
-  [data-testid="stSidebar"] .stTextInput label p {{
+  [data-testid="stSidebar"] .stMarkdown p {{
     color: {COPPER} !important;
     margin: 0 0 4px 0 !important;
     font-size: 13px !important;
   }}
-  /* inputs compacts */
+
+  /* Indentation hiérarchique */
+  .smbg-indent {{ margin-left: 16px; }}
+
+  /* Mini-scroll regroupant Région→Départements imbriqués */
+  .nested-scroll {{
+    max-height: 180px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }}
+
+  /* Grille 2 colonnes pour départements */
+  .dept-grid {{
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 8px;
+    margin: 2px 0 8px 0;
+  }}
+
+  /* Inputs compacts */
   [data-testid="stSidebar"] input[type="text"] {{
     padding: 6px 8px !important;
     font-size: 13px !important;
@@ -111,37 +118,9 @@ st.markdown(f"""
     font-size: 13px !important;
   }}
 
-  /* Indentation hiérarchique (titre -> options) */
-  .smbg-indent {{ margin-left: 16px; }}
-
-  /* Grilles compactes (Région/Département) : 2 colonnes + mini-scroll */
-  .smbg-chip-grid {{
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 2px 8px;
-    max-height: 150px;
-    overflow-y: auto;
-    padding: 2px 2px 2px 2px;
-  }}
-
-  /* Liste d'annonces (compact + scroll) */
-  .smbg-list-scroller {{
-    max-height: 180px;
-    overflow-y: auto;
-    padding: 2px;
-  }}
-  .smbg-list-scroller label p {{
-    font-size: 13px !important;
-    margin: 0 0 3px 0 !important;
-  }}
-
-  /* Conteneur principal plus large */
+  /* Conteneur principal + volet droit 275px */
   .block-container {{ max-width: 1600px; padding-top: .5rem; }}
-
-  /* Volet droit (détails) 275px */
-  .details-panel {{
-    width: 275px; min-width: 275px;
-  }}
+  .details-panel {{ width: 275px; min-width: 275px; }}
   .ref-banner {{
     background:{BLUE_SMBG}; color:white; padding:8px 12px; border-radius:10px; display:inline-block;
     font-weight:600; letter-spacing:.2px;
@@ -271,10 +250,10 @@ st.session_state.setdefault("selection", set())
 st.session_state.setdefault("checked_refs", set())
 
 # =========================
-# SIDEBAR (volet gauche) : Logo + Filtres + Liste annonces + Actions
+# SIDEBAR (volet gauche)
 # =========================
 with st.sidebar:
-    # --- Logo (petit & collé)
+    # --- Logo
     st.markdown("<div class='smbg-logo-wrap'>", unsafe_allow_html=True)
     if LOGO_PATH:
         st.image(LOGO_PATH)
@@ -284,84 +263,99 @@ with st.sidebar:
 
     filtered = df.copy()
 
-    # ---- Région (grille 2 col + mini scroll, SANS recherche)
-    if COL_REGION in df.columns:
-        st.markdown("<div class='smbg-title'><b>Région</b></div>", unsafe_allow_html=True)
-        st.markdown("<div class='smbg-indent smbg-chip-grid'>", unsafe_allow_html=True)
-        regions = sorted([str(x) for x in df[COL_REGION].dropna().unique()])
-        sel_regions = []
-        for i, opt in enumerate(regions):
-            if st.checkbox(opt, key=f"reg_{i}"):
-                sel_regions.append(opt)
-        st.markdown("</div>", unsafe_allow_html=True)
-        if sel_regions:
-            filtered = filtered[filtered[COL_REGION].astype(str).isin(sel_regions)]
+    # ===== Région → Départements imbriqués (dans un mini-scroll) =====
+    st.markdown("<div class='smbg-title'><b>Région</b></div>", unsafe_allow_html=True)
 
-    # ---- Département (lié à Région, même UI compacte, SANS recherche)
-    if COL_DEPT in df.columns:
-        st.markdown("<div class='smbg-title'><b>Département</b></div>", unsafe_allow_html=True)
-        base = filtered if (COL_REGION in df.columns and len([k for k in st.session_state if k.startswith("reg_")])>0) else df
-        depts = sorted([str(x) for x in base[COL_DEPT].dropna().unique()])
-        st.markdown("<div class='smbg-indent smbg-chip-grid'>", unsafe_allow_html=True)
-        sel_depts = []
-        for i, opt in enumerate(depts):
-            if st.checkbox(opt, key=f"dep_{i}"):
-                sel_depts.append(opt)
-        st.markdown("</div>", unsafe_allow_html=True)
-        if sel_depts:
-            filtered = filtered[filtered[COL_DEPT].astype(str).isin(sel_depts)]
+    # Prépare le mapping Région -> [Départements]
+    reg2deps: Dict[str, List[str]] = {}
+    if COL_REGION in df.columns and COL_DEPT in df.columns:
+        for r, d in df[[COL_REGION, COL_DEPT]].dropna().drop_duplicates().itertuples(index=False):
+            reg2deps.setdefault(str(r), set()).add(str(d))
+        # cast sets to sorted lists
+        reg2deps = {k: sorted(list(v)) for k, v in reg2deps.items()}
+    regions_sorted = sorted(reg2deps.keys())
 
-    # ---- Emplacement (compact)
+    # Conteneur scrollable
+    st.markdown("<div class='nested-scroll'>", unsafe_allow_html=True)
+
+    selected_regions: List[str] = []
+    selected_deps: List[str] = []
+
+    for ridx, reg in enumerate(regions_sorted):
+        r_key = f"reg_{ridx}"
+        r_checked = st.checkbox(reg, key=r_key)
+        if r_checked:
+            selected_regions.append(reg)
+            # Afficher les départements de cette région (indentés, grille 2 colonnes)
+            st.markdown("<div class='smbg-indent'>", unsafe_allow_html=True)
+            # on coupe la liste en 2 colonnes
+            deps = reg2deps.get(reg, [])
+            col1, col2 = st.columns(2)
+            for i, dep in enumerate(deps):
+                d_key = f"dep_{ridx}_{i}"
+                with (col1 if i % 2 == 0 else col2):
+                    if st.checkbox(dep, key=d_key):
+                        selected_deps.append(dep)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)  # /nested-scroll
+
+    # Application des filtres Région / Départements
+    if selected_regions:
+        filtered = filtered[filtered[COL_REGION].astype(str).isin(selected_regions)]
+        if selected_deps:
+            filtered = filtered[filtered[COL_DEPT].astype(str).isin(selected_deps)]
+        # sinon, aucun dép coché → on garde tous les deps des régions cochées (déjà fait)
+
+    # ===== Emplacement =====
     if COL_EMPLACEMENT in df.columns:
         st.markdown("<div class='smbg-title'><b>Emplacement</b></div>", unsafe_allow_html=True)
         vals = sorted([str(x) for x in df[COL_EMPLACEMENT].dropna().unique()])
-        st.markdown("<div class='smbg-indent smbg-chip-grid'>", unsafe_allow_html=True)
+        # grille compacte 2 colonnes
+        st.markdown("<div class='smbg-indent'>", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
         sel_vals = []
         for i, opt in enumerate(vals):
-            if st.checkbox(opt, key=f"emp_{i}"):
-                sel_vals.append(opt)
+            with (c1 if i % 2 == 0 else c2):
+                if st.checkbox(opt, key=f"emp_{i}"): sel_vals.append(opt)
         st.markdown("</div>", unsafe_allow_html=True)
         if sel_vals:
             filtered = filtered[filtered[COL_EMPLACEMENT].astype(str).isin(sel_vals)]
 
-    # ---- Typologie (compact)
+    # ===== Typologie =====
     if COL_TYPOLOGIE in df.columns:
         st.markdown("<div class='smbg-title'><b>Typologie</b></div>", unsafe_allow_html=True)
         vals = sorted([str(x) for x in df[COL_TYPOLOGIE].dropna().unique()])
-        st.markdown("<div class='smbg-indent smbg-chip-grid'>", unsafe_allow_html=True)
+        st.markdown("<div class='smbg-indent'>", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
         sel_vals = []
         for i, opt in enumerate(vals):
-            if st.checkbox(opt, key=f"typ_{i}"):
-                sel_vals.append(opt)
+            with (c1 if i % 2 == 0 else c2):
+                if st.checkbox(opt, key=f"typ_{i}"): sel_vals.append(opt)
         st.markdown("</div>", unsafe_allow_html=True)
         if sel_vals:
             filtered = filtered[filtered[COL_TYPOLOGIE].astype(str).isin(sel_vals)]
 
-    # ---- Cession / Droit au bail (visible seulement si au moins une valeur non vide)
-    show_dab_filter = False
+    # ===== Cession / Droit au bail (visible si au moins une valeur non vide) =====
+    show_dab = False
     if COL_DAB in df.columns:
-        non_empty_mask = ~df[COL_DAB].apply(is_empty_cell)
-        show_dab_filter = bool(non_empty_mask.any())
-
-    if show_dab_filter:
+        show_dab = bool((~df[COL_DAB].apply(is_empty_cell)).any())
+    if show_dab:
         st.markdown("<div class='smbg-title'><b>Cession / Droit au bail</b></div>", unsafe_allow_html=True)
         choice = st.radio(" ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="dab_radio")
         if choice != "Les deux":
-            dab_flags = df[COL_DAB].apply(lambda v: True if dab_is_yes(v) is True else False)
-            if choice == "Oui":
-                mask = dab_flags
-            else:
-                mask = ~dab_flags  # Non = False / None
+            flags = df[COL_DAB].apply(lambda v: True if dab_is_yes(v) is True else False)
+            mask = flags if choice == "Oui" else ~flags
             filtered = filtered[mask.reindex(filtered.index).fillna(True)]
 
-    # ---- Surface GLA (slider par recouvrement N + O)
+    # ===== Surface GLA (slider recouvrement N + O) =====
     st.markdown("<div class='smbg-title'><b>Surface GLA (m²)</b></div>", unsafe_allow_html=True)
     mins, maxs = [], []
     for _, row in df.iterrows():
         rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA)
         if rmin is not None: mins.append(rmin)
         if rmax is not None: maxs.append(rmax)
-    if mins and maxs and min(mins) < max(maxs):
+    if mins and maxs and min(mins) < max(maxs)):
         smin_glob = int(math.floor(min(mins))); smax_glob = int(math.ceil(max(maxs)))
         ssel = st.slider(" ", min_value=smin_glob, max_value=smax_glob, value=(smin_glob, smax_glob),
                          label_visibility="collapsed", key="sl_gla")
@@ -369,13 +363,12 @@ with st.sidebar:
         for idx, row in filtered.iterrows():
             rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA)
             if rmin is None and rmax is None:
-                keep_idx.append(idx)  # non renseigné => rester visible
+                keep_idx.append(idx)
             else:
-                if (rmax >= ssel[0]) and (rmin <= ssel[1]):
-                    keep_idx.append(idx)
+                if (rmax >= ssel[0]) and (rmin <= ssel[1]): keep_idx.append(idx)
         filtered = filtered.loc[keep_idx]
 
-    # ---- Loyer annuel (slider numérique, "selon surface" non exclu)
+    # ===== Loyer annuel (slider numérique, "selon surface" non exclu) =====
     if COL_LOYER_ANNUEL in df.columns:
         st.markdown("<div class='smbg-title'><b>Loyer annuel (€)</b></div>", unsafe_allow_html=True)
         vals = [to_float_clean(x) for x in df[COL_LOYER_ANNUEL].tolist()]
@@ -388,19 +381,16 @@ with st.sidebar:
             keep = (mask_num.isna()) | ((mask_num >= lsel[0]) & (mask_num <= lsel[1]))
             filtered = filtered[keep]
 
-    # ---- Extraction (Oui / Non / Les deux)
+    # ===== Extraction =====
     if COL_EXTRACTION in df.columns:
         st.markdown("<div class='smbg-title'><b>Extraction</b></div>", unsafe_allow_html=True)
         ext_choice = st.radio("  ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="ext_radio")
         if ext_choice != "Les deux":
             norm = df[COL_EXTRACTION].apply(normalize_extraction)
-            if ext_choice == "Oui":
-                mask = norm.eq("OUI")
-            else:
-                mask = norm.eq("NON")
+            mask = norm.eq("OUI") if ext_choice == "Oui" else norm.eq("NON")
             filtered = filtered[mask.reindex(filtered.index).fillna(ext_choice == "Oui")]
 
-    # ---- Liste d'annonces (recherche + tout cocher/décocher) — COMPACTE
+    # ===== Liste d'annonces (recherche + (dé)cocher tout) =====
     st.markdown("<div class='smbg-title'><b>Annonces (cocher / décocher)</b></div>", unsafe_allow_html=True)
     c1, c2 = st.columns([1,1])
     with c1:
@@ -410,27 +400,26 @@ with st.sidebar:
             else:
                 st.session_state["checked_refs"] = set([f"Annonce {i}" for i in filtered.index])
     with c2:
-        if st.button("Tout décocher"):
-            st.session_state["checked_refs"] = set()
+        if st.button("Tout décocher"): st.session_state["checked_refs"] = set()
 
     q = st.text_input("Filtrer la liste…", "", label_visibility="collapsed", placeholder="Rechercher une référence…")
     refs = [str(x) for x in (filtered[COL_REF] if COL_REF in filtered.columns else pd.Series([f"Annonce {i}" for i in filtered.index]))]
     checked = st.session_state.get("checked_refs", set())
-    st.markdown("<div class='smbg-indent smbg-list-scroller'>", unsafe_allow_html=True)
+
+    st.markdown("<div class='smbg-indent'>", unsafe_allow_html=True)
+    st.markdown("<div class='nested-scroll'>", unsafe_allow_html=True)
     for i, r in enumerate(refs):
-        if q and q.lower() not in r.lower():
-            continue
+        if q and q.lower() not in r.lower(): continue
         key = f"chk_ref_{i}"
         val = (r in checked)
         new = st.checkbox(r, value=val, key=key)
-        if new and (r not in checked):
-            checked.add(r)
-        if (not new) and (r in checked):
-            checked.discard(r)
+        if new and (r not in checked): checked.add(r)
+        if (not new) and (r in checked): checked.discard(r)
     st.session_state["checked_refs"] = checked
     st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---- Actions (bas du volet)
+    # ===== Actions (bas du volet) =====
     st.markdown("<div class='smbg-actions-title'><b>Actions</b></div>", unsafe_allow_html=True)
     a1, a2 = st.columns(2)
     with a1:
@@ -441,38 +430,28 @@ with st.sidebar:
             st.session_state["checked_refs"] = set()
             st.rerun()
     with a2:
-        st.button("🗺️ Partager la carte")  # brancher la génération de l'URL si besoin
+        st.button("🗺️ Partager la carte")
 
     b1, b2 = st.columns(2)
     with b1:
-        st.button("📧 Envoyer sélection")  # mailto prérempli à brancher plus tard
+        st.button("📧 Envoyer sélection")
     with b2:
         st.button("🌐 Partager tout")
 
     st.markdown(f"<div class='smbg-counter'> {len(filtered)} annonces visibles</div>", unsafe_allow_html=True)
 
 # =========================
-# COLONNES CENTRALES : Carte + Volet droit (275px, rétractable)
+# CENTRE : Carte + Volet droit
 # =========================
 left, right = st.columns([1, 0.0001], gap="large")
 
 with left:
-    if COL_LAT in filtered.columns and COL_LON in filtered.columns:
-        df_map = filtered.dropna(subset=[COL_LAT, COL_LON]).copy()
-    else:
-        df_map = filtered.iloc[0:0].copy()
-
+    df_map = filtered.dropna(subset=[COL_LAT, COL_LON]).copy() if {COL_LAT, COL_LON}.issubset(filtered.columns) else filtered.iloc[0:0].copy()
     center = [df_map[COL_LAT].astype(float).mean(), df_map[COL_LON].astype(float).mean()] if not df_map.empty else [46.6, 2.5]
     m = folium.Map(location=center, zoom_start=6, control_scale=True, tiles="OpenStreetMap")
-
     for idx, row in df_map.iterrows():
         ref_txt = str(row.get(COL_REF, f"Annonce {idx}"))
-        folium.Marker(
-            location=[float(row[COL_LAT]), float(row[COL_LON])],
-            tooltip=ref_txt,
-            popup=ref_txt
-        ).add_to(m)
-
+        folium.Marker([float(row[COL_LAT]), float(row[COL_LON])], tooltip=ref_txt, popup=ref_txt).add_to(m)
     st_folium(m, height=680, width=None)
 
 with right:
@@ -480,69 +459,37 @@ with right:
     show_details = st.toggle("Afficher le volet de détails", value=True)
     if show_details and not filtered.empty:
         row = filtered.iloc[0]
-
-        # Référence
         ref_val = str(row.get(COL_REF, ""))
-        if ref_val:
-            st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
-            st.write("")
-
-        # Bouton Google Maps
-        gm = row.get(COL_GOOGLE, "")
-        if gm and not is_empty_cell(gm):
-            st.link_button("Ouvrir Google Maps", str(gm).strip(), type="primary")
-
+        if ref_val: st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
         st.write("")
-
-        # Adresse (si présentes)
+        gm = row.get(COL_GOOGLE, "")
+        if gm and not is_empty_cell(gm): st.link_button("Ouvrir Google Maps", str(gm).strip(), type="primary")
+        st.write("")
         adresse_parts = []
         for col in ["Rue", "Code Postal", "Ville"]:
-            if col in filtered.columns and not is_empty_cell(row.get(col, None)):
-                adresse_parts.append(str(row[col]))
-        if adresse_parts:
-            st.markdown(f"<div class='field'><b>Adresse</b> : {' — '.join(adresse_parts)}</div>", unsafe_allow_html=True)
-
-        # Emplacement / Typologie / Type
+            if col in filtered.columns and not is_empty_cell(row.get(col, None)): adresse_parts.append(str(row[col]))
+        if adresse_parts: st.markdown(f"<div class='field'><b>Adresse</b> : {' — '.join(adresse_parts)}</div>", unsafe_allow_html=True)
         for col in [COL_EMPLACEMENT, COL_TYPOLOGIE, "Type"]:
             if col in filtered.columns and not is_empty_cell(row.get(col, None)):
                 st.markdown(f"<div class='field'><b>{col}</b> : {row[col]}</div>", unsafe_allow_html=True)
-
-        # Surfaces (GLA & Utile) + Répartitions (infos)
         gla_val = row.get(COL_GLA, None)
-        if not is_empty_cell(gla_val):
-            st.markdown(f"<div class='field'><b>Surface GLA</b> : {gla_val}</div>", unsafe_allow_html=True)
+        if not is_empty_cell(gla_val): st.markdown(f"<div class='field'><b>Surface GLA</b> : {gla_val}</div>", unsafe_allow_html=True)
         rep_gla = row.get(COL_REP_GLA, None)
-        if not is_empty_cell(rep_gla):
-            st.markdown(f"<div class='field'><b>Répartition Surface GLA</b> : {rep_gla}</div>", unsafe_allow_html=True)
-
+        if not is_empty_cell(rep_gla): st.markdown(f"<div class='field'><b>Répartition Surface GLA</b> : {rep_gla}</div>", unsafe_allow_html=True)
         utile_val = row.get(COL_UTILE, None)
-        if not is_empty_cell(utile_val):
-            st.markdown(f"<div class='field'><b>Surface Utile</b> : {utile_val}</div>", unsafe_allow_html=True)
+        if not is_empty_cell(utile_val): st.markdown(f"<div class='field'><b>Surface Utile</b> : {utile_val}</div>", unsafe_allow_html=True)
         rep_utile = row.get(COL_REP_UTILE, None)
-        if not is_empty_cell(rep_utile):
-            st.markdown(f"<div class='field'><b>Répartition Surface Utile</b> : {rep_utile}</div>", unsafe_allow_html=True)
-
-        # Cession / DAB
+        if not is_empty_cell(rep_utile): st.markdown(f"<div class='field'><b>Répartition Surface Utile</b> : {rep_utile}</div>", unsafe_allow_html=True)
         if COL_DAB in filtered.columns and not is_empty_cell(row.get(COL_DAB, None)):
             st.markdown(f"<div class='field'><b>Cession / Droit au bail</b> : {row[COL_DAB]}</div>", unsafe_allow_html=True)
-
-        # Loyer annuel
         if COL_LOYER_ANNUEL in filtered.columns:
             ly = row.get(COL_LOYER_ANNUEL, None)
             if not is_empty_cell(ly):
                 s = str(ly)
-                if "selon surface" in s.lower():
-                    st.markdown(f"<div class='field'><b>Loyer annuel</b> : Selon surface</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div class='field'><b>Loyer annuel</b> : {s}</div>", unsafe_allow_html=True)
-
-        # Extraction
+                st.markdown(f"<div class='field'><b>Loyer annuel</b> : {'Selon surface' if 'selon surface' in s.lower() else s}</div>", unsafe_allow_html=True)
         if COL_EXTRACTION in filtered.columns and not is_empty_cell(row.get(COL_EXTRACTION, None)):
             st.markdown(f"<div class='field'><b>Extraction</b> : {row[COL_EXTRACTION]}</div>", unsafe_allow_html=True)
-
-        # Région / Département
         for col in [COL_DEPT, COL_REGION]:
             if col in filtered.columns and not is_empty_cell(row.get(col, None)):
                 st.markdown(f"<div class='field'><b>{col}</b> : {row[col]}</div>", unsafe_allow_html=True)
-
     st.markdown("</div>", unsafe_allow_html=True)
