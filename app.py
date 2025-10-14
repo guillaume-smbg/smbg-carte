@@ -53,7 +53,7 @@ LOGO_PATH = get_first_existing(LOGO_PATH_CANDIDATES)
 BLUE_SMBG = get_dominant_color(LOGO_PATH) if LOGO_PATH else "#0A2942"
 
 # =========================
-# CSS — volets 275px, cuivré, carte 100vh, tiroir droit rétractile
+# CSS — volets 275px, cuivré, carte grande, tiroir droit rétractile
 # =========================
 st.markdown(f"""
 <style>
@@ -66,17 +66,10 @@ st.markdown(f"""
   }}
   [data-testid="collapsedControl"] {{ display:none !important; }}
 
-  /* Logo : centré, taille maîtrisée, collé haut */
-  .smbg-logo-wrap {{
-    display:flex; justify-content:center; align-items:flex-start;
-    margin: 0 0 8px 0;
-  }}
+  /* Logo en haut, centré, compact */
+  .smbg-logo-wrap {{ display:flex; justify-content:center; align-items:flex-start; margin:0 0 8px 0; }}
   [data-testid="stSidebar"] img {{
-    width: 38% !important;
-    max-width: 110px !important;
-    height: auto !important;
-    margin: 2px auto 0 auto !important;
-    display:block;
+    width: 38% !important; max-width: 110px !important; height:auto !important; margin: 2px auto 0 auto !important;
   }}
 
   /* Titres & labels cuivrés */
@@ -84,46 +77,16 @@ st.markdown(f"""
   [data-testid="stSidebar"] label p, [data-testid="stSidebar"] .stMarkdown p {{
     color: {COPPER} !important; margin: 0 0 4px 0 !important; font-size: 13px !important;
   }}
-
-  /* Indentation hiérarchique */
   .smbg-indent {{ margin-left: 16px; }}
 
-  /* Mini-scroll regroupant Région→Départements imbriqués */
-  .nested-scroll {{
-    max-height: 180px;
-    overflow-y: auto;
-    padding-right: 4px;
-  }}
+  /* Grilles compactes */
+  .two-col {{ display:grid; grid-template-columns:repeat(2,1fr); gap:2px 8px; }}
+  .nested-scroll {{ max-height: 180px; overflow-y:auto; padding-right:4px; }}
 
-  /* Grille compacte 2 colonnes pour options */
-  .two-col {{
-    display: grid; grid-template-columns: repeat(2, 1fr);
-    gap: 2px 8px;
-  }}
+  /* Conteneur principal : on laisse de la place pour le tiroir droit */
+  .block-container {{ max-width: 1700px; padding-top:.5rem; padding-right: 300px; }}
 
-  /* Inputs compacts */
-  [data-testid="stSidebar"] input[type="text"] {{
-    padding: 6px 8px !important;
-    font-size: 13px !important;
-    min-height: 32px !important;
-  }}
-  [data-testid="stSidebar"] button {{
-    padding: 4px 8px !important;
-    min-height: 32px !important;
-    line-height: 1.2 !important;
-    font-size: 13px !important;
-  }}
-
-  .block-container {{ max-width: 1700px; padding-top: .5rem; }}
-
-  /* Carte plein écran (hauteur viewport) */
-  iframe[title="st_folium"] {{
-    height: calc(100vh - 40px) !important;
-    min-height: 640px;
-    width: 100% !important;
-  }}
-
-  /* Tiroir droit FIXE 275px, rétractile */
+  /* Tiroir droit (275px), rétractile */
   .smbg-right-drawer {{
     position: fixed; top: 0; right: 0; width: 275px; height: 100vh;
     padding: 14px; background: #fff; box-shadow: -6px 0 16px rgba(0,0,0,0.12);
@@ -136,6 +99,8 @@ st.markdown(f"""
   }}
   .field {{ margin-bottom: 6px; }}
   .field b {{ color:#333; }}
+
+  /* NOTE: l'iframe folium varie selon versions, donc on grossit aussi côté Streamlit (height=820). */
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +173,7 @@ def dab_is_yes(value) -> Optional[bool]:
     return True
 
 def to_float_geo(x: any) -> Optional[float]:
-    """Latitude/Longitude -> float ; gère les virgules."""
+    """Latitude/Longitude -> float ; gère les virgules et espaces."""
     if pd.isna(x): return None
     s = str(x).strip()
     if s in ("", "/", "-", "—"): return None
@@ -427,7 +392,7 @@ with st.sidebar:
     st.markdown(f"<div class='smbg-counter'> {len(filtered)} annonces visibles</div>", unsafe_allow_html=True)
 
 # =========================
-# CARTE 100vh + VOLET DROIT RÉTRACTILE
+# CARTE LARGE + VOLET DROIT RÉTRACTILE
 # =========================
 
 # Données géo propres
@@ -449,19 +414,29 @@ bounds = []
 for _, row in df_geo.iterrows():
     ref_txt = str(row.get(COL_REF, ""))
     lat = float(row["_lat"]); lon = float(row["_lon"])
-    folium.Marker([lat, lon], tooltip=ref_txt, popup=ref_txt).add_to(m)
+    folium.Marker([lat, lon], tooltip=ref_txt,
+                  popup=folium.Popup(ref_txt, max_width=250)).add_to(m)
     bounds.append([lat, lon])
 if bounds:
     folium.FitBounds(bounds).add_to(m)
 
 # Affichage + évènements
-map_event = st_folium(m, key="smbg_map")
+# (On force un grand format ici)
+map_event = st_folium(m, key="smbg_map", use_container_width=True, height=820)
 
 # ---- LOGIQUE RÉTRACTILE DU VOLET DROIT ----
-clicked_popup = map_event.get("last_object_clicked_popup") if isinstance(map_event, dict) else None
+clicked_popup = None
+if isinstance(map_event, dict):
+    # Variante 1 (courante)
+    if map_event.get("last_object_clicked_popup"):
+        clicked_popup = map_event["last_object_clicked_popup"]
+    # Variante 2 (selon versions)
+    elif map_event.get("last_object_clicked") and isinstance(map_event["last_object_clicked"], dict):
+        clicked_popup = map_event["last_object_clicked"].get("popup")
+
 clicked_map = map_event.get("last_clicked") if isinstance(map_event, dict) else None
 
-# Cas 1 : pin cliqué -> ouvrir/mettre à jour la référence
+# Cas 1 : pin cliqué -> ouvrir / MAJ la ref
 if clicked_popup:
     st.session_state["last_selected_ref"] = str(clicked_popup)
     st.session_state["drawer_open"] = True
@@ -510,7 +485,7 @@ if st.session_state["drawer_open"] and (detail_row is not None):
         if col in filtered.columns and not is_empty_cell(detail_row.get(col, None)):
             st.markdown(f"<div class='field'><b>{col}</b> : {detail_row[col]}</div>", unsafe_allow_html=True)
 
-    # Surfaces + répartitions (infos)
+    # Surfaces + répartitions
     gla_val = detail_row.get(COL_GLA, None)
     if not is_empty_cell(gla_val):
         st.markdown(f"<div class='field'><b>Surface GLA</b> : {gla_val}</div>", unsafe_allow_html=True)
@@ -529,7 +504,7 @@ if st.session_state["drawer_open"] and (detail_row is not None):
     if COL_DAB in filtered.columns and not is_empty_cell(detail_row.get(COL_DAB, None)):
         st.markdown(f"<div class='field'><b>Cession / Droit au bail</b> : {detail_row[COL_DAB]}</div>", unsafe_allow_html=True)
 
-    # Loyer annuel
+    # Loyer
     if COL_LOYER_ANNUEL in filtered.columns:
         ly = detail_row.get(COL_LOYER_ANNUEL, None)
         if not is_empty_cell(ly):
