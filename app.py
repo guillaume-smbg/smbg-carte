@@ -35,11 +35,12 @@ def hex_from_rgb(rgb) -> str:
     return "#{:02X}{:02X}{:02X}".format(r, g, b)
 
 def get_dominant_color(path: str) -> str:
+    """Extrait une teinte dominante robuste depuis le logo (médiane)."""
     try:
         with Image.open(path).convert("RGBA") as im:
             im = im.resize((80, 80))
             data = np.array(im)
-            mask = data[:, :, 3] > 10
+            mask = data[:, :, 3] > 10  # ignore transparence
             if not mask.any():
                 return "#0A2942"
             rgb = data[:, :, :3][mask]
@@ -52,7 +53,7 @@ LOGO_PATH = get_first_existing(LOGO_PATH_CANDIDATES)
 BLUE_SMBG = get_dominant_color(LOGO_PATH) if LOGO_PATH else "#0A2942"
 
 # =========================
-# CSS (volets 275px, carte 100vh, drawer rétractile)
+# CSS — volets 275px, cuivré, carte 100vh, tiroir droit rétractile
 # =========================
 st.markdown(f"""
 <style>
@@ -65,24 +66,64 @@ st.markdown(f"""
   }}
   [data-testid="collapsedControl"] {{ display:none !important; }}
 
-  .smbg-logo-wrap {{ display:flex; justify-content:center; margin:0 0 8px 0; }}
+  /* Logo : centré, taille maîtrisée, collé haut */
+  .smbg-logo-wrap {{
+    display:flex; justify-content:center; align-items:flex-start;
+    margin: 0 0 8px 0;
+  }}
   [data-testid="stSidebar"] img {{
-    width: 38% !important; max-width: 110px !important; height:auto !important; margin: 2px auto 0 auto !important;
+    width: 38% !important;
+    max-width: 110px !important;
+    height: auto !important;
+    margin: 2px auto 0 auto !important;
+    display:block;
   }}
 
+  /* Titres & labels cuivrés */
   .smbg-title, .smbg-actions-title, .smbg-counter {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] label p, [data-testid="stSidebar"] .stMarkdown p {{
-    color: {COPPER} !important; margin:0 0 4px 0 !important; font-size:13px !important;
+    color: {COPPER} !important; margin: 0 0 4px 0 !important; font-size: 13px !important;
   }}
+
+  /* Indentation hiérarchique */
   .smbg-indent {{ margin-left: 16px; }}
 
-  /* Carte plein écran */
-  iframe[title="st_folium"] {{
-    height: calc(100vh - 40px) !important;
-    min-height: 600px;
+  /* Mini-scroll regroupant Région→Départements imbriqués */
+  .nested-scroll {{
+    max-height: 180px;
+    overflow-y: auto;
+    padding-right: 4px;
   }}
 
-  /* Volet droit FIXE 275px, rétractile */
+  /* Grille compacte 2 colonnes pour options */
+  .two-col {{
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 2px 8px;
+  }}
+
+  /* Inputs compacts */
+  [data-testid="stSidebar"] input[type="text"] {{
+    padding: 6px 8px !important;
+    font-size: 13px !important;
+    min-height: 32px !important;
+  }}
+  [data-testid="stSidebar"] button {{
+    padding: 4px 8px !important;
+    min-height: 32px !important;
+    line-height: 1.2 !important;
+    font-size: 13px !important;
+  }}
+
+  .block-container {{ max-width: 1700px; padding-top: .5rem; }}
+
+  /* Carte plein écran (hauteur viewport) */
+  iframe[title="st_folium"] {{
+    height: calc(100vh - 40px) !important;
+    min-height: 640px;
+    width: 100% !important;
+  }}
+
+  /* Tiroir droit FIXE 275px, rétractile */
   .smbg-right-drawer {{
     position: fixed; top: 0; right: 0; width: 275px; height: 100vh;
     padding: 14px; background: #fff; box-shadow: -6px 0 16px rgba(0,0,0,0.12);
@@ -99,7 +140,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =========================
-# HELPERS
+# HELPERS (parsing & filtres)
 # =========================
 def truthy_yes(x) -> bool:
     return str(x).strip().lower() in {"oui","yes","true","1","y"}
@@ -223,15 +264,17 @@ if COL_ACTIF in df.columns:
     df = df[df[COL_ACTIF].apply(truthy_yes)].copy()
 
 # =========================
-# STATE (sélection + volet droit)
+# STATE (sélection + tiroir)
 # =========================
+st.session_state.setdefault("checked_refs", set())
 st.session_state.setdefault("last_selected_ref", None)
 st.session_state.setdefault("drawer_open", False)
 
 # =========================
-# SIDEBAR (volet gauche) — on garde la version actuelle
+# SIDEBAR (volet gauche complet)
 # =========================
 with st.sidebar:
+    # --- Logo
     st.markdown("<div class='smbg-logo-wrap'>", unsafe_allow_html=True)
     if LOGO_PATH:
         st.image(LOGO_PATH)
@@ -241,34 +284,153 @@ with st.sidebar:
 
     filtered = df.copy()
 
-    # (On peut garder quelques filtres simples pour tester)
-    if COL_REGION in df.columns:
-        st.markdown("<div class='smbg-title'><b>Région</b></div>", unsafe_allow_html=True)
-        regs = sorted([str(x) for x in df[COL_REGION].dropna().unique()])
-        sel_regs = []
-        for i, r in enumerate(regs):
-            if st.checkbox(r, key=f"reg_{i}"):
-                sel_regs.append(r)
-        if sel_regs:
-            filtered = filtered[filtered[COL_REGION].astype(str).isin(sel_regs)]
+    # ===== Région → Départements imbriqués
+    st.markdown("<div class='smbg-title'><b>Région</b></div>", unsafe_allow_html=True)
+    reg2deps: Dict[str, List[str]] = {}
+    if COL_REGION in df.columns and COL_DEPT in df.columns:
+        for r, d in df[[COL_REGION, COL_DEPT]].dropna().drop_duplicates().itertuples(index=False):
+            reg2deps.setdefault(str(r), set()).add(str(d))
+        reg2deps = {k: sorted(list(v)) for k, v in reg2deps.items()}
+    regions_sorted = sorted(reg2deps.keys())
 
+    st.markdown("<div class='nested-scroll'>", unsafe_allow_html=True)
+    selected_regions: List[str] = []
+    selected_deps: List[str] = []
+    for ridx, reg in enumerate(regions_sorted):
+        r_key = f"reg_{ridx}"
+        r_checked = st.checkbox(reg, key=r_key)
+        if r_checked:
+            selected_regions.append(reg)
+            st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
+            deps = reg2deps.get(reg, [])
+            for i, dep in enumerate(deps):
+                d_key = f"dep_{ridx}_{i}"
+                if st.checkbox(dep, key=d_key):
+                    selected_deps.append(dep)
+            st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if selected_regions:
+        filtered = filtered[filtered[COL_REGION].astype(str).isin(selected_regions)]
+        if selected_deps:
+            filtered = filtered[filtered[COL_DEPT].astype(str).isin(selected_deps)]
+
+    # ===== Emplacement
     if COL_EMPLACEMENT in df.columns:
         st.markdown("<div class='smbg-title'><b>Emplacement</b></div>", unsafe_allow_html=True)
         vals = sorted([str(x) for x in df[COL_EMPLACEMENT].dropna().unique()])
+        st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
         sel_vals = []
-        col1, col2 = st.columns(2)
-        for i, v in enumerate(vals):
-            with (col1 if i % 2 == 0 else col2):
-                if st.checkbox(v, key=f"emp_{i}"):
-                    sel_vals.append(v)
+        for i, opt in enumerate(vals):
+            if st.checkbox(opt, key=f"emp_{i}"):
+                sel_vals.append(opt)
+        st.markdown("</div>", unsafe_allow_html=True)
         if sel_vals:
             filtered = filtered[filtered[COL_EMPLACEMENT].astype(str).isin(sel_vals)]
+
+    # ===== Typologie
+    if COL_TYPOLOGIE in df.columns:
+        st.markdown("<div class='smbg-title'><b>Typologie</b></div>", unsafe_allow_html=True)
+        vals = sorted([str(x) for x in df[COL_TYPOLOGIE].dropna().unique()])
+        st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
+        sel_vals = []
+        for i, opt in enumerate(vals):
+            if st.checkbox(opt, key=f"typ_{i}"):
+                sel_vals.append(opt)
+        st.markdown("</div>", unsafe_allow_html=True)
+        if sel_vals:
+            filtered = filtered[filtered[COL_TYPOLOGIE].astype(str).isin(sel_vals)]
+
+    # ===== Cession / DAB (visible si au moins une valeur non vide)
+    show_dab = False
+    if COL_DAB in df.columns:
+        show_dab = bool((~df[COL_DAB].apply(is_empty_cell)).any())
+    if show_dab:
+        st.markdown("<div class='smbg-title'><b>Cession / Droit au bail</b></div>", unsafe_allow_html=True)
+        choice = st.radio(" ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="dab_radio")
+        if choice != "Les deux":
+            flags = df[COL_DAB].apply(lambda v: True if dab_is_yes(v) is True else False)
+            mask = flags if choice == "Oui" else ~flags
+            filtered = filtered[mask.reindex(filtered.index).fillna(True)]
+
+    # ===== Surface GLA (slider recouvrement N + O)
+    st.markdown("<div class='smbg-title'><b>Surface GLA (m²)</b></div>", unsafe_allow_html=True)
+    mins, maxs = [], []
+    for _, row in df.iterrows():
+        rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA)
+        if rmin is not None: mins.append(rmin)
+        if rmax is not None: maxs.append(rmax)
+    if mins and maxs and min(mins) < max(maxs):
+        smin_glob = int(math.floor(min(mins))); smax_glob = int(math.ceil(max(maxs)))
+        ssel = st.slider(" ", min_value=smin_glob, max_value=smax_glob,
+                         value=(smin_glob, smax_glob),
+                         label_visibility="collapsed", key="sl_gla")
+        keep_idx = []
+        for idx, row in filtered.iterrows():
+            rmin, rmax = row_surface_interval(row, COL_GLA, COL_REP_GLA)
+            if rmin is None and rmax is None:
+                keep_idx.append(idx)  # non renseigné => rester visible
+            else:
+                if (rmax >= ssel[0]) and (rmin <= ssel[1]):
+                    keep_idx.append(idx)
+        filtered = filtered.loc[keep_idx]
+
+    # ===== Loyer annuel (slider numérique)
+    if COL_LOYER_ANNUEL in df.columns:
+        st.markdown("<div class='smbg-title'><b>Loyer annuel (€)</b></div>", unsafe_allow_html=True)
+        vals = [to_float_clean(x) for x in df[COL_LOYER_ANNUEL].tolist()]
+        nums = [v for v in vals if v is not None]
+        if nums and min(nums) < max(nums):
+            lmin = int(math.floor(min(nums))); lmax = int(math.ceil(max(nums)))
+            lsel = st.slider("  ", min_value=lmin, max_value=lmax,
+                             value=(lmin, lmax),
+                             label_visibility="collapsed", key="sl_loy")
+            mask_num = filtered[COL_LOYER_ANNUEL].apply(to_float_clean)
+            keep = (mask_num.isna()) | ((mask_num >= lsel[0]) & (mask_num <= lsel[1]))
+            filtered = filtered[keep]
+
+    # ===== Extraction
+    if COL_EXTRACTION in df.columns:
+        st.markdown("<div class='smbg-title'><b>Extraction</b></div>", unsafe_allow_html=True)
+        ext_choice = st.radio("  ", ["Oui", "Non", "Les deux"], horizontal=True, label_visibility="collapsed", key="ext_radio")
+        if ext_choice != "Les deux":
+            norm = df[COL_EXTRACTION].apply(normalize_extraction)
+            mask = norm.eq("OUI") if ext_choice == "Oui" else norm.eq("NON")
+            filtered = filtered[mask.reindex(filtered.index).fillna(ext_choice == "Oui")]
+
+    # ===== Liste d’annonces (optionnelle) — compacte
+    if COL_REF in df.columns:
+        st.markdown("<div class='smbg-title'><b>Annonces (cocher / décocher)</b></div>", unsafe_allow_html=True)
+        c1, c2 = st.columns([1,1])
+        with c1:
+            if st.button("Tout cocher"):
+                st.session_state["checked_refs"] = set([str(x) for x in filtered[COL_REF].fillna("").tolist()])
+        with c2:
+            if st.button("Tout décocher"):
+                st.session_state["checked_refs"] = set()
+
+        q = st.text_input("Filtrer la liste…", "", label_visibility="collapsed", placeholder="Rechercher une référence…")
+        refs = [str(x) for x in filtered[COL_REF].fillna("").tolist()]
+        checked = st.session_state.get("checked_refs", set())
+        st.markdown("<div class='smbg-indent nested-scroll'>", unsafe_allow_html=True)
+        for i, r in enumerate(refs):
+            if q and q.lower() not in r.lower():
+                continue
+            key = f"chk_ref_{i}"
+            val = (r in checked)
+            new = st.checkbox(r, value=val, key=key)
+            if new and (r not in checked): checked.add(r)
+            if (not new) and (r in checked): checked.discard(r)
+        st.session_state["checked_refs"] = checked
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(f"<div class='smbg-counter'> {len(filtered)} annonces visibles</div>", unsafe_allow_html=True)
 
 # =========================
 # CARTE 100vh + VOLET DROIT RÉTRACTILE
 # =========================
 
-# Données géo
+# Données géo propres
 df_geo = filtered.copy()
 if COL_LAT in df_geo.columns and COL_LON in df_geo.columns:
     df_geo["_lat"] = df_geo[COL_LAT].apply(to_float_geo)
@@ -277,7 +439,7 @@ if COL_LAT in df_geo.columns and COL_LON in df_geo.columns:
 else:
     df_geo = df_geo.iloc[0:0]
 
-# Centre
+# Centre de la carte
 center = [df_geo["_lat"].mean(), df_geo["_lon"].mean()] if not df_geo.empty else [46.6, 2.5]
 
 # Carte
@@ -296,26 +458,18 @@ if bounds:
 map_event = st_folium(m, key="smbg_map")
 
 # ---- LOGIQUE RÉTRACTILE DU VOLET DROIT ----
-# 1) Clic sur un pin -> map_event['last_object_clicked_popup'] (texte du popup)
-clicked_popup = None
-if isinstance(map_event, dict):
-    clicked_popup = map_event.get("last_object_clicked_popup", None)
+clicked_popup = map_event.get("last_object_clicked_popup") if isinstance(map_event, dict) else None
+clicked_map = map_event.get("last_clicked") if isinstance(map_event, dict) else None
 
-# 2) Clic ailleurs sur la carte -> map_event['last_clicked'] = {'lat':..., 'lng':...}
-clicked_map = None
-if isinstance(map_event, dict):
-    clicked_map = map_event.get("last_clicked", None)
-
-# Cas 1 : pin cliqué -> ouvrir le tiroir + mémoriser la référence
+# Cas 1 : pin cliqué -> ouvrir/mettre à jour la référence
 if clicked_popup:
     st.session_state["last_selected_ref"] = str(clicked_popup)
     st.session_state["drawer_open"] = True
-
-# Cas 2 : clic fond de carte -> fermer le tiroir
+# Cas 2 : clic fond de carte -> fermer
 elif clicked_map is not None:
     st.session_state["drawer_open"] = False
 
-# Choisir la ligne à afficher si le tiroir est ouvert
+# Choisir la ligne à afficher si tiroir ouvert
 detail_row = None
 if st.session_state["drawer_open"]:
     if st.session_state["last_selected_ref"] and COL_REF in filtered.columns:
@@ -323,7 +477,6 @@ if st.session_state["drawer_open"]:
         if mask.any():
             detail_row = filtered[mask].iloc[0]
         else:
-            # si la ref sélectionnée n'existe plus (filtres), on ferme
             st.session_state["drawer_open"] = False
 
 # ---- Rendu du tiroir ----
@@ -376,7 +529,7 @@ if st.session_state["drawer_open"] and (detail_row is not None):
     if COL_DAB in filtered.columns and not is_empty_cell(detail_row.get(COL_DAB, None)):
         st.markdown(f"<div class='field'><b>Cession / Droit au bail</b> : {detail_row[COL_DAB]}</div>", unsafe_allow_html=True)
 
-    # Loyer
+    # Loyer annuel
     if COL_LOYER_ANNUEL in filtered.columns:
         ly = detail_row.get(COL_LOYER_ANNUEL, None)
         if not is_empty_cell(ly):
