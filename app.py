@@ -1,4 +1,4 @@
-import os, re, time
+import os, re, math, time
 from typing import Optional, Tuple, List, Dict
 
 import pandas as pd
@@ -9,61 +9,67 @@ from streamlit_folium import st_folium
 import folium
 import requests
 
-# =========================
+# ---------------------------
 # PAGE CONFIG
-# =========================
+# ---------------------------
 st.set_page_config(page_title="SMBG Carte — Sélection d’annonces", layout="wide")
 
-# =========================
+# ---------------------------
 # COULEURS / LOGO
-# =========================
+# ---------------------------
 COPPER = "#B87333"
+
 LOGO_CANDIDATES = [
     "logo bleu crop.png", "Logo bleu crop.png",
     "assets/logo bleu crop.png", "assets/Logo bleu crop.png",
     "images/logo bleu crop.png", "static/logo bleu crop.png",
 ]
+
 def first_existing(paths: List[str]) -> Optional[str]:
     for p in paths:
         if os.path.exists(p): return p
     return None
 
 def hex_from_rgb(rgb) -> str:
-    r,g,b = [int(x) for x in rgb]; return "#{:02X}{:02X}{:02X}".format(r,g,b)
+    r,g,b = [int(x) for x in rgb]
+    return "#{:02X}{:02X}{:02X}".format(r,g,b)
 
 def get_blue_from_logo(path: str) -> str:
     try:
         with Image.open(path).convert("RGBA") as im:
             im = im.resize((80, 80))
-            data = np.array(im); mask = data[:,:,3] > 10
+            data = np.array(im)
+            mask = data[:,:,3] > 10
             if not mask.any(): return "#0A2942"
             rgb = data[:,:,:3][mask]
-            return hex_from_rgb(np.median(rgb, axis=0))
+            med = np.median(rgb, axis=0)
+            return hex_from_rgb(med)
     except Exception:
         return "#0A2942"
 
 LOGO_PATH = first_existing(LOGO_CANDIDATES)
 BLUE_SMBG = get_blue_from_logo(LOGO_PATH) if LOGO_PATH else "#0A2942"
 
-# =========================
-# CSS — carte VRAI plein écran + sidebar fixe + pas de scroll
-# =========================
+# ---------------------------
+# CSS — 100vh réel, pas de scroll, sidebar figée, pas de bouton “plein écran” sur le logo,
+# pins via DivIcon SVG donc pas d’assets externes.
+# ---------------------------
 st.markdown(f"""
 <style>
   html, body, .stApp {{ height: 100%; margin: 0; overflow: hidden; }}
-  /* Enlève header/menu/footer Streamlit */
-  [data-testid="stHeader"] {{ display:none !important; }}
-  #MainMenu, footer {{ visibility: hidden !important; }}
 
+  /* Supprime header/menu/footer Streamlit pour éviter bandes blanches */
+  [data-testid="stHeader"] {{ display: none !important; }}
+  #MainMenu, footer {{ display: none !important; }}
+
+  /* Conteneur principal plein écran strict */
   [data-testid="stAppViewContainer"] {{ padding: 0 !important; }}
+  section.main {{ height: 100vh !important; }}
+  section.main > div {{ padding: 0 !important; height: 100vh !important; }}
   .block-container {{
-    padding: 0 !important;
-    margin: 0 !important;
-    max-width: 100% !important;
-    height: 100vh !important;        /* plein écran réel */
-    box-sizing: border-box;
+    padding: 0 !important; margin: 0 !important;
+    max-width: 100% !important; height: 100vh !important; box-sizing: border-box;
   }}
-  section.main > div {{ padding: 0 !important; }}
 
   /* Sidebar fixe, jamais rétractable */
   [data-testid="stSidebar"] {{
@@ -73,24 +79,25 @@ st.markdown(f"""
   }}
   [data-testid="collapsedControl"],
   [data-testid="stSidebarCollapseButton"],
-  button[kind="header"] {{ display:none !important; }}
+  button[kind="header"] {{ display: none !important; }}
 
-  /* Logo compact */
-  .smbg-logo-wrap {{ display:flex; justify-content:center; margin:0 0 8px 0; }}
+  /* Logo compact et SANS bouton “plein écran” */
+  .smbg-logo-wrap {{ display:flex; justify-content:center; margin: 0 0 8px 0; }}
+  [data-testid="stSidebar"] [data-testid="stImage"] button {{ display:none !important; }}
   [data-testid="stSidebar"] img {{
     width: 38% !important; max-width: 110px !important; height:auto !important; margin:2px auto 0 auto !important;
   }}
 
-  /* Titres/labels en cuivré */
+  /* Titres & labels cuivrés */
   .smbg-title, .smbg-counter {{ color:{COPPER} !important; }}
   [data-testid="stSidebar"] label p, [data-testid="stSidebar"] .stMarkdown p {{
-    color:{COPPER} !important; margin:0 0 4px 0 !important; font-size:13px !important;
+    color:{COPPER} !important; margin: 0 0 4px 0 !important; font-size: 13px !important;
   }}
-  .smbg-indent {{ margin-left:16px; }}
-  .two-col {{ display:grid; grid-template-columns:repeat(2,1fr); gap:2px 8px; }}
+  .smbg-indent {{ margin-left: 16px; }}
+  .two-col {{ display:grid; grid-template-columns:repeat(2, 1fr); gap: 2px 8px; }}
   .nested-scroll {{ max-height: 180px; overflow-y:auto; padding-right:4px; }}
 
-  /* L'iframe folium prend 100% largeur dispo & 100vh de hauteur */
+  /* Carte : l'iframe occupe 100% largeur et 100vh hauteur */
   iframe[title^="st_folium"], iframe[title="st_folium"] {{
     height: 100vh !important;
     width: 100% !important;
@@ -100,48 +107,99 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# =========================
+# ---------------------------
 # HELPERS
-# =========================
+# ---------------------------
 def truthy_yes(x) -> bool:
     return str(x).strip().lower() in {"oui","yes","true","1","y"}
 
 def empty(v) -> bool:
     if pd.isna(v): return True
     s = str(v).strip()
-    return s == "" or s in {"/", "-", "—"}
+    return s=="" or s in {"/","-","—"}
 
-def geo_float(x) -> Optional[float]:
+def to_float(x) -> Optional[float]:
+    if pd.isna(x): return None
+    s = str(x).strip().lower()
+    if s in {"","/","-","—"}: return None
+    if "selon surface" in s: return None
+    s = re.sub(r"[^\d,.\-]", "", s)
+    if s.count(",")==1 and s.count(".")==0: s = s.replace(",", ".")
+    try: return float(s)
+    except: return None
+
+def parse_range(text: str) -> Tuple[Optional[float], Optional[float]]:
+    if pd.isna(text): return (None,None)
+    s = str(text).lower()
+    nums = re.findall(r"[\d]+(?:[.,]\d+)?", s)
+    if not nums:
+        v = to_float(s)
+        return (v,v) if v is not None else (None,None)
+    vals=[]
+    for n in nums:
+        try: vals.append(float(n.replace(",", ".")))
+        except: pass
+    if not vals: return (None,None)
+    if len(vals)==1: return (vals[0], vals[0])
+    return (min(vals), max(vals))
+
+def gla_interval(row, col_gla, col_rep):
+    mins, maxs = [], []
+    if col_gla in row and not empty(row[col_gla]):
+        v = to_float(row[col_gla])
+        if v is not None: mins.append(v); maxs.append(v)
+    if col_rep in row and not empty(row[col_rep]):
+        a,b = parse_range(row[col_rep])
+        if a is not None: mins.append(a)
+        if b is not None: maxs.append(b)
+    if mins and maxs: return (min(mins), max(maxs))
+    return (None,None)
+
+def norm_extraction(v:str) -> str:
+    if empty(v): return "NR"
+    s=str(v).strip().lower()
+    if any(k in s for k in ["oui","faisable","possible","ok"]): return "OUI"
+    if "non" in s: return "NON"
+    return "NR"
+
+def dab_yes(v) -> Optional[bool]:
+    if empty(v): return None
+    s=str(v).strip().lower()
+    if s in {"néant","neant","0","0€","0 €"}: return False
+    f=to_float(s)
+    if f is not None and f>0: return True
+    return True
+
+def geo_float(x)->Optional[float]:
     if pd.isna(x): return None
     s = str(x).strip()
-    if s in ("", "/", "-", "—"): return None
+    if s in ("","","/","-","—"): return None
     s = s.replace(",", ".")
     try: return float(s)
     except: return None
 
 def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    """Trouve une colonne en tolérant casse/espaces/accents."""
     norm = {str(c).strip().lower(): c for c in df.columns}
-    for wanted in candidates:
-        k = wanted.strip().lower()
+    for w in candidates:
+        k = w.strip().lower()
         if k in norm: return norm[k]
+    # deaccent
     def deaccent(s: str) -> str:
-        repl = (("é","e"),("è","e"),("ê","e"),("à","a"),("ù","u"),("ô","o"),("ï","i"),("î","i"),("ç","c"))
-        t = s.lower().strip()
-        for a,b in repl: t = t.replace(a,b)
-        return t
+        for a,b in (("é","e"),("è","e"),("ê","e"),("à","a"),("ù","u"),("ô","o"),("ï","i"),("î","i"),("ç","c")):
+            s=s.replace(a,b)
+        return s
     norm2 = {deaccent(k): v for k,v in norm.items()}
-    for wanted in candidates:
-        k = deaccent(wanted)
+    for w in candidates:
+        k = deaccent(w.strip().lower())
         if k in norm2: return norm2[k]
     return None
 
-# =========================
+# ---------------------------
 # CHARGEMENT EXCEL
-# =========================
+# ---------------------------
 @st.cache_data(show_spinner=False)
-def load_excel() -> pd.DataFrame:
-    for p in ["annonces.xlsx", "data/annonces.xlsx", "Liste des lots Version 2.xlsx"]:
+def load_excel()->pd.DataFrame:
+    for p in ["annonces.xlsx","data/annonces.xlsx","Liste des lots Version 2.xlsx"]:
         if os.path.exists(p): return pd.read_excel(p)
     url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL","")).strip()
     if url: return pd.read_excel(url)
@@ -151,132 +209,270 @@ def load_excel() -> pd.DataFrame:
 df = load_excel()
 if df.empty: st.stop()
 
-# Colonnes (robustes)
-COL_REGION = find_column(df, ["Région","Region"])
-COL_DEPT   = find_column(df, ["Département","Departement"])
-COL_EMPL   = find_column(df, ["Emplacement"])
-COL_TYPO   = find_column(df, ["Typologie"])
-COL_REF    = find_column(df, ["Référence annonce","Reference annonce","Référence","Reference"])
-COL_LAT    = find_column(df, ["Latitude","lat","Lat"])
-COL_LON    = find_column(df, ["Longitude","lon","Lng","Long"])
-COL_ADDR   = find_column(df, ["Adresse"])
-COL_RUE    = find_column(df, ["Rue"])
-COL_CP     = find_column(df, ["Code Postal","CP","CodePostal"])
-COL_VILLE  = find_column(df, ["Ville"])
-COL_ACTIF  = find_column(df, ["Actif","Active"])
+# ---------------------------
+# COLONNES (Version 2)
+# ---------------------------
+COL_REGION="Région"; COL_DEPT="Département"; COL_EMPL="Emplacement"; COL_TYPO="Typologie"
+COL_DAB="Cession / Droit au bail"; COL_NB_LOTS="Nombre de lots"
+COL_GLA="Surface GLA"; COL_REP_GLA="Répartition surface GLA"
+COL_UTILE="Surface Utile"; COL_REP_UT="Répartition surface utile"
+COL_LOYER="Loyer annuel"; COL_EXT="Extraction"; COL_GMAP="Lien Google Maps"
+COL_REF="Référence annonce"; COL_LAT="Latitude"; COL_LON="Longitude"; COL_ACTIF="Actif"
 
-if COL_ACTIF:
+# si noms exacts absents, tente une détection
+for var, cands in [
+    ("COL_REGION", ["Région","Region"]),
+    ("COL_DEPT", ["Département","Departement"]),
+    ("COL_EMPL", ["Emplacement"]),
+    ("COL_TYPO", ["Typologie"]),
+    ("COL_DAB", ["Cession / Droit au bail","Cession","Droit au bail"]),
+    ("COL_GLA", ["Surface GLA"]),
+    ("COL_REP_GLA", ["Répartition surface GLA","Repartition surface GLA"]),
+    ("COL_UTILE", ["Surface Utile"]),
+    ("COL_REP_UT", ["Répartition surface utile","Repartition surface utile"]),
+    ("COL_LOYER", ["Loyer annuel","Loyer annuel HT","Loyer HT annuel"]),
+    ("COL_EXT", ["Extraction"]),
+    ("COL_GMAP", ["Lien Google Maps","Lien Google","Google Maps"]),
+    ("COL_REF", ["Référence annonce","Reference annonce","Référence","Reference"]),
+    ("COL_LAT", ["Latitude","lat","Lat"]),
+    ("COL_LON", ["Longitude","lon","Lng","Long"]),
+    ("COL_ACTIF", ["Actif","Active"]),
+]:
+    if globals()[var] not in df.columns:
+        alt = find_column(df, cands)
+        if alt: globals()[var] = alt
+
+if COL_ACTIF in df.columns:
     df = df[df[COL_ACTIF].apply(truthy_yes)].copy()
 
-# =========================
-# GÉOCODAGE — Nominatim + cache
-# =========================
+# ---------------------------
+# GEOCODAGE (secours si pas de lat/lon)
+# ---------------------------
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = os.environ.get("GEOCODER_UA", "SMBG-Streamlit/1.0")  # mets ton UA si tu veux
+USER_AGENT = os.environ.get("GEOCODER_UA", "SMBG-Streamlit/1.0")
 
 @st.cache_data(show_spinner=False)
 def geocode_cached(addr: str) -> Optional[Tuple[float,float]]:
-    """Retourne (lat, lon) en cache pour une adresse précise, sinon None."""
     try:
-        params = {"q": addr, "format": "json", "addressdetails": 0, "limit": 1, "countrycodes": "fr"}
-        r = requests.get(NOMINATIM_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=10)
-        if r.status_code == 200:
+        r = requests.get(NOMINATIM_URL,
+                         params={"q": addr, "format":"json", "limit":1, "countrycodes":"fr"},
+                         headers={"User-Agent": USER_AGENT},
+                         timeout=10)
+        if r.status_code==200:
             js = r.json()
             if js:
-                lat = float(js[0]["lat"]); lon = float(js[0]["lon"])
-                return (lat, lon)
+                return float(js[0]["lat"]), float(js[0]]["lon"])
     except Exception:
         pass
     return None
 
-def build_address(row) -> Optional[str]:
-    if COL_ADDR and not empty(row.get(COL_ADDR, None)):
-        return str(row[COL_ADDR]).strip()
-    parts = []
-    for c in [COL_RUE, COL_CP, COL_VILLE]:
-        if c and not empty(row.get(c, None)):
+def build_addr(row) -> Optional[str]:
+    for c in ["Adresse","Rue","Code Postal","Ville"]:
+        if c in df.columns and not empty(row.get(c,None)):
+            # on reconstruit proprement
+            break
+    parts=[]
+    for c in ["Rue","Code Postal","Ville"]:
+        if c in df.columns and not empty(row.get(c,None)):
             parts.append(str(row[c]).strip())
+    if "Adresse" in df.columns and not empty(row.get("Adresse",None)):
+        return str(row["Adresse"]).strip()
     return " ".join(parts) if parts else None
 
-def add_latlon_from_geocoding(df_in: pd.DataFrame) -> pd.DataFrame:
-    """Complète _lat/_lon :
-       - 1) parse depuis colonnes lat/lon si dispo
-       - 2) sinon géocode les adresses manquantes (avec limite de débit)
-    """
-    df2 = df_in.copy()
-
-    # 1) parse lat/lon si colonnes présentes
-    if COL_LAT and COL_LON and (COL_LAT in df2.columns) and (COL_LON in df2.columns):
-        df2["_lat"] = df2[COL_LAT].apply(geo_float)
-        df2["_lon"] = df2[COL_LON].apply(geo_float)
-
-    # 2) géocode adresses manquantes
-    need_geo = df2[df2.get("_lat").isna() | df2.get("_lon").isna()] if "_lat" in df2 and "_lon" in df2 else df2
-    max_to_geocode = int(os.environ.get("GEOCODE_MAX", "50"))  # limite par exécution
-    done = 0
-    if not need_geo.empty:
-        for idx, row in need_geo.iterrows():
-            if done >= max_to_geocode: break
-            addr = build_address(row)
+def enrich_latlon(df_in: pd.DataFrame)->pd.DataFrame:
+    out = df_in.copy()
+    if COL_LAT in out.columns and COL_LON in out.columns:
+        out["_lat"] = out[COL_LAT].apply(geo_float)
+        out["_lon"] = out[COL_LON].apply(geo_float)
+    need = out[(out.get("_lat").isna()) | (out.get("_lon").isna())] if "_lat" in out and "_lon" in out else out
+    if not need.empty:
+        max_to_geocode = int(os.environ.get("GEOCODE_MAX","30"))
+        done=0
+        for idx,row in need.iterrows():
+            if done>=max_to_geocode: break
+            addr = build_addr(row)
             if not addr: continue
             res = geocode_cached(addr)
             if res:
-                df2.loc[idx, "_lat"] = res[0]
-                df2.loc[idx, "_lon"] = res[1]
+                out.loc[idx,"_lat"], out.loc[idx,"_lon"] = res
                 done += 1
-                time.sleep(float(os.environ.get("GEOCODE_DELAY", "1.0")))  # politesse Nominatim
-    return df2
+                time.sleep(float(os.environ.get("GEOCODE_DELAY","1.0")))
+    return out
 
-# =========================
-# SIDEBAR — (simple, on gardera les gros filtres plus tard)
-# =========================
+# ---------------------------
+# VOLET GAUCHE — remis “plein” et figé
+# ---------------------------
 with st.sidebar:
     st.markdown("<div class='smbg-logo-wrap'>", unsafe_allow_html=True)
     if LOGO_PATH: st.image(LOGO_PATH)
     else: st.markdown("<p style='text-align:center;color:white;font-weight:600;'>SMBG CONSEIL</p>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Mini filtres (Région->Département)
     filtered = df.copy()
-    if COL_REGION and COL_DEPT:
+
+    # Région -> Départements imbriqués
+    if COL_REGION in df.columns and COL_DEPT in df.columns:
         st.markdown("<div class='smbg-title'><b>Région</b></div>", unsafe_allow_html=True)
         reg2deps: Dict[str, List[str]] = {}
         for r,d in df[[COL_REGION, COL_DEPT]].dropna().drop_duplicates().itertuples(index=False):
             reg2deps.setdefault(str(r), set()).add(str(d))
         reg2deps = {k: sorted(list(v)) for k,v in reg2deps.items()}
-
+        sel_regs, sel_deps = [], []
         st.markdown("<div class='nested-scroll'>", unsafe_allow_html=True)
-        chosen_regs, chosen_deps = [], []
-        for i, reg in enumerate(sorted(reg2deps.keys())):
+        for i,reg in enumerate(sorted(reg2deps.keys())):
             if st.checkbox(reg, key=f"reg_{i}"):
-                chosen_regs.append(reg)
+                sel_regs.append(reg)
                 st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
-                for j, dep in enumerate(reg2deps[reg]):
-                    if st.checkbox(dep, key=f"dep_{i}_{j}"): chosen_deps.append(dep)
+                for j,dep in enumerate(reg2deps[reg]):
+                    if st.checkbox(dep, key=f"dep_{i}_{j}"):
+                        sel_deps.append(dep)
                 st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+        if sel_regs:
+            filtered = filtered[filtered[COL_REGION].astype(str).isin(sel_regs)]
+            if sel_deps:
+                filtered = filtered[filtered[COL_DEPT].astype(str).isin(sel_deps)]
 
-        if chosen_regs:
-            filtered = filtered[filtered[COL_REGION].astype(str).isin(chosen_regs)]
-            if chosen_deps:
-                filtered = filtered[filtered[COL_DEPT].astype(str).isin(chosen_deps)]
+    # Emplacement
+    if COL_EMPL in df.columns:
+        st.markdown("<div class='smbg-title'><b>Emplacement</b></div>", unsafe_allow_html=True)
+        vals = sorted([str(x) for x in df[COL_EMPL].dropna().unique()])
+        st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
+        picked=[]
+        for i,v in enumerate(vals):
+            if st.checkbox(v, key=f"emp_{i}"): picked.append(v)
+        st.markdown("</div>", unsafe_allow_html=True)
+        if picked:
+            filtered = filtered[filtered[COL_EMPL].astype(str).isin(picked)]
 
-# =========================
-# CARTE — occupation totale de l’espace libre
-# =========================
-df_geo = add_latlon_from_geocoding(filtered)
-df_geo = df_geo.dropna(subset=["_lat","_lon"])
+    # Typologie
+    if COL_TYPO in df.columns:
+        st.markdown("<div class='smbg-title'><b>Typologie</b></div>", unsafe_allow_html=True)
+        vals = sorted([str(x) for x in df[COL_TYPO].dropna().unique()])
+        st.markdown("<div class='smbg-indent two-col'>", unsafe_allow_html=True)
+        picked=[]
+        for i,v in enumerate(vals):
+            if st.checkbox(v, key=f"typ_{i}"): picked.append(v)
+        st.markdown("</div>", unsafe_allow_html=True)
+        if picked:
+            filtered = filtered[filtered[COL_TYPO].astype(str).isin(picked)]
 
+    # Cession / DAB — visible si au moins une valeur
+    show_dab = COL_DAB in df.columns and (~df[COL_DAB].apply(empty)).any()
+    if show_dab:
+        st.markdown("<div class='smbg-title'><b>Cession / Droit au bail</b></div>", unsafe_allow_html=True)
+        choice = st.radio(" ", ["Oui","Non","Les deux"], horizontal=True, label_visibility="collapsed")
+        if choice!="Les deux":
+            flags = df[COL_DAB].apply(lambda v: True if dab_yes(v) is True else False)
+            mask = flags if choice=="Oui" else ~flags
+            filtered = filtered[mask.reindex(filtered.index).fillna(True)]
+
+    # Surface GLA (slider recouvrement GLA + Répartition GLA)
+    st.markdown("<div class='smbg-title'><b>Surface GLA (m²)</b></div>", unsafe_allow_html=True)
+    mins,maxs=[],[]
+    for _,row in df.iterrows():
+        a,b = gla_interval(row, COL_GLA, COL_REP_GLA)
+        if a is not None: mins.append(a)
+        if b is not None: maxs.append(b)
+    if mins and maxs and min(mins)<max(maxs):
+        a,b = int(math.floor(min(mins))), int(math.ceil(max(maxs)))
+        sl = st.slider(" ", a,b,(a,b), label_visibility="collapsed")
+        keep=[]
+        for idx,row in filtered.iterrows():
+            x,y = gla_interval(row, COL_GLA, COL_REP_GLA)
+            if x is None and y is None: keep.append(idx)           # NR -> rester visible
+            else:
+                if (y>=sl[0]) and (x<=sl[1]): keep.append(idx)      # interval overlap
+        filtered = filtered.loc[keep]
+
+    # Loyer annuel
+    if COL_LOYER in df.columns:
+        st.markdown("<div class='smbg-title'><b>Loyer annuel (€)</b></div>", unsafe_allow_html=True)
+        vals = [to_float(x) for x in df[COL_LOYER].tolist()]
+        nums = [v for v in vals if v is not None]
+        if nums and min(nums)<max(nums):
+            a,b = int(math.floor(min(nums))), int(math.ceil(max(nums)))
+            sl = st.slider("  ", a,b,(a,b), label_visibility="collapsed")
+            num = filtered[COL_LOYER].apply(to_float)
+            keep = num.isna() | ((num>=sl[0]) & (num<=sl[1]))
+            filtered = filtered[keep]
+
+    # Extraction
+    if COL_EXT in df.columns:
+        st.markdown("<div class='smbg-title'><b>Extraction</b></div>", unsafe_allow_html=True)
+        c = st.radio("  ", ["Oui","Non","Les deux"], horizontal=True, label_visibility="collapsed")
+        if c!="Les deux":
+            nrm = df[COL_EXT].apply(norm_extraction)
+            mask = nrm.eq("OUI") if c=="Oui" else nrm.eq("NON")
+            filtered = filtered[mask.reindex(filtered.index).fillna(c=="Oui")]
+
+# ---------------------------
+# CARTE — plein écran, pins SVG robustes (pas d’assets externes)
+# ---------------------------
+
+# Complète lat/lon (prend lat/lon si présents, sinon géocode)
+def add_latlon(df_in: pd.DataFrame)->pd.DataFrame:
+    out = df_in.copy()
+    if COL_LAT in out.columns and COL_LON in out.columns:
+        out["_lat"] = out[COL_LAT].apply(geo_float)
+        out["_lon"] = out[COL_LON].apply(geo_float)
+    # géocode si manquants (petite limite pour politesse)
+    need = out[(out.get("_lat").isna()) | (out.get("_lon").isna())] if "_lat" in out and "_lon" in out else out
+    if not need.empty:
+        max_to_geocode = int(os.environ.get("GEOCODE_MAX","30"))
+        done=0
+        for idx,row in need.iterrows():
+            if done>=max_to_geocode: break
+            adr_parts=[]
+            for c in ["Adresse","Rue","Code Postal","Ville"]:
+                if c in df.columns and not empty(row.get(c,None)): adr_parts.append(str(row[c]).strip())
+            addr = " ".join(adr_parts) if adr_parts else None
+            if not addr: continue
+            try:
+                r = requests.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": addr, "format":"json", "limit":1, "countrycodes":"fr"},
+                    headers={"User-Agent": USER_AGENT}, timeout=10
+                )
+                if r.status_code==200:
+                    js=r.json()
+                    if js:
+                        out.loc[idx,"_lat"] = float(js[0]["lat"])
+                        out.loc[idx,"_lon"] = float(js[0]["lon"])
+                        done+=1
+                        time.sleep(float(os.environ.get("GEOCODE_DELAY","1.0")))
+            except Exception:
+                pass
+    return out
+
+df_geo = add_latlon(filtered).dropna(subset=["_lat","_lon"])
+
+# Carte
 center = [df_geo["_lat"].mean(), df_geo["_lon"].mean()] if not df_geo.empty else [46.6, 2.5]
 m = folium.Map(location=center, zoom_start=6, control_scale=True, tiles="OpenStreetMap")
 
-bounds=[]
-for _, row in df_geo.iterrows():
-    ref = str(row.get(COL_REF, "")).strip() if COL_REF else ""
-    lat, lon = float(row["_lat"]), float(row["_lon"])
-    folium.Marker([lat, lon], tooltip=ref or None, popup=ref or None).add_to(m)
-    bounds.append([lat, lon])
-if bounds: folium.FitBounds(bounds).add_to(m)
+# Pin SVG (DivIcon) — pas d’image externe, rendu propre
+def svg_pin_html(label: str = "") -> str:
+    # petit pin rond + pointe, cuivre
+    return f"""
+    <div style="position:relative; transform: translate(-50%, -100%);">
+      <svg width="26" height="38" viewBox="0 0 26 38" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13 0C6 0 0.7 5.3 0.7 12.2c0 8.5 12.3 24.8 12.3 24.8S25.3 20.7 25.3 12.2C25.3 5.3 20 0 13 0z"
+              fill="{COPPER}" stroke="#783f1e" stroke-width="1"/>
+        <circle cx="13" cy="12" r="5.5" fill="#fff"/>
+      </svg>
+    </div>
+    """
 
-# Affichage — la hauteur/largeur réelles sont forcées par le CSS à 100vh/100%
-st_folium(m, key="map_full", use_container_width=True, height=800)
+for _, row in df_geo.iterrows():
+    lat, lon = float(row["_lat"]), float(row["_lon"])
+    ref = str(row.get(COL_REF, "")).strip() if COL_REF in df_geo.columns else ""
+    icon = folium.DivIcon(html=svg_pin_html(ref))
+    folium.Marker([lat, lon], icon=icon, tooltip=ref or None).add_to(m)
+
+if not df_geo.empty:
+    folium.FitBounds([[df_geo["_lat"].min(), df_geo["_lon"].min()],
+                      [df_geo["_lat"].max(), df_geo["_lon"].max()]]).add_to(m)
+
+# Affichage (100vh réel via CSS)
+st_folium(m, key="smbg_map_full", use_container_width=True, height=800)
