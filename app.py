@@ -169,12 +169,11 @@ def norm_extraction(v:str) -> str:
     return "NR"
 
 def geo_float(x)->Optional[float]:
-    """Convertit lat/lon en float (supporte virgule, espaces, ‘/’, ‘—’)."""
+    """Convertit lat/lon en float (supporte virgule, espaces, ‘/’, ‘—’, etc.)."""
     if pd.isna(x): return None
     s = str(x).strip()
     if s in ("", "/", "-", "—"): return None
     s = s.replace(",", ".")
-    # enlève tout sauf chiffres, +, -, ., e, E
     s = re.sub(r"[^0-9eE+.\-]", "", s)
     try:
         return float(s)
@@ -194,13 +193,11 @@ def load_excel()->pd.DataFrame:
     return pd.DataFrame()
 
 df = load_excel()
-if df.empty:
-    st.stop()
+if df.empty: st.stop()
 
 # =========================
-# COLONNES (FORCÉES) — AI:AL
+# COLONNES (forcées selon ton Excel)
 # =========================
-# On force explicitement les noms : "Latitude" / "Longitude" / "Géocodage statut" / "Géocodage date"
 COL_REGION = "Région"
 COL_DEPT   = "Département"
 COL_EMPL   = "Emplacement"
@@ -214,28 +211,24 @@ COL_LOYER  = "Loyer annuel"
 COL_EXT    = "Extraction"
 COL_GMAP   = "Lien Google Maps"
 COL_REF    = "Référence annonce"
-
-COL_LAT    = "Latitude"             # AI
-COL_LON    = "Longitude"            # AJ
-COL_GSTAT  = "Géocodage statut"     # AK (info seulement)
-COL_GDATE  = "Géocodage date"       # AL (info seulement)
+COL_LAT    = "Latitude"            # AI
+COL_LON    = "Longitude"           # AJ
+COL_GSTAT  = "Géocodage statut"    # AK  (info non utilisée ici)
+COL_GDATE  = "Géocodage date"      # AL  (info non utilisée ici)
 COL_ACTIF  = "Actif"
 
-# Par sécurité : si certaines colonnes n'existent pas, on ne crashe pas.
-for c in [COL_REGION, COL_DEPT, COL_EMPL, COL_TYPO, COL_DAB, COL_GLA, COL_REP_GLA,
-          COL_UTILE, COL_REP_UT, COL_LOYER, COL_EXT, COL_GMAP, COL_REF,
-          COL_LAT, COL_LON, COL_GSTAT, COL_GDATE, COL_ACTIF]:
-    if c not in df.columns:
-        # On ne stoppe pas, on continue (les champs manquants seront simplement ignorés)
-        pass
-
-# IMPORTANT : ne PAS filtrer "Actif" pour éviter de perdre des lignes si la colonne est mal remplie
-# (Si tu veux filtrer "Actif=Oui", décommente les 2 lignes ci-dessous)
+# Ne pas filtrer Actif par défaut (pour ne pas perdre de points)
 # if COL_ACTIF in df.columns:
 #     df = df[df[COL_ACTIF].apply(truthy_yes)].copy()
 
 # =========================
-# VOLET GAUCHE — inchangé (figé)
+# STATE tiroir droit
+# =========================
+st.session_state.setdefault("drawer_open", False)
+st.session_state.setdefault("last_ref", None)
+
+# =========================
+# VOLET GAUCHE — inchangé (sauf défaut radios)
 # =========================
 with st.sidebar:
     st.markdown("<div class='smbg-logo-wrap'>", unsafe_allow_html=True)
@@ -294,11 +287,12 @@ with st.sidebar:
         if picked:
             filtered = filtered[filtered[COL_TYPO].astype(str).isin(picked)]
 
-    # Cession / DAB — visible si au moins une valeur
+    # Cession / DAB — visible si au moins une valeur (défaut = Les deux)
     show_dab = (COL_DAB in df.columns) and (~df[COL_DAB].apply(empty)).any()
     if show_dab:
         st.markdown("<div class='smbg-title'><b>Cession / Droit au bail</b></div>", unsafe_allow_html=True)
-        choice = st.radio(" ", ["Oui","Non","Les deux"], horizontal=True, label_visibility="collapsed")
+        choice = st.radio(" ", ["Oui","Non","Les deux"], horizontal=True,
+                          label_visibility="collapsed", index=2)  # <- "Les deux" par défaut
         if choice!="Les deux":
             flags = df[COL_DAB].apply(lambda v: True if str(v).strip() else False)
             mask = flags if choice=="Oui" else ~flags
@@ -335,24 +329,24 @@ with st.sidebar:
             keep = num.isna() | ((num>=sl[0]) & (num<=sl[1]))
             filtered = filtered[keep]
 
-    # Extraction
+    # Extraction (défaut = Les deux)
     if COL_EXT in df.columns:
         st.markdown("<div class='smbg-title'><b>Extraction</b></div>", unsafe_allow_html=True)
-        c = st.radio("  ", ["Oui","Non","Les deux"], horizontal=True, label_visibility="collapsed")
+        c = st.radio("  ", ["Oui","Non","Les deux"], horizontal=True,
+                     label_visibility="collapsed", index=2)  # <- "Les deux" par défaut
         if c!="Les deux":
             nrm = df[COL_EXT].apply(norm_extraction)
             mask = nrm.eq("OUI") if c=="Oui" else nrm.eq("NON")
-            filtered = filtered[mask.reindex(filtered.index).fillna(c=="Oui")]
+            filtered = filtered[mask.reindex(filtered.index).fillna(True)]
 
 # =========================
-# CARTE — utilise strictement AI:AJ (Latitude/Longitude)
+# CARTE — lecture stricte AI:AJ (Latitude/Longitude)
 # =========================
 def series_to_float(series: pd.Series) -> pd.Series:
-    return series.astype(str).map(geo_float)
+    return series.apply(geo_float)
 
 df_geo = filtered.copy()
 
-# Si les colonnes Latitude/Longitude existent, on ne géocode pas : on parse et on trace
 if (COL_LAT in df_geo.columns) and (COL_LON in df_geo.columns):
     df_geo["_lat"] = series_to_float(df_geo[COL_LAT])
     df_geo["_lon"] = series_to_float(df_geo[COL_LON])
