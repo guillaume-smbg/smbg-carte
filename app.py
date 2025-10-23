@@ -52,6 +52,7 @@ BLUE_SMBG = get_blue_from_logo(LOGO_PATH) if LOGO_PATH else "#0A2942"
 
 # =========================
 # CSS — 100vh réel, pas de scroll, sidebar figée, logo sans bouton plein écran
+# + tiroir droit (volet) 275px, overlay, pleine hauteur
 # =========================
 st.markdown(f"""
 <style>
@@ -103,6 +104,21 @@ st.markdown(f"""
     border: 0 !important;
     display: block !important;
   }}
+
+  /* --- Tiroir droit (volet) --- */
+  .drawer {{
+    position: fixed; top: 0; right: 0; width: 275px; height: 100vh;
+    background: #fff; box-shadow: -6px 0 16px rgba(0,0,0,.14);
+    padding: 14px; overflow-y: auto; z-index: 9999;
+  }}
+  .drawer.hidden {{ display: none; }}
+
+  .ref-banner {{
+    background:{BLUE_SMBG}; color:#fff;
+    padding:8px 12px; border-radius:10px; display:inline-block; font-weight:600;
+  }}
+  .field {{ margin-bottom: 6px; }}
+  .field b {{ color: #333; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -240,12 +256,12 @@ for var, cands in [
         alt = find_column(df, cands)
         if alt: globals()[var] = alt
 
-# (Option : filtrer sur Actif=Oui. Laisser tel quel si c’était le comportement attendu.)
+# (Option : filtrer Actif=Oui — on conserve le comportement)
 if COL_ACTIF in df.columns:
     df = df[df[COL_ACTIF].apply(truthy_yes)].copy()
 
 # =========================
-# GEOCODAGE (lat/lon si dispo, sinon Nominatim) — CORRECTION SYNTAXE OK
+# GEOCODAGE (lat/lon si dispo, sinon Nominatim) — correction syntaxe OK
 # =========================
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = os.environ.get("GEOCODER_UA", "SMBG-Streamlit/1.0")
@@ -261,8 +277,7 @@ def geocode_cached(addr: str) -> Optional[Tuple[float,float]]:
         if r.status_code == 200:
             js = r.json()
             if js:
-                # ✅ Correction de syntaxe ici (plus de ']]')
-                return float(js[0]["lat"]), float(js[0]["lon"])
+                return float(js[0]["lat"]), float(js[0]["lon"])  # ✅ corrigé
     except Exception:
         pass
     return None
@@ -277,7 +292,7 @@ def build_address(row) -> Optional[str]:
 def enrich_latlon(df_in: pd.DataFrame) -> pd.DataFrame:
     """Complète _lat/_lon :
        - 1) parse depuis colonnes lat/lon si dispo
-       - 2) sinon géocode les adresses manquantes (avec limite de débit)
+       - 2) sinon géocode les adresses manquantes (limité)
     """
     out = df_in.copy()
 
@@ -301,7 +316,13 @@ def enrich_latlon(df_in: pd.DataFrame) -> pd.DataFrame:
     return out
 
 # =========================
-# VOLET GAUCHE — filtres “figés”
+# STATE pour le tiroir droit
+# =========================
+st.session_state.setdefault("drawer_open", False)
+st.session_state.setdefault("last_ref", None)
+
+# =========================
+# VOLET GAUCHE — filtres “figés” (inchangés)
 # =========================
 with st.sidebar:
     st.markdown("<div class='smbg-logo-wrap'>", unsafe_allow_html=True)
@@ -378,7 +399,7 @@ with st.sidebar:
         if a is not None: mins.append(a)
         if b is not None: maxs.append(b)
     if mins and maxs and min(mins)<max(maxs):
-        a,b = int(math.floor(min(mins))), int(math.ceil(max(maxs))))
+        a,b = int(math.floor(min(mins))), int(math.ceil(max(maxs)))
         sl = st.slider(" ", a,b,(a,b), label_visibility="collapsed")
         keep=[]
         for idx,row in filtered.iterrows():
@@ -410,7 +431,7 @@ with st.sidebar:
             filtered = filtered[mask.reindex(filtered.index).fillna(c=="Oui")]
 
 # =========================
-# CARTE — plein écran, pins SVG robustes (pas d’assets externes)
+# CARTE — plein écran, pins cuivre SVG
 # =========================
 df_geo = enrich_latlon(filtered).dropna(subset=["_lat","_lon"])
 
@@ -430,14 +451,118 @@ def svg_pin_html() -> str:
     </div>
     """
 
+# Ajout des marqueurs avec tooltip et popup = référence (pour capter les clics)
+bounds=[]
 for _, row in df_geo.iterrows():
     lat, lon = float(row["_lat"]), float(row["_lon"])
     ref = str(row.get(COL_REF, "")).strip() if COL_REF in df_geo.columns else ""
     icon = folium.DivIcon(html=svg_pin_html())
-    folium.Marker([lat, lon], icon=icon, tooltip=ref or None).add_to(m)
+    folium.Marker(
+        [lat, lon],
+        icon=icon,
+        tooltip=ref or None,
+        popup=folium.Popup(ref, max_width=260) if ref else None
+    ).add_to(m)
+    bounds.append([lat, lon])
 
-if not df_geo.empty:
-    folium.FitBounds([[df_geo["_lat"].min(), df_geo["_lon"].min()],
-                      [df_geo["_lat"].max(), df_geo["_lon"].max()]]).add_to(m)
+if bounds:
+    folium.FitBounds(bounds).add_to(m)
 
-st_folium(m, key="smbg_map_full", use_container_width=True, height=800)
+# Affichage carte
+map_event = st_folium(m, key="smbg_map_full", use_container_width=True, height=800)
+
+# =========================
+# LOGIQUE TIROIR DROIT (rétractile)
+# =========================
+# Récupère clic sur pin (popup) + clic fond de carte
+clicked_popup = None
+if isinstance(map_event, dict):
+    # Variante courante
+    if map_event.get("last_object_clicked_popup"):
+        clicked_popup = map_event["last_object_clicked_popup"]
+    # Autres variantes possibles selon versions
+    elif map_event.get("last_object_clicked") and isinstance(map_event["last_object_clicked"], dict):
+        clicked_popup = map_event["last_object_clicked"].get("popup")
+
+clicked_map = map_event.get("last_clicked") if isinstance(map_event, dict) else None
+
+# Ouvrir / mettre à jour / fermer
+if clicked_popup:
+    st.session_state["last_ref"] = str(clicked_popup)
+    st.session_state["drawer_open"] = True
+elif clicked_map is not None:
+    st.session_state["drawer_open"] = False
+
+# Trouver la ligne détaillée
+detail = None
+if st.session_state["drawer_open"] and st.session_state.get("last_ref") and (COL_REF in filtered.columns):
+    mask = filtered[COL_REF].astype(str) == st.session_state["last_ref"]
+    if mask.any():
+        detail = filtered[mask].iloc[0]
+    else:
+        st.session_state["drawer_open"] = False
+
+# =========================
+# RENDU DU TIROIR DROIT
+# =========================
+drawer_class = "drawer" if (st.session_state["drawer_open"] and detail is not None) else "drawer hidden"
+st.markdown(f"<div class='{drawer_class}'>", unsafe_allow_html=True)
+
+if st.session_state["drawer_open"] and (detail is not None):
+    # Référence
+    ref_val = str(detail.get(COL_REF, "")).strip()
+    if ref_val:
+        st.markdown(f"<span class='ref-banner'>Référence annonce : {ref_val}</span>", unsafe_allow_html=True)
+        st.write("")
+
+    # Lien Google Maps
+    if COL_GMAP in filtered.columns:
+        g = detail.get(COL_GMAP, "")
+        if g and not empty(g):
+            st.link_button("Ouvrir Google Maps", str(g).strip(), type="primary")
+
+    st.write("")
+
+    # Adresse
+    parts=[]
+    for c in ["Rue","Code Postal","Ville"]:
+        if c in filtered.columns and not empty(detail.get(c,None)):
+            parts.append(str(detail[c]).strip())
+    if parts:
+        st.markdown(f"<div class='field'><b>Adresse</b> : {' — '.join(parts)}</div>", unsafe_allow_html=True)
+
+    # Emplacement / Typologie / Type
+    for c in [COL_EMPL, COL_TYPO, "Type"]:
+        if c in filtered.columns and not empty(detail.get(c,None)):
+            st.markdown(f"<div class='field'><b>{c}</b> : {detail[c]}</div>", unsafe_allow_html=True)
+
+    # Surfaces + répartitions (infos)
+    if "Surface GLA" in filtered.columns and not empty(detail.get("Surface GLA", None)):
+        st.markdown(f"<div class='field'><b>Surface GLA</b> : {detail['Surface GLA']}</div>", unsafe_allow_html=True)
+    if "Répartition surface GLA" in filtered.columns and not empty(detail.get("Répartition surface GLA", None)):
+        st.markdown(f"<div class='field'><b>Répartition Surface GLA</b> : {detail['Répartition surface GLA']}</div>", unsafe_allow_html=True)
+
+    if "Surface Utile" in filtered.columns and not empty(detail.get("Surface Utile", None)):
+        st.markdown(f"<div class='field'><b>Surface Utile</b> : {detail['Surface Utile']}</div>", unsafe_allow_html=True)
+    if "Répartition surface utile" in filtered.columns and not empty(detail.get("Répartition surface utile", None)):
+        st.markdown(f"<div class='field'><b>Répartition Surface Utile</b> : {detail['Répartition surface utile']}</div>", unsafe_allow_html=True)
+
+    # Cession / DAB
+    if COL_DAB in filtered.columns and not empty(detail.get(COL_DAB, None)):
+        st.markdown(f"<div class='field'><b>Cession / Droit au bail</b> : {detail[COL_DAB]}</div>", unsafe_allow_html=True)
+
+    # Loyer annuel (affiche “Selon surface” si texte contient cette mention)
+    if COL_LOYER in filtered.columns and not empty(detail.get(COL_LOYER, None)):
+        s = str(detail[COL_LOYER])
+        st.markdown(f"<div class='field'><b>Loyer annuel</b> : {'Selon surface' if 'selon surface' in s.lower() else s}</div>", unsafe_allow_html=True)
+
+    # Extraction
+    if COL_EXT in filtered.columns and not empty(detail.get(COL_EXT, None)):
+        st.markdown(f"<div class='field'><b>Extraction</b> : {detail[COL_EXT]}</div>", unsafe_allow_html=True)
+
+    # Région / Département
+    for c in [COL_DEPT, COL_REGION]:
+        if c in filtered.columns and not empty(detail.get(c, None)):
+            st.markdown(f"<div class='field'><b>{c}</b> : {detail[c]}</div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
