@@ -11,15 +11,12 @@ import requests
 import folium
 from streamlit.components.v1 import html as st_html
 
-# ================== PAGE LAYOUT ==================
-st.set_page_config(page_title='SMBG Carte (Drawer vide)', layout='wide')
+st.set_page_config(page_title='SMBG Carte (version validée)', layout='wide')
 DEFAULT_LOCAL_PATH = 'data/Liste_des_lots.xlsx'
 LOGO_BLUE = '#05263d'
 
-# Volet gauche (réservé filtres) fixe 275px
 st.sidebar.markdown('### Filtres (à venir)')
 
-# Plein écran, pas de scroll global
 st.markdown('''
 <style>
   html, body {height:100%; overflow:hidden;}
@@ -31,7 +28,6 @@ st.markdown('''
 </style>
 ''', unsafe_allow_html=True)
 
-# ================== HELPERS: Excel ==================
 def normalize_excel_url(url: str) -> str:
     if not url: return url
     url = url.strip()
@@ -72,7 +68,6 @@ def load_excel() -> pd.DataFrame:
         st.stop()
     return pd.read_excel(DEFAULT_LOCAL_PATH)
 
-# ================== GEOCODING (validé) ==================
 @st.cache_data(show_spinner=False)
 def resolve_redirect(url: str) -> str:
     try:
@@ -167,13 +162,6 @@ def geocode_best_effort(address: str, gmap_url: str):
     except Exception:
         return None, None
 
-# ================== MAP (pins via Python) ==================
-def build_mapping(df):
-    cols = list(df.columns)
-    start_idx, end_idx = 6, 33  # G..AH
-    slice_cols = cols[start_idx:end_idx+1] if len(cols) > end_idx else cols[start_idx:]
-    return {'range_cols': slice_cols}
-
 def render_map(df_valid: pd.DataFrame, ref_col: str | None):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
 
@@ -194,8 +182,7 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None):
     ).add_to(m)
 
     group = folium.FeatureGroup(name='Annonces').add_to(m)
-
-    pin_css = 'background:%s; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%%; text-align:center; font-size:11px; font-weight:700;' % LOGO_BLUE
+    pin_css = f'background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:700;'
 
     for _, row in df_valid.iterrows():
         lat, lon = float(row['_lat']), float(row['_lon'])
@@ -204,81 +191,20 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None):
         icon = folium.DivIcon(html=html_div, class_name='smbg-divicon', icon_size=(28,28), icon_anchor=(14,14))
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
-    # Drawer (vide) + stylage
     css = f'''
     <style>
       .smbg-divicon {{ background: transparent; border: none; }}
       .smbg-pin {{ {pin_css} }}
-      .leaflet-marker-icon {{ cursor: pointer; }}
-
-      .smbg-drawer {{
-        position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;
-        box-shadow: -12px 0 24px rgba(0,0,0,0.08);
-        border-left: 1px solid rgba(0,0,0,0.06);
-        transform: translateX(100%);
-        transition: transform 220ms ease-in-out;
-        z-index: 9999;
-      }}
-      .smbg-drawer.open {{ transform: translateX(0%); }}
+      .leaflet-marker-icon {{ cursor: default; }}
+      .leaflet-container {{ background:#e6e9ef; }}
     </style>
     '''
-    js = '''
-    <script>
-      let drawer;
-      function ensureDrawer(){
-        drawer = document.querySelector('.smbg-drawer');
-        if(!drawer){
-          drawer = document.createElement('div');
-          drawer.className = 'smbg-drawer';
-          document.body.appendChild(drawer);
-        }
-      }
-      function openDrawerBlank(){
-        ensureDrawer();
-        drawer.classList.add('open');
-      }
-      function closeDrawer(){
-        ensureDrawer();
-        drawer.classList.remove('open');
-      }
-      function getLeafletMap(){
-        for(const k in window){
-          if(k.startsWith('map_') && window[k] && typeof window[k].eachLayer==='function'){
-            return window[k];
-          }
-        }
-        return null;
-      }
-      function attach(){
-        const map = getLeafletMap();
-        if(!map){ setTimeout(attach, 50); return; }
-        // Bind to all markers reliably via Leaflet API
-        map.eachLayer(function(layer){
-          if(layer && typeof layer.on==='function' && layer.getLatLng){
-            layer.on('click', function(e){
-              if (window.L && window.L.DomEvent && e) { window.L.DomEvent.stop(e); }
-              openDrawerBlank();
-            });
-          }
-        });
-        // Close on background clicks
-        map.on('click', ()=> closeDrawer());
-      }
-      if(document.readyState==='complete' || document.readyState==='interactive'){
-        setTimeout(attach, 0);
-      }else{
-        document.addEventListener('DOMContentLoaded', attach);
-      }
-    </script>
-'''
     folium.Element(css).add_to(m)
-    folium.Element(js).add_to(m)
     return m.get_root().render()
 
 def main():
     df = load_excel()
 
-    # Colonnes utiles déjà en place dans la version validée
     def first_match(cands):
         for c in cands:
             if c in df.columns: return c
@@ -286,11 +212,10 @@ def main():
     actif_col = first_match(['Actif','Active','AO'])
     lat_col   = first_match(['Latitude','Lat','AI'])
     lon_col   = first_match(['Longitude','Lon','Lng','Long','AJ'])
-    ref_col   = first_match(['Référence annonce','Référence','AM'])
     addr_col  = first_match(['Adresse','Adresse complète','G'])
     gmap_col  = first_match(['Lien Google Maps','Google Maps','Maps','H'])
+    ref_col   = first_match(['Référence annonce','Référence','AM'])
 
-    # Filtre actif
     if actif_col is None:
         df['_actif'] = True
     else:
@@ -303,7 +228,6 @@ def main():
             return False
         df['_actif'] = df[actif_col].apply(norm)
 
-    # Lat/Lon
     if lat_col is None: lat_col = 'Latitude'; df[lat_col] = None
     if lon_col is None: lon_col = 'Longitude'; df[lon_col] = None
     lat_num = pd.to_numeric(df[lat_col], errors='coerce')
