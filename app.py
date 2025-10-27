@@ -19,7 +19,7 @@ LOGO_BLUE = '#05263d'
 # Left sidebar placeholder (fixed 275px)
 st.sidebar.markdown('### Filtres (à venir)')
 
-# Fullscreen layout (no scroll)
+# Fullscreen, no scroll
 st.markdown('''
 <style>
   html, body {height:100%; overflow:hidden;}
@@ -31,7 +31,7 @@ st.markdown('''
 </style>
 ''', unsafe_allow_html=True)
 
-# ================== HELPERS: Excel ==================
+# ================== HELPERS ==================
 def normalize_excel_url(url: str) -> str:
     if not url: return url
     url = url.strip()
@@ -72,7 +72,11 @@ def load_excel() -> pd.DataFrame:
         st.stop()
     return pd.read_excel(DEFAULT_LOCAL_PATH)
 
-# ================== GEOCODING (validé) ==================
+def html_attr_escape(s: str) -> str:
+    # Safe escape for embedding JSON in HTML attribute
+    return s.replace('&', '&amp;').replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+
+# ================== GEOCODING ==================
 @st.cache_data(show_spinner=False)
 def resolve_redirect(url: str) -> str:
     try:
@@ -167,7 +171,13 @@ def geocode_best_effort(address: str, gmap_url: str):
     except Exception:
         return None, None
 
-# ================== RENDER MAP (pins via Python, drawer via JS) ==================
+# ================== MAP RENDER (pins via Python) ==================
+def build_mapping(df):
+    cols = list(df.columns)
+    start_idx, end_idx = 6, 33  # G..AH
+    slice_cols = cols[start_idx:end_idx+1] if len(cols) > end_idx else cols[start_idx:]
+    return {'range_cols': slice_cols}
+
 def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
 
@@ -187,17 +197,13 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
         opacity=1.0
     ).add_to(m)
 
-    # Feature group for markers
     group = folium.FeatureGroup(name='Annonces').add_to(m)
 
-    # CSS for pin
     PIN_CSS = f'background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:700;'
 
-    # Add markers as before (validated approach)
     for _, row in df_valid.iterrows():
         lat, lon = float(row['_lat']), float(row['_lon'])
         ref_text = str(row.get(ref_col, '')) if ref_col else ''
-        # Build props for drawer: only columns G..AH in order
         props = {}
         for col in range_cols:
             val = row.get(col, '')
@@ -205,13 +211,12 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
             props[col] = str(val)
         if ref_col:
             props['_ref'] = ref_text
-        # Encode to HTML-safe JSON
-        data_props = html.escape(json.dumps(props, ensure_ascii=False))
+        # Safely embed JSON as a data-attribute
+        data_props = html_attr_escape(json.dumps(props, ensure_ascii=False))
         html_div = f'<div class="smbg-pin" data-props="{data_props}">{ref_text}</div>'
         icon = folium.DivIcon(html=html_div, class_name='smbg-divicon', icon_size=(28,28), icon_anchor=(14,14))
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
-    # Drawer CSS/JS injected once
     css = f'''
     <style>
       @font-face {{ font-family: 'Futura'; src: local('Futura'); }}
@@ -268,11 +273,9 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
         const title = props._ref ? `Annonce ${props._ref}` : 'Détail de l’annonce';
         header.textContent = title;
         body.innerHTML = '';
-        const cols = Object.keys(props);
-        // Preserve Python order by reading dataset JSON as-is (already ordered), but safeguard here:
-        for(const k of cols){
+        // Respect order G..AH by reading the DOM-embedded JSON (already in Python order):
+        for(const [k,v] of Object.entries(props)){
           if(k==='_ref') continue;
-          const v = props[k];
           if(isMeaningful(v)){
             body.insertAdjacentHTML('beforeend', buildRowHTML(k, String(v)));
           }
@@ -284,7 +287,6 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
         drawer.classList.remove('open');
       }
       function attachHandlers(){
-        // Attach click on all pin divs
         document.querySelectorAll('.smbg-pin').forEach(el=>{
           el.addEventListener('click', (e)=>{
             e.preventDefault();
@@ -295,7 +297,6 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
             }catch(err){ console.warn('Bad props', err); }
           }, {passive:true});
         });
-        // Close on map background
         const map = (function(){
           for(const k in window){
             if(k.startsWith('map_') && window[k] && typeof window[k].on==='function'){ return window[k]; }
@@ -304,7 +305,6 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
         })();
         if(map){ map.on('click', ()=> closeDrawer()); }
       }
-      // Run after tiles render
       if(document.readyState==='complete' || document.readyState==='interactive'){
         setTimeout(attachHandlers, 0);
       }else{
@@ -315,16 +315,7 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
     folium.Element(css).add_to(m)
     folium.Element(js).add_to(m)
 
-    # Render
-    html_str = m.get_root().render()
-    return html_str
-
-def build_mapping(df):
-    # columns G..AH (indices 6..33)
-    cols = list(df.columns)
-    start_idx, end_idx = 6, 33
-    slice_cols = cols[start_idx:end_idx+1] if len(cols)>end_idx else cols[start_idx:]
-    return {'range_cols': slice_cols}
+    return m.get_root().render()
 
 def main():
     df = load_excel()
@@ -341,7 +332,7 @@ def main():
     gmap_col  = first_match(['Lien Google Maps','Google Maps','Maps','H'])
     ref_col   = first_match(['Référence annonce','Référence','AM'])
 
-    # Active flag
+    # Active filter
     if actif_col is None:
         df['_actif'] = True
     else:
@@ -354,7 +345,7 @@ def main():
             return False
         df['_actif'] = df[actif_col].apply(norm)
 
-    # Ensure lat/lon
+    # Lat/Lon ensure
     if lat_col is None: lat_col = 'Latitude'; df[lat_col] = None
     if lon_col is None: lon_col = 'Longitude'; df[lon_col] = None
     lat_num = pd.to_numeric(df[lat_col], errors='coerce')
@@ -368,7 +359,6 @@ def main():
             df.loc[idx, lat_col] = lat
             df.loc[idx, lon_col] = lon
 
-    # Valid rows
     df = df[df['_actif']].copy()
     df['_lat'] = pd.to_numeric(df[lat_col], errors='coerce')
     df['_lon'] = pd.to_numeric(df[lon_col], errors='coerce')
