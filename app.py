@@ -237,21 +237,12 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
       .smbg-kv .v {{ font-size:14px; color:#0f172a; font-weight:600; margin-top:2px; word-break:break-word; }}
       .smbg-link {{ color:{LOGO_BLUE}; text-decoration:none; font-weight:700; }}
       .leaflet-container {{ background:#e6e9ef; }}
+      .leaflet-marker-icon {{ cursor: pointer; }}
     </style>
     '''
 
     js = f'''
     <script>
-      (function() {{
-        if (!window.map) {{
-          for (const k in window) {{
-            if (k.startsWith('map_') && window[k] && typeof window[k].on === 'function') {{
-              window.map = window[k]; break;
-            }}
-          }}
-        }}
-      }})();
-
       const SMBG_DATA = {data_json};
       const COL_ORDER = {json.dumps(range_cols, ensure_ascii=False)};
 
@@ -294,28 +285,49 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
         }});
         drawer.classList.add('open');
       }}
-
       function closeDrawer() {{
         ensureDrawer();
         drawer.classList.remove('open');
       }}
 
-      const gj = L.geoJSON({data_json}, {{
-        pointToLayer: function(feature, latlng) {{
-          const ref = (feature.properties && feature.properties._ref) ? feature.properties._ref : '';
-          const html = `<div class="smbg-pin">${'{'}${'ref'}{'}'}</div>`;
-          const icon = L.divIcon({{html: html, className:'smbg-divicon', iconSize:[28,28], iconAnchor:[14,14]}});
-          const marker = L.marker(latlng, {{icon}});
-          marker.on('click', (e) => {{
-            openDrawerWithProps(feature.properties);
-            e.originalEvent.cancelBubble = true;
-            if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
-          }});
-          return marker;
+      function getLeafletMap() {{
+        for (const k in window) {{
+          if (k.startsWith('map_') && window[k] && typeof window[k].on === 'function') {{
+            return window[k];
+          }}
         }}
-      }}).addTo(window.map);
+        return null;
+      }}
 
-      window.map.on('click', function() {{ closeDrawer(); }});
+      function boot() {{
+        const map = getLeafletMap();
+        if (!map) {{ setTimeout(boot, 50); return; }}
+        window.map = map;
+
+        const gj = L.geoJSON(SMBG_DATA, {{
+          pointToLayer: function(feature, latlng) {{
+            const ref = (feature.properties && feature.properties._ref) ? feature.properties._ref : '';
+            const html = `<div class='smbg-pin'>${'{'}${'ref'}{'}'}</div>`;
+            const icon = L.divIcon({{html: html, className:'smbg-divicon', iconSize:[28,28], iconAnchor:[14,14]}});
+            const marker = L.marker(latlng, {{icon}});
+            marker.on('click', (e) => {{
+              openDrawerWithProps(feature.properties);
+              e.originalEvent.cancelBubble = true;
+              if (e.originalEvent.stopPropagation) e.originalEvent.stopPropagation();
+            }});
+            return marker;
+          }}
+        }}).addTo(map);
+
+        map.on('click', function() {{ closeDrawer(); }});
+      }}
+
+      // Start after DOM ready
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {{
+        setTimeout(boot, 0);
+      }} else {{
+        document.addEventListener('DOMContentLoaded', boot);
+      }}
     </script>
     '''
 
