@@ -208,6 +208,9 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
     gj = build_geojson(df_valid, ref_col, range_cols)
     data_json = json.dumps(gj, ensure_ascii=False)
 
+    # Get the exact map variable name to bind reliably
+    map_var = m.get_name()
+
     css = f'''
     <style>
       @font-face {{
@@ -245,6 +248,11 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
     <script>
       const SMBG_DATA = {data_json};
       const COL_ORDER = {json.dumps(range_cols, ensure_ascii=False)};
+      const MAP_VAR = '{map_var}';
+
+      function getMap() {{
+        return window[MAP_VAR] || null;
+      }}
 
       function isMeaningful(v) {{
         if (v === null || v === undefined) return false;
@@ -285,24 +293,15 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
         }});
         drawer.classList.add('open');
       }}
+
       function closeDrawer() {{
         ensureDrawer();
         drawer.classList.remove('open');
       }}
 
-      function getLeafletMap() {{
-        for (const k in window) {{
-          if (k.startsWith('map_') && window[k] && typeof window[k].on === 'function') {{
-            return window[k];
-          }}
-        }}
-        return null;
-      }}
-
       function boot() {{
-        const map = getLeafletMap();
+        const map = getMap();
         if (!map) {{ setTimeout(boot, 50); return; }}
-        window.map = map;
 
         const gj = L.geoJSON(SMBG_DATA, {{
           pointToLayer: function(feature, latlng) {{
@@ -319,10 +318,13 @@ def render_map_with_drawer(df_valid: pd.DataFrame, range_cols, ref_col: str | No
           }}
         }}).addTo(map);
 
+        // Close on background click
         map.on('click', function() {{ closeDrawer(); }});
+
+        // Keep France center (re-assert after layer add to avoid auto-fit)
+        map.setView([46.603354, 1.888334], 6, {{animate:false}});
       }}
 
-      // Start after DOM ready
       if (document.readyState === 'complete' || document.readyState === 'interactive') {{
         setTimeout(boot, 0);
       }} else {{
