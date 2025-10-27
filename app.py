@@ -12,14 +12,14 @@ import folium
 from streamlit.components.v1 import html as st_html
 
 # ================== PAGE LAYOUT ==================
-st.set_page_config(page_title='SMBG Carte (Leaflet Mapnik + Drawer)', layout='wide')
+st.set_page_config(page_title='SMBG Carte (Drawer vide)', layout='wide')
 DEFAULT_LOCAL_PATH = 'data/Liste_des_lots.xlsx'
 LOGO_BLUE = '#05263d'
 
-# Left sidebar placeholder (fixed 275px)
+# Volet gauche (réservé filtres) fixe 275px
 st.sidebar.markdown('### Filtres (à venir)')
 
-# Fullscreen, no scroll
+# Plein écran, pas de scroll global
 st.markdown('''
 <style>
   html, body {height:100%; overflow:hidden;}
@@ -31,7 +31,7 @@ st.markdown('''
 </style>
 ''', unsafe_allow_html=True)
 
-# ================== HELPERS ==================
+# ================== HELPERS: Excel ==================
 def normalize_excel_url(url: str) -> str:
     if not url: return url
     url = url.strip()
@@ -72,11 +72,7 @@ def load_excel() -> pd.DataFrame:
         st.stop()
     return pd.read_excel(DEFAULT_LOCAL_PATH)
 
-def html_attr_escape(s: str) -> str:
-    # Safe escape for embedding JSON in HTML attribute
-    return s.replace('&', '&amp;').replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
-
-# ================== GEOCODING ==================
+# ================== GEOCODING (validé) ==================
 @st.cache_data(show_spinner=False)
 def resolve_redirect(url: str) -> str:
     try:
@@ -171,14 +167,14 @@ def geocode_best_effort(address: str, gmap_url: str):
     except Exception:
         return None, None
 
-# ================== MAP RENDER (pins via Python) ==================
+# ================== MAP (pins via Python) ==================
 def build_mapping(df):
     cols = list(df.columns)
     start_idx, end_idx = 6, 33  # G..AH
     slice_cols = cols[start_idx:end_idx+1] if len(cols) > end_idx else cols[start_idx:]
     return {'range_cols': slice_cols}
 
-def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
+def render_map(df_valid: pd.DataFrame, ref_col: str | None):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
 
     m = folium.Map(
@@ -199,102 +195,59 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
 
     group = folium.FeatureGroup(name='Annonces').add_to(m)
 
-    PIN_CSS = f'background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:700;'
+    pin_css = 'background:%s; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%%; text-align:center; font-size:11px; font-weight:700;' % LOGO_BLUE
 
     for _, row in df_valid.iterrows():
         lat, lon = float(row['_lat']), float(row['_lon'])
         ref_text = str(row.get(ref_col, '')) if ref_col else ''
-        props = {}
-        for col in range_cols:
-            val = row.get(col, '')
-            if pd.isna(val): val = ''
-            props[col] = str(val)
-        if ref_col:
-            props['_ref'] = ref_text
-        # Safely embed JSON as a data-attribute
-        data_props = html_attr_escape(json.dumps(props, ensure_ascii=False))
-        html_div = f'<div class="smbg-pin" data-props="{data_props}">{ref_text}</div>'
+        html_div = f'<div class="smbg-pin">{ref_text}</div>'
         icon = folium.DivIcon(html=html_div, class_name='smbg-divicon', icon_size=(28,28), icon_anchor=(14,14))
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
+    # Drawer (vide) + stylage
     css = f'''
     <style>
-      @font-face {{ font-family: 'Futura'; src: local('Futura'); }}
       .smbg-divicon {{ background: transparent; border: none; }}
+      .smbg-pin {{ {pin_css} }}
+      .leaflet-marker-icon {{ cursor: pointer; }}
+
       .smbg-drawer {{
         position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;
-        font-family: 'Futura', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
         box-shadow: -12px 0 24px rgba(0,0,0,0.08);
         border-left: 1px solid rgba(0,0,0,0.06);
         transform: translateX(100%);
         transition: transform 220ms ease-in-out;
-        display:flex; flex-direction:column;
         z-index: 9999;
       }}
       .smbg-drawer.open {{ transform: translateX(0%); }}
-      .smbg-drawer-header {{ padding:12px 14px; font-weight:700; font-size:14px; color:#0f172a; border-bottom:1px solid rgba(0,0,0,0.06);}}
-      .smbg-drawer-body {{ padding:10px 14px; overflow-y:auto; }}
-      .smbg-kv {{ margin-bottom:10px; }}
-      .smbg-kv .k {{ font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.02em; }}
-      .smbg-kv .v {{ font-size:14px; color:#0f172a; font-weight:600; margin-top:2px; word-break:break-word; }}
-      .smbg-link {{ color:{LOGO_BLUE}; text-decoration:none; font-weight:700; }}
-      .leaflet-container {{ background:#e6e9ef; }}
-      .smbg-pin {{ {PIN_CSS} }}
-      .leaflet-marker-icon {{ cursor: pointer; }}
     </style>
     '''
     js = '''
     <script>
-      function isMeaningful(v){
-        if(v===null||v===undefined) return false;
-        const s=String(v).trim();
-        return s!=='' && s!=='/' && s!=='-';
-      }
-      function buildRowHTML(label,value){
-        if(/^https?:\/\//i.test(value) && /google\./i.test(value)){
-          return `<div class="smbg-kv"><div class="k">${label}</div><div class="v"><a href="${value}" target="_blank" class="smbg-link">Ouvrir dans Google Maps</a></div></div>`;
-        }
-        return `<div class="smbg-kv"><div class="k">${label}</div><div class="v">${value}</div></div>`;
-      }
-      let drawer, body, header;
+      let drawer;
       function ensureDrawer(){
         drawer = document.querySelector('.smbg-drawer');
         if(!drawer){
           drawer = document.createElement('div');
           drawer.className = 'smbg-drawer';
-          drawer.innerHTML = '<div class="smbg-drawer-header">Détail de l’annonce</div><div class="smbg-drawer-body"></div>';
+          // drawer SANS contenu : tout blanc
           document.body.appendChild(drawer);
         }
-        header = drawer.querySelector('.smbg-drawer-header');
-        body = drawer.querySelector('.smbg-drawer-body');
       }
-      function openDrawerWithProps(props){
+      function openDrawerBlank(){
         ensureDrawer();
-        const title = props._ref ? `Annonce ${props._ref}` : 'Détail de l’annonce';
-        header.textContent = title;
-        body.innerHTML = '';
-        // Respect order G..AH by reading the DOM-embedded JSON (already in Python order):
-        for(const [k,v] of Object.entries(props)){
-          if(k==='_ref') continue;
-          if(isMeaningful(v)){
-            body.insertAdjacentHTML('beforeend', buildRowHTML(k, String(v)));
-          }
-        }
         drawer.classList.add('open');
       }
       function closeDrawer(){
         ensureDrawer();
         drawer.classList.remove('open');
       }
-      function attachHandlers(){
+      function attach(){
         document.querySelectorAll('.smbg-pin').forEach(el=>{
           el.addEventListener('click', (e)=>{
             e.preventDefault();
             e.stopPropagation();
-            try{
-              const props = JSON.parse(el.getAttribute('data-props') || '{}');
-              openDrawerWithProps(props);
-            }catch(err){ console.warn('Bad props', err); }
+            openDrawerBlank();
           }, {passive:true});
         });
         const map = (function(){
@@ -303,24 +256,25 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None, range_cols):
           }
           return null;
         })();
-        if(map){ map.on('click', ()=> closeDrawer()); }
+        if(map){
+          map.on('click', ()=> closeDrawer());
+        }
       }
       if(document.readyState==='complete' || document.readyState==='interactive'){
-        setTimeout(attachHandlers, 0);
+        setTimeout(attach, 0);
       }else{
-        document.addEventListener('DOMContentLoaded', attachHandlers);
+        document.addEventListener('DOMContentLoaded', attach);
       }
     </script>
     '''
     folium.Element(css).add_to(m)
     folium.Element(js).add_to(m)
-
     return m.get_root().render()
 
 def main():
     df = load_excel()
 
-    # Detect columns
+    # Colonnes utiles déjà en place dans la version validée
     def first_match(cands):
         for c in cands:
             if c in df.columns: return c
@@ -328,11 +282,11 @@ def main():
     actif_col = first_match(['Actif','Active','AO'])
     lat_col   = first_match(['Latitude','Lat','AI'])
     lon_col   = first_match(['Longitude','Lon','Lng','Long','AJ'])
+    ref_col   = first_match(['Référence annonce','Référence','AM'])
     addr_col  = first_match(['Adresse','Adresse complète','G'])
     gmap_col  = first_match(['Lien Google Maps','Google Maps','Maps','H'])
-    ref_col   = first_match(['Référence annonce','Référence','AM'])
 
-    # Active filter
+    # Filtre actif
     if actif_col is None:
         df['_actif'] = True
     else:
@@ -345,7 +299,7 @@ def main():
             return False
         df['_actif'] = df[actif_col].apply(norm)
 
-    # Lat/Lon ensure
+    # Lat/Lon
     if lat_col is None: lat_col = 'Latitude'; df[lat_col] = None
     if lon_col is None: lon_col = 'Longitude'; df[lon_col] = None
     lat_num = pd.to_numeric(df[lat_col], errors='coerce')
@@ -367,12 +321,7 @@ def main():
         st.warning('Aucune ligne active avec coordonnées valides.')
         st.stop()
 
-    # Columns G..AH
-    mapcols = build_mapping(df_valid)
-    range_cols = mapcols['range_cols']
-
-    # Render
-    html_str = render_map(df_valid, ref_col, range_cols)
+    html_str = render_map(df_valid, ref_col)
     st_html(html_str, height=1080, scrolling=False)
 
 if __name__ == '__main__':
