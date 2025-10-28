@@ -2,7 +2,6 @@
 import os
 import io
 import re
-import json
 import time
 import urllib.parse as up
 import pandas as pd
@@ -11,51 +10,56 @@ import requests
 import folium
 from streamlit.components.v1 import html as st_html
 
-st.set_page_config(page_title='SMBG Carte (version validée)', layout='wide')
-DEFAULT_LOCAL_PATH = 'data/Liste_des_lots.xlsx'
-LOGO_BLUE = '#05263d'
+# ================== PAGE LAYOUT ==================
+st.set_page_config(page_title="SMBG Carte (Leaflet Mapnik - Fast)", layout="wide")
+DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
+LOGO_BLUE = "#05263d"
 
-st.sidebar.markdown('### Filtres (à venir)')
+st.sidebar.markdown("### Filtres (à venir)")
 
-st.markdown('''
-<style>
-  html, body {height:100%; overflow:hidden;}
-  [data-testid="stAppViewContainer"]{padding:0; margin:0; height:100vh; overflow:hidden;}
-  [data-testid="stMain"]{padding:0; margin:0; height:100vh; overflow:hidden;}
-  .block-container{padding:0 !important; margin:0 !important;}
-  [data-testid="stSidebar"]{min-width:275px; max-width:275px;}
-  header, footer {visibility:hidden; height:0;}
-</style>
-''', unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+      html, body {height:100%; overflow:hidden;}
+      [data-testid="stAppViewContainer"]{padding:0; margin:0; height:100vh; overflow:hidden;}
+      [data-testid="stMain"]{padding:0; margin:0; height:100vh; overflow:hidden;}
+      .block-container{padding:0 !important; margin:0 !important;}
+      [data-testid="stSidebar"]{min-width:275px; max-width:275px;}
+      header, footer {visibility:hidden; height:0;}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+# ================== HELPERS: Excel Loading ==================
 def normalize_excel_url(url: str) -> str:
     if not url: return url
     url = url.strip()
-    url = re.sub(r'https://github\.com/(.+)/blob/([^ ]+)', r'https://github.com/\1/raw/\2', url)
+    url = re.sub(r"https://github\.com/(.+)/blob/([^ ]+)", r"https://github.com/\1/raw/\2", url)
     return url
 
 def is_github_folder(url: str) -> bool:
-    return bool(re.match(r'^https://github\.com/[^/]+/[^/]+/tree/[^/]+/.+', url))
+    return bool(re.match(r"^https://github\.com/[^/]+/[^/]+/tree/[^/]+/.+", url))
 
 def folder_to_api(url: str) -> str:
-    m = re.match(r'^https://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.*)$', url)
-    if not m: return ''
+    m = re.match(r"^https://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.*)$", url)
+    if not m: return ""
     owner, repo, branch, path = m.groups()
-    return f'https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}'
+    return f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}"
 
 def fetch_first_excel_from_folder(url: str) -> bytes:
     api_url = folder_to_api(url)
     r = requests.get(api_url, timeout=20); r.raise_for_status()
     entries = r.json()
-    excel_items = [e for e in entries if e.get('type')=='file' and e.get('name','').lower().endswith(('.xlsx','.xls'))]
+    excel_items = [e for e in entries if e.get("type")=="file" and e.get("name","").lower().endswith((".xlsx",".xls"))]
     if not excel_items:
-        raise FileNotFoundError('Aucun .xlsx trouvé dans ce dossier GitHub.')
-    excel_items.sort(key=lambda e: (not e['name'].lower().endswith('.xlsx'), e['name'].lower()))
-    raw = requests.get(excel_items[0]['download_url'], timeout=30); raw.raise_for_status()
+        raise FileNotFoundError("Aucun .xlsx trouvé dans ce dossier GitHub.")
+    excel_items.sort(key=lambda e: (not e["name"].lower().endswith(".xlsx"), e["name"].lower()))
+    raw = requests.get(excel_items[0]["download_url"], timeout=30); raw.raise_for_status()
     return raw.content
 
 def load_excel() -> pd.DataFrame:
-    excel_url = st.secrets.get('EXCEL_URL', os.environ.get('EXCEL_URL', '')).strip()
+    excel_url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL", "")).strip()
     excel_url = normalize_excel_url(excel_url)
     if excel_url:
         if is_github_folder(excel_url):
@@ -68,49 +72,83 @@ def load_excel() -> pd.DataFrame:
         st.stop()
     return pd.read_excel(DEFAULT_LOCAL_PATH)
 
-@st.cache_data(show_spinner=False)
-def resolve_redirect(url: str) -> str:
-    try:
-        r = requests.get(url, timeout=15, allow_redirects=True, headers={'User-Agent':'Mozilla/5.0'})
-        return r.url
-    except Exception:
-        return url
+# ================== COLUMN DETECTION ==================
+def find_col(df, *candidates):
+    cols = {str(c).strip(): c for c in df.columns}
+    lower = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand in cols: return cols[cand]
+        if cand.lower() in lower: return lower[cand.lower()]
+    for c in df.columns:
+        name = str(c).lower()
+        for cand in candidates:
+            if cand.lower() in name: return c
+    return None
 
+def build_mapping(df):
+    m = {}
+    m["adresse"]     = find_col(df, "Adresse", "Adresse complète", "G")
+    m["lat"]         = find_col(df, "Latitude", "Lat", "AI")
+    m["lon"]         = find_col(df, "Longitude", "Lon", "Lng", "Long", "AJ")
+    m["actif"]       = find_col(df, "Actif", "Active", "AO")
+    m["ref"]         = find_col(df, "Référence annonce", "Référence", "AM")
+    m["gmap"]        = find_col(df, "Lien Google Maps", "Google Maps", "Maps", "H")
+    return m
+
+def normalize_bool(val):
+    if isinstance(val, str): return val.strip().lower() in ["oui","yes","true","1","vrai"]
+    if isinstance(val, (int, float)):
+        try: return int(val)==1
+        except Exception: return False
+    if isinstance(val, bool): return val
+    return False
+
+def coerce_num(series): return pd.to_numeric(series, errors="coerce")
+
+# ================== GEOCODING (fast & persistent-cache) ==================
 def clean_address(a: str) -> str:
     a = re.sub(r'\s+', ' ', str(a)).strip()
     a = re.sub(r'\s*-\s*', ' ', a)
     if a and 'france' not in a.lower():
-        a = f'{a}, France'
+        a = f"{a}, France"
     return a
 
+@st.cache_data(show_spinner=False)
+def resolve_redirect(url: str) -> str:
+    try:
+        r = requests.get(url, timeout=15, allow_redirects=True, headers={"User-Agent":"Mozilla/5.0"})
+        return r.url
+    except Exception:
+        return url
+
 def extract_lat_lon_from_gmap(url: str):
-    if not isinstance(url, str) or url.strip() == '': return None, None
+    if not isinstance(url, str) or url.strip() == "": return None, None
     url = url.strip()
-    if re.search(r'(goo\.gl|maps\.app\.goo\.gl)', url): url = resolve_redirect(url)
+    if re.search(r"(goo\.gl|maps\.app\.goo\.gl)", url): url = resolve_redirect(url)
     parsed = up.urlparse(url); qs = up.parse_qs(parsed.query)
-    m = re.search(r'@([0-9.\-]+),([0-9.\-]+)', url)
+    m = re.search(r"@([0-9.\-]+),([0-9.\-]+)", url)
     if m:
         try: return float(m.group(1)), float(m.group(2))
         except: pass
-    m = re.search(r'!3d([0-9.\-]+)!4d([0-9.\-]+)', url)
+    m = re.search(r"!3d([0-9.\-]+)!4d([0-9.\-]+)", url)
     if m:
         try: return float(m.group(1)), float(m.group(2))
         except: pass
-    if 'll' in qs:
+    if "ll" in qs:
         try:
-            lat, lon = qs['ll'][0].split(','); return float(lat), float(lon)
+            lat, lon = qs["ll"][0].split(","); return float(lat), float(lon)
         except: pass
-    if 'q' in qs:
-        qv = qs['q'][0].replace('loc:', '').strip()
-        m = re.match(r'\s*([0-9.\-]+)\s*,\s*([0-9.\-]+)\s*$', qv)
+    if "q" in qs:
+        qv = qs["q"][0].replace("loc:", "").strip()
+        m = re.match(r"\s*([0-9.\-]+)\s*,\s*([0-9.\-]+)\s*$", qv)
         if m:
             try: return float(m.group(1)), float(m.group(2))
             except: pass
-    if 'center' in qs:
+    if "center" in qs:
         try:
-            lat, lon = qs['center'][0].split(','); return float(lat), float(lon)
+            lat, lon = qs["center"][0].split(","); return float(lat), float(lon)
         except: pass
-    m = re.search(r'/place/([0-9.\-]+),([0-9.\-]+)', parsed.path)
+    m = re.search(r"/place/([0-9.\-]+),([0-9.\-]+)", parsed.path)
     if m:
         try: return float(m.group(1)), float(m.group(2))
         except: pass
@@ -126,43 +164,84 @@ def extract_query_from_gmap(url: str):
     except Exception:
         return None
 
+# Persisted success cache across sessions (st.cache_data)
 @st.cache_data(show_spinner=False)
-def geocode_one(addr: str, email: str = ''):
+def geocode_success_cached(address: str, gmap_url: str):
+    """Return (lat, lon) for a given address/link if successful. If not found, raise to avoid caching failure."""
+    # 1) direct coords in Google URL
+    lat, lon = extract_lat_lon_from_gmap(gmap_url)
+    if lat is not None and lon is not None:
+        return lat, lon
+
+    # 2) geocode q= from Google URL
+    q = extract_query_from_gmap(gmap_url)
+    if q:
+        cla = clean_address(q)
+        lat, lon = geocode_one(cla)
+        if lat is not None and lon is not None:
+            return lat, lon
+
+    # 3) geocode cleaned address (retry)
+    cla = clean_address(address)
+    for _ in range(2):
+        lat, lon = geocode_one(cla)
+        if lat is not None and lon is not None:
+            return lat, lon
+        time.sleep(1.3)  # backoff only when we call Nominatim
+    # Fail: raise so Streamlit does NOT cache the failure
+    raise RuntimeError("geocode_failed")
+
+# Session cache to avoid duplicate calls within the same page view
+if "geo_cache" not in st.session_state:
+    st.session_state["geo_cache"] = {}
+
+def geocode_best_effort(address: str, gmap_url: str):
+    key = (address or "").strip() + "|" + (gmap_url or "").strip()
+    if key in st.session_state["geo_cache"]:
+        return st.session_state["geo_cache"][key]
+    try:
+        lat, lon = geocode_success_cached(address, gmap_url)
+        st.session_state["geo_cache"][key] = (lat, lon)
+        return lat, lon
+    except Exception:
+        return None, None
+
+def geocode_one(addr: str, email: str = ""):
     if not addr: return None, None
-    base = 'https://nominatim.openstreetmap.org/search'
-    params = {'q': addr, 'format': 'json', 'limit': 1, 'countrycodes': 'fr'}
-    ua = f'SMBG-CARTE/1.0 ({email})' if email else 'SMBG-CARTE/1.0 (contact@smbg-conseil.fr)'
-    headers = {'User-Agent': ua, 'Accept-Language': 'fr'}
+    base = "https://nominatim.openstreetmap.org/search"
+    params = {"q": addr, "format": "json", "limit": 1, "countrycodes": "fr"}
+    ua = f"SMBG-CARTE/1.0 ({email})" if email else "SMBG-CARTE/1.0 (contact@smbg-conseil.fr)"
+    headers = {"User-Agent": ua, "Accept-Language": "fr"}
     try:
         r = requests.get(base, params=params, headers=headers, timeout=20); r.raise_for_status()
         data = r.json()
-        if data: return float(data[0]['lat']), float(data[0]['lon'])
+        if data: return float(data[0]["lat"]), float(data[0]["lon"])
     except Exception:
         return None, None
     return None, None
 
-@st.cache_data(show_spinner=False)
-def geocode_success_cached(address: str, gmap_url: str):
-    lat, lon = extract_lat_lon_from_gmap(gmap_url)
-    if lat is not None and lon is not None: return lat, lon
-    q = extract_query_from_gmap(gmap_url)
-    if q:
-        lat, lon = geocode_one(clean_address(q))
-        if lat is not None and lon is not None: return lat, lon
-    addr = clean_address(address)
-    for _ in range(2):
-        lat, lon = geocode_one(addr)
-        if lat is not None and lon is not None: return lat, lon
-        time.sleep(1.2)
-    raise RuntimeError('geocode_failed')
+def ensure_latlon(df, mapcols):
+    latc, lonc = mapcols["lat"], mapcols["lon"]
+    gmapc, addrc = mapcols["gmap"], mapcols["adresse"]
+    if latc is None: latc = "Latitude"; df[latc] = None; mapcols["lat"] = latc
+    if lonc is None: lonc = "Longitude"; df[lonc] = None; mapcols["lon"] = lonc
+    lat_num = pd.to_numeric(df[latc], errors="coerce"); lon_num = pd.to_numeric(df[lonc], errors="coerce")
+    need = lat_num.isna() | lon_num.isna()
+    to_fill = df[need].copy()
+    if not to_fill.empty:
+        email = st.secrets.get("NOMINATIM_EMAIL", os.environ.get("NOMINATIM_EMAIL", ""))
+        for idx, row in to_fill.iterrows():
+            lat, lon = geocode_best_effort(
+                address=str(row.get(addrc, "")),
+                gmap_url=str(row.get(gmapc, "")) if gmapc else ""
+            )
+            df.loc[idx, mapcols["lat"]] = lat
+            df.loc[idx, mapcols["lon"]] = lon
+    return df
 
-def geocode_best_effort(address: str, gmap_url: str):
-    try:
-        return geocode_success_cached(address, gmap_url)
-    except Exception:
-        return None, None
+# ================== MAP (Leaflet via Folium, iframe) ==================
 
-def render_map(df_valid: pd.DataFrame, ref_col: str | None):
+def build_map(df_valid: pd.DataFrame, ref_col: str | None):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
 
     m = folium.Map(
@@ -172,85 +251,54 @@ def render_map(df_valid: pd.DataFrame, ref_col: str | None):
         control_scale=False,
         zoom_control=True
     )
+
     folium.TileLayer(
-        tiles='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        attr='© OpenStreetMap contributors',
-        name='OpenStreetMap.Mapnik',
+        tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attr="© OpenStreetMap contributors",
+        name="OpenStreetMap.Mapnik",
         max_zoom=19,
         min_zoom=0,
         opacity=1.0
     ).add_to(m)
 
-    group = folium.FeatureGroup(name='Annonces').add_to(m)
-    pin_css = f'background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:700;'
+    group = folium.FeatureGroup(name="Annonces").add_to(m)
 
-    for _, row in df_valid.iterrows():
-        lat, lon = float(row['_lat']), float(row['_lon'])
-        ref_text = str(row.get(ref_col, '')) if ref_col else ''
-        html_div = f'<div class="smbg-pin">{ref_text}</div>'
-        icon = folium.DivIcon(html=html_div, class_name='smbg-divicon', icon_size=(28,28), icon_anchor=(14,14))
+    CSS = f"background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
+    for _, r in df_valid.iterrows():
+        lat, lon = float(r["_lat"]), float(r["_lon"])
+        ref_text = str(r[ref_col]) if ref_col else ""
+        icon = folium.DivIcon(html=f'<div style="{CSS}">{ref_text}</div>', class_name="smbg-divicon", icon_size=(28,28), icon_anchor=(14,14))
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
-    css = f'''
-    <style>
-      .smbg-divicon {{ background: transparent; border: none; }}
-      .smbg-pin {{ {pin_css} }}
-      .leaflet-marker-icon {{ cursor: default; }}
-      .leaflet-container {{ background:#e6e9ef; }}
-    </style>
-    '''
-    folium.Element(css).add_to(m)
-    return m.get_root().render()
+    folium.Element('<style>\n  .smbg-divicon { background: transparent; border: none; }\n  .leaflet-marker-icon { cursor: pointer; }\n  .smbg-drawer {\n    position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;\n    box-shadow: -12px 0 24px rgba(0,0,0,0.08);\n    border-left: 1px solid rgba(0,0,0,0.06);\n    transform: translateX(100%);\n    transition: transform 220ms ease-in-out;\n    z-index: 9999;\n  }\n  .smbg-drawer.open { transform: translateX(0%); }\n</style>').add_to(m)
+    folium.Element("<script>\n  let drawer;\n  function ensureDrawer(){\n    drawer = document.querySelector('.smbg-drawer');\n    if(!drawer){\n      drawer = document.createElement('div');\n      drawer.className = 'smbg-drawer';\n      document.body.appendChild(drawer);\n    }\n  }\n  function openDrawerBlank(){\n    ensureDrawer();\n    drawer.classList.add('open');\n  }\n  function closeDrawer(){\n    ensureDrawer();\n    drawer.classList.remove('open');\n  }\n  function getLeafletMap(){\n    for(const k in window){\n      if(k.startsWith('map_') && window[k] && typeof window[k].eachLayer==='function'){\n        return window[k];\n      }\n    }\n    return null;\n  }\n  function attach(){\n    const map = getLeafletMap();\n    if(!map){ setTimeout(attach, 50); return; }\n    map.eachLayer(function(layer){\n      if(layer && typeof layer.on==='function' && typeof layer.getLatLng==='function'){\n        layer.on('click', function(e){\n          if (window.L && window.L.DomEvent && e) { window.L.DomEvent.stop(e); }\n          openDrawerBlank();\n        });\n      }\n    });\n    map.on('click', ()=> closeDrawer());\n  }\n  if(document.readyState==='complete' || document.readyState==='interactive'){\n    setTimeout(attach, 0);\n  }else{\n    document.addEventListener('DOMContentLoaded', attach);\n  }\n</script>").add_to(m)
+
+    return m
+
 
 def main():
     df = load_excel()
+    mapcols = build_mapping(df)
 
-    def first_match(cands):
-        for c in cands:
-            if c in df.columns: return c
-        return None
-    actif_col = first_match(['Actif','Active','AO'])
-    lat_col   = first_match(['Latitude','Lat','AI'])
-    lon_col   = first_match(['Longitude','Lon','Lng','Long','AJ'])
-    addr_col  = first_match(['Adresse','Adresse complète','G'])
-    gmap_col  = first_match(['Lien Google Maps','Google Maps','Maps','H'])
-    ref_col   = first_match(['Référence annonce','Référence','AM'])
+    actif_col = mapcols["actif"]
+    df["_actif"] = True if actif_col is None else df[actif_col].apply(normalize_bool)
 
-    if actif_col is None:
-        df['_actif'] = True
-    else:
-        def norm(v):
-            if isinstance(v, str): return v.strip().lower() in {'oui','yes','true','1','vrai'}
-            if isinstance(v, (int,float)):
-                try: return int(v)==1
-                except: return False
-            if isinstance(v, bool): return v
-            return False
-        df['_actif'] = df[actif_col].apply(norm)
+    df = ensure_latlon(df, mapcols)
 
-    if lat_col is None: lat_col = 'Latitude'; df[lat_col] = None
-    if lon_col is None: lon_col = 'Longitude'; df[lon_col] = None
-    lat_num = pd.to_numeric(df[lat_col], errors='coerce')
-    lon_num = pd.to_numeric(df[lon_col], errors='coerce')
-    need = lat_num.isna() | lon_num.isna()
-    if need.any():
-        for idx, row in df[need].iterrows():
-            addr = str(row.get(addr_col, '')) if addr_col else ''
-            gmap = str(row.get(gmap_col, '')) if gmap_col else ''
-            lat, lon = geocode_best_effort(addr, gmap)
-            df.loc[idx, lat_col] = lat
-            df.loc[idx, lon_col] = lon
-
-    df = df[df['_actif']].copy()
-    df['_lat'] = pd.to_numeric(df[lat_col], errors='coerce')
-    df['_lon'] = pd.to_numeric(df[lon_col], errors='coerce')
-    df_valid = df.dropna(subset=['_lat','_lon']).copy()
+    df = df[df["_actif"]].copy()
+    df["_lat"] = pd.to_numeric(df[mapcols["lat"]], errors="coerce")
+    df["_lon"] = pd.to_numeric(df[mapcols["lon"]], errors="coerce")
+    df_valid = df.dropna(subset=["_lat", "_lon"]).copy()
     if df_valid.empty:
-        st.warning('Aucune ligne active avec coordonnées valides.')
+        st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    html_str = render_map(df_valid, ref_col)
+    ref_col = mapcols.get("ref") if mapcols.get("ref") in df_valid.columns else None
+
+    m = build_map(df_valid, ref_col)
+
+    html_str = m.get_root().render()
     st_html(html_str, height=1080, scrolling=False)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
