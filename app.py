@@ -15,7 +15,7 @@ st.set_page_config(page_title="SMBG Carte — Leaflet (Mapnik)", layout="wide")
 LOGO_BLUE = "#05263d"
 
 st.markdown(
-    """
+    f"""
     <style>
       @font-face {font-family: "Futura"; src: local("Futura");}
       html, body {height:100%;}
@@ -24,16 +24,16 @@ st.markdown(
       .block-container{padding:0 !important; margin:0 !important;}
       header, footer {visibility:hidden; height:0;}
       .smbg-badge{background:#eeefe9; border:1px solid #d9d7cf; color:#333; padding:2px 8px; border-radius:10px; font-size:12px;}
-      .smbg-button{background:%(blue)s; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;}
-      .smbg-label{color:%(blue)s; font-weight:700;}
+      .smbg-button{background:#05263d; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;}
+      .smbg-label{color:#05263d; font-weight:700;}
       .smbg-drawer{height:calc(100vh - 24px); overflow:auto; padding:16px 20px 24px 20px; border-left:1px solid #e7e7e7; box-shadow:-8px 0 16px rgba(0,0,0,0.04);}
       .smbg-grid{display:grid; grid-template-columns: 1fr; gap:8px;}
-      .smbg-photo{width:100%%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
+      .smbg-photo{width:100%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
       .smbg-item{display:flex; gap:8px; align-items:flex-start;}
       .smbg-key{min-width:160px; color:#4b5563; font-weight:600;}
       .smbg-val{color:#111827;}
     </style>
-    """ % {"blue": LOGO_BLUE},
+    """,
     unsafe_allow_html=True
 )
 
@@ -215,7 +215,6 @@ def render_right_panel(df_valid: pd.DataFrame, mapcols: dict):
     # Reference selector (kept simple and robust)
     ref_col = mapcols.get("ref")
     refs = df_valid[ref_col].astype(str).tolist() if ref_col else [f"#{i+1}" for i in range(len(df_valid))]
-    default_idx = 0
     if "selected_ref" not in st.session_state:
         st.session_state["selected_ref"] = refs[0] if refs else ""
 
@@ -239,7 +238,7 @@ def render_right_panel(df_valid: pd.DataFrame, mapcols: dict):
     gmap_val = row.get(gmap_col) if gmap_col else None
     if isinstance(gmap_val, str) and gmap_val.strip():
         url = gmap_val.strip()
-        st.markdown(f'<a href="{url}" target="_blank"><button class="smbg-button">Ouvrir dans Google Maps</button></a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="{url}" target="_blank"><button class="smbg-button">Ouvrir dans Google Maps</button></a>', unsafe_allow_html=True)
 
     # Grid of fields (respect Excel order, hide '/', '-' and empty)
     # Build display list: take all columns except tech-like + photos + lat/lon + actif; and skip Google Maps (since it's a button)
