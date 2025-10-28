@@ -270,75 +270,92 @@ def build_map(df_valid: pd.DataFrame, ref_col: str | None):
         icon = folium.DivIcon(html=f'<div style="{CSS}">{ref_text}</div>', class_name="smbg-divicon", icon_size=(28,28), icon_anchor=(14,14))
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
-    folium.Element('<style>\n  .smbg-divicon { background: transparent; border: none; }\n  .leaflet-marker-icon { cursor: pointer; }\n  .smbg-drawer {\n    position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;\n    box-shadow: -12px 0 24px rgba(0,0,0,0.08);\n    border-left: 1px solid rgba(0,0,0,0.06);\n    transform: translateX(100%);\n    transition: transform 220ms ease-in-out;\n    z-index: 9999;\n  }\n  .smbg-drawer.open { transform: translateX(0%); }\n</style>').add_to(m)
-    folium.Element("<script>
-  let drawer;
-  function ensureDrawer(){
-    drawer = document.querySelector('.smbg-drawer');
-    if(!drawer){
-      drawer = document.createElement('div');
-      drawer.className = 'smbg-drawer';
-      document.body.appendChild(drawer);
-    }
-  }
-  function openDrawerBlank(){
-    ensureDrawer();
-    drawer.classList.add('open');
-  }
-  function closeDrawer(){
-    ensureDrawer();
-    drawer.classList.remove('open');
-  }
-  function getLeafletMap(){
-    for(const k in window){
-      if(k.startsWith('map_') && window[k] && typeof window[k].eachLayer==='function'){
-        return window[k];
+    css = """
+    <style>
+      .smbg-divicon { background: transparent; border: none; }
+      .leaflet-marker-icon { cursor: pointer; }
+      .smbg-drawer {
+        position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;
+        box-shadow: -12px 0 24px rgba(0,0,0,0.08);
+        border-left: 1px solid rgba(0,0,0,0.06);
+        transform: translateX(100%);
+        transition: transform 220ms ease-in-out;
+        z-index: 9999;
       }
-    }
-    return null;
-  }
-  function bindToLeafletMarkers(map){
-    try{
-      map.eachLayer(function(layer){
-        if(layer && typeof layer.on==='function' && typeof layer.getLatLng==='function' && !layer._smbgBound){
-          layer._smbgBound = true;
-          layer.on('click', function(e){
-            if (window.L && window.L.DomEvent && e) { window.L.DomEvent.stop(e); }
-            openDrawerBlank();
-          });
+      .smbg-drawer.open { transform: translateX(0%); }
+    </style>
+    """
+
+    js = """
+    <script>
+      let drawer;
+      function ensureDrawer(){
+        drawer = document.querySelector('.smbg-drawer');
+        if(!drawer){
+          drawer = document.createElement('div');
+          drawer.className = 'smbg-drawer';
+          document.body.appendChild(drawer);
         }
-      });
-    }catch(_){}
-  }
-  function bindToDomPins(){
-    document.querySelectorAll('.leaflet-marker-icon').forEach(el=>{
-      if(!el.dataset.smbgBound){
-        el.dataset.smbgBound = '1';
-        el.addEventListener('click', (e)=>{ e.stopPropagation(); openDrawerBlank(); }, {passive:true});
       }
-    });
-  }
-  function attach(){
-    const map = getLeafletMap();
-    if(!map){ setTimeout(attach, 50); return; }
-    // Initial bindings
-    bindToLeafletMarkers(map);
-    bindToDomPins();
-    // Re-bind on DOM changes (icons injected after render)
-    const obs = new MutationObserver(()=>{ bindToDomPins(); });
-    obs.observe(document.body, {childList:true, subtree:true});
-    // Close drawer on map background click
-    map.on('click', ()=> closeDrawer());
-  }
-  if(document.readyState==='complete' || document.readyState==='interactive'){
-    setTimeout(attach, 0);
-  }else{
-    document.addEventListener('DOMContentLoaded', attach);
-  }
-</script>").add_to(m)
+      function openDrawerBlank(){
+        ensureDrawer();
+        drawer.classList.add('open');
+      }
+      function closeDrawer(){
+        ensureDrawer();
+        drawer.classList.remove('open');
+      }
+      function getLeafletMap(){
+        for(const k in window){
+          if(k.startsWith('map_') && window[k] && typeof window[k].eachLayer==='function'){
+            return window[k];
+          }
+        }
+        return null;
+      }
+      function bindToLeafletMarkers(map){
+        try{
+          map.eachLayer(function(layer){
+            if(layer && typeof layer.on==='function' && typeof layer.getLatLng==='function' && !layer._smbgBound){
+              layer._smbgBound = true;
+              layer.on('click', function(e){
+                if (window.L && window.L.DomEvent && e) { window.L.DomEvent.stop(e); }
+                openDrawerBlank();
+              });
+            }
+          });
+        }catch(_){}
+      }
+      function bindToDomPins(){
+        document.querySelectorAll('.leaflet-marker-icon').forEach(el=>{
+          if(!el.dataset.smbgBound){
+            el.dataset.smbgBound = '1';
+            el.addEventListener('click', (e)=>{ e.stopPropagation(); openDrawerBlank(); }, {passive:true});
+          }
+        });
+      }
+      function attach(){
+        const map = getLeafletMap();
+        if(!map){ setTimeout(attach, 50); return; }
+        bindToLeafletMarkers(map);
+        bindToDomPins();
+        const obs = new MutationObserver(()=>{ bindToDomPins(); });
+        obs.observe(document.body, {childList:true, subtree:true});
+        map.on('click', ()=> closeDrawer());
+      }
+      if(document.readyState==='complete' || document.readyState==='interactive'){
+        setTimeout(attach, 0);
+      }else{
+        document.addEventListener('DOMContentLoaded', attach);
+      }
+    </script>
+    """
+
+    # Inject the drawer assets
+    folium.Element(css).add_to(m)
+    folium.Element(js).add_to(m)
 
     return m
-
 
 def main():
     df = load_excel()
