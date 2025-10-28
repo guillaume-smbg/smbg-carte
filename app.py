@@ -240,7 +240,6 @@ def ensure_latlon(df, mapcols):
     return df
 
 # ================== MAP (Leaflet via Folium, iframe) ==================
-
 def build_map(df_valid: pd.DataFrame, ref_col: str | None):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
 
@@ -267,14 +266,11 @@ def build_map(df_valid: pd.DataFrame, ref_col: str | None):
     for _, r in df_valid.iterrows():
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r[ref_col]) if ref_col else ""
-        icon = folium.DivIcon(html=f'<div style="{CSS}">{ref_text}</div>', class_name="smbg-divicon", icon_size=(28,28), icon_anchor=(14,14))
+        html = f'<div style="{CSS}">{ref_text}</div>'
+        icon = folium.DivIcon(html=html)
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
-    folium.Element('<style>\n  .smbg-divicon { background: transparent; border: none; }\n  .leaflet-marker-icon { cursor: pointer; }\n  .smbg-drawer {\n    position: absolute; top:0; right:0; width:275px; height:100vh; background:#fff;\n    box-shadow: -12px 0 24px rgba(0,0,0,0.08);\n    border-left: 1px solid rgba(0,0,0,0.06);\n    transform: translateX(100%);\n    transition: transform 220ms ease-in-out;\n    z-index: 9999;\n  }\n  .smbg-drawer.open { transform: translateX(0%); }\n</style>').add_to(m)
-    folium.Element("<script>\n  let drawer;\n  function ensureDrawer(){\n    drawer = document.querySelector('.smbg-drawer');\n    if(!drawer){\n      drawer = document.createElement('div');\n      drawer.className = 'smbg-drawer';\n      document.body.appendChild(drawer);\n    }\n  }\n  function openDrawerBlank(){\n    ensureDrawer();\n    drawer.classList.add('open');\n  }\n  function closeDrawer(){\n    ensureDrawer();\n    drawer.classList.remove('open');\n  }\n  function getLeafletMap(){\n    for(const k in window){\n      if(k.startsWith('map_') && window[k] && typeof window[k].eachLayer==='function'){\n        return window[k];\n      }\n    }\n    return null;\n  }\n  function attach(){\n    const map = getLeafletMap();\n    if(!map){ setTimeout(attach, 50); return; }\n    map.eachLayer(function(layer){\n      if(layer && typeof layer.on==='function' && typeof layer.getLatLng==='function'){\n        layer.on('click', function(e){\n          if (window.L && window.L.DomEvent && e) { window.L.DomEvent.stop(e); }\n          openDrawerBlank();\n        });\n      }\n    });\n    map.on('click', ()=> closeDrawer());\n  }\n  if(document.readyState==='complete' || document.readyState==='interactive'){\n    setTimeout(attach, 0);\n  }else{\n    document.addEventListener('DOMContentLoaded', attach);\n  }\n</script>").add_to(m)
-
     return m
-
 
 def main():
     df = load_excel()
