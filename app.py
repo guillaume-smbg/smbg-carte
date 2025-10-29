@@ -22,7 +22,6 @@ CSS = f"""
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
   [data-testid="stSidebar"] .smbg-scroll {{ max-height: 190px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-  [data-testid="stSidebar"] .smbg-indent {{ padding-left: 26px; }} /* stronger indent */
   [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
@@ -103,6 +102,13 @@ def drawer(row: pd.Series):
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
+def clear_all_filters_once():
+    if not st.session_state.get("_smbg_cleared", False):
+        for k in list(st.session_state.keys()):
+            if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
+                del st.session_state[k]
+        st.session_state["_smbg_cleared"] = True
+
 def region_department_nested(df: pd.DataFrame):
     sel_regions: List[str] = []
     sel_deps: List[str] = []
@@ -113,14 +119,14 @@ def region_department_nested(df: pd.DataFrame):
         if st.checkbox(reg, key=f"reg_{reg}"):
             sel_regions.append(reg)
             deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
-            if deps:
-                st.markdown('<div class="smbg-indent">', unsafe_allow_html=True)
-                for dep in deps:
-                    label = f"↳ {dep}"
-                    st.checkbox(label, key=f"dep_{reg}_{dep}")
-                    if st.session_state.get(f"dep_{reg}_{dep}"):
+            # Indented rendering via columns (robust)
+            for dep in deps:
+                cpad, cbox = st.columns([1, 10])
+                with cpad:
+                    st.write("")  # spacer for visual indent
+                with cbox:
+                    if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
                         sel_deps.append(dep)
-                st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     return sel_regions, sel_deps
 
@@ -129,10 +135,12 @@ def main():
     if df is None or df.empty:
         st.warning("Excel vide ou introuvable."); st.stop()
 
+    # Clear filters on first load so all pins show
+    clear_all_filters_once()
+
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
-    # normalized helper cols
     df["_typologie_n"] = df.get("Typologie", "").astype(str).map(norm_txt)
     df["_empl_n"] = df.get("Emplacement", "").astype(str).map(norm_txt)
     df["_extr_n"] = df.get("Extraction", "").astype(str).map(norm_txt)
@@ -153,51 +161,48 @@ def main():
             if sel_deps:
                 working = working[working["Département"].astype(str).isin(sel_deps)]
 
-        # Typologie (normalized)
+        # Typologie (normalized set-OR)
         if "Typologie" in working.columns:
             st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            # Build display list from raw values present after region/dep filters
             typos_raw = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
-            # Map display -> normalized
-            selected_norm = []
+            chosen_norm = []
             for t in typos_raw:
                 if st.checkbox(t, key=f"typo_{t}"):
-                    selected_norm.append(norm_txt(t))
+                    chosen_norm.append(norm_txt(t))
             st.markdown("</div>", unsafe_allow_html=True)
-            if selected_norm:
-                working = working[working["_typologie_n"].isin(selected_norm)]
+            if chosen_norm:
+                working = working[working["_typologie_n"].isin(chosen_norm)]
 
-        # Extraction (normalized)
+        # Extraction
         if "Extraction" in working.columns:
             st.markdown("<div class='group-title'>Extraction</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            opts = ["oui","non","faisable"]
+            extr_opts = ["oui","non","faisable"]
             sel_extr = []
-            for e in opts:
+            for e in extr_opts:
                 if st.checkbox(e, key=f"extr_{e}"):
                     sel_extr.append(norm_txt(e))
             st.markdown("</div>", unsafe_allow_html=True)
             if sel_extr:
                 working = working[working["_extr_n"].isin(sel_extr)]
 
-        # Emplacement (normalized)
+        # Emplacement
         if "Emplacement" in working.columns:
             st.markdown("<div class='group-title'>Emplacement</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
             vals = [e for e in working["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
-            # order: Centre-ville / Périphérie first if present
             base = ["Centre-ville","Périphérie"]
             ordered = [e for e in base if e in vals] + [e for e in vals if e not in base]
-            sel_empl_norm = []
+            sel_empl = []
             for e in ordered:
                 if st.checkbox(e, key=f"empl_{e}"):
-                    sel_empl_norm.append(norm_txt(e))
+                    sel_empl.append(norm_txt(e))
             st.markdown("</div>", unsafe_allow_html=True)
-            if sel_empl_norm:
-                working = working[working["_empl_n"].isin(sel_empl_norm)]
+            if sel_empl:
+                working = working[working["_empl_n"].isin(sel_empl)]
 
-        # Surface slider
+        # Surface slider -> robust
         if "Surface GLA" in working.columns:
             series = pd.to_numeric(working["Surface GLA"], errors="coerce").dropna()
             if not series.empty:
@@ -208,7 +213,7 @@ def main():
                     rng = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
                     working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rng[0], rng[1])]
 
-        # Loyer annuel slider
+        # Loyer slider -> robust
         if "Loyer annuel" in working.columns:
             series = pd.to_numeric(working["Loyer annuel"], errors="coerce").dropna()
             if not series.empty:
@@ -222,18 +227,24 @@ def main():
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Réinitialiser"):
+                # Hard reset: clear states and rerun
+                for k in list(st.session_state.keys()):
+                    if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
+                        del st.session_state[k]
                 st.experimental_rerun()
         with c2:
             st.button("Je suis intéressé")
 
-    # Map
+    # Map (working reflects any chosen filters; otherwise full df)
     data = working.copy()
     if data.empty:
         st.info("Aucun résultat pour ces filtres.")
         return
 
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
-    m = folium.Map(location=[FR_LAT, FR_LON], zoom_start=FR_ZOOM, tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", attr="© OpenStreetMap contributors")
+    m = folium.Map(location=[FR_LAT, FR_LON], zoom_start=FR_ZOOM,
+                   tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                   attr="© OpenStreetMap contributors")
     css = f"background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
     group = folium.FeatureGroup(name="Annonces").add_to(m)
 
