@@ -13,29 +13,33 @@ st.set_page_config(page_title="SMBG Carte — Map", layout="wide")
 LOGO_BLUE = "#05263d"
 COPPER = "#c47e47"
 
-# --------- CSS (placeholders to avoid brace issues) ---------
+# --------- CSS (fixed left panel 275px) ---------
 _CSS = """
 <style>
   :root { --smbg-blue: __BLUE__; --smbg-copper: __COPPER__; }
-  [data-testid="stAppViewContainer"] { padding-top: 0; padding-bottom: 0; }
+  [data-testid="stAppViewContainer"] { padding: 0; }
   header, footer { visibility: hidden; height: 0; }
-  .block-container { padding-top: 8px !important; padding-left: 0 !important; padding-right: 0 !important; }
 
-  /* Sidebar 275px */
-  [data-testid="stSidebar"] { width: 275px; min-width: 275px; max-width: 275px; }
-  [data-testid="stSidebar"] > div { background: var(--smbg-blue); color: var(--smbg-copper); min-height: 100vh; }
-  [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
-  [data-testid="stSidebar"] label, [data-testid="stSidebar"] p { color: var(--smbg-copper) !important; }
-  [data-testid="stSidebar"] .smbg-scroll { max-height: 180px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.04); border-radius: 8px; }
-  [data-testid="stSidebar"] .smbg-indent { padding-left: 12px; }
-  [data-testid="stSidebar"] .stButton > button { background: var(--smbg-copper) !important; color: #ffffff !important; border: none; border-radius: 10px; font-weight: 700; }
+  /* Two-column app layout */
+  .smbg-layout { display: grid; grid-template-columns: 275px 1fr; }
+  .smbg-left {
+    background: var(--smbg-blue); color: var(--smbg-copper);
+    min-height: 100vh; height: 100vh; position: sticky; top: 0;
+    padding: 14px; border-right: 1px solid rgba(255,255,255,0.08); overflow-y: auto;
+  }
+  .smbg-left h3, .smbg-left label, .smbg-left p { color: var(--smbg-copper) !important; }
+  .smbg-left .smbg-scroll { max-height: 180px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }
+  .smbg-left .smbg-indent { padding-left: 12px; }
+  .smbg-left .stButton > button { background: var(--smbg-copper) !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }
 
-  /* Drawer right (overlay) */
+  .smbg-right { min-height: 100vh; padding: 0 0 0 0; }
+
+  /* Right drawer overlay */
   .smbg-drawer {
     position: fixed; top: 0; right: 0; width: 275px; max-width: 96vw;
     height: 100vh; background: #fff; transform: translateX(100%);
     transition: transform 240ms ease; box-shadow: -14px 0 28px rgba(0,0,0,0.12);
-    border-left: 1px solid #e9eaee; z-index: 9999; overflow: auto;
+    border-left: 1px solid #e9eaee; z-index: 9999; overflow-y: auto;
   }
   .smbg-drawer.open { transform: translateX(0); }
   .smbg-banner { background: var(--smbg-blue); color: #fff; padding: 12px 16px; font-weight: 800; font-size: 18px; position: sticky; top:0; }
@@ -109,7 +113,7 @@ def sanitize_value(val):
     return "" if s in ["/", "-", ""] else s
 
 def checkbox_group(title: str, options: List[str], key_prefix: str, indent: bool=False) -> List[str]:
-    st.write(title)
+    st.markdown(f"**{title}**")
     selected = []
     st.markdown('<div class="smbg-scroll{}">'.format(" smbg-indent" if indent else ""), unsafe_allow_html=True)
     for opt in options:
@@ -118,76 +122,78 @@ def checkbox_group(title: str, options: List[str], key_prefix: str, indent: bool
     st.markdown("</div>", unsafe_allow_html=True)
     return selected
 
-# --------- Sidebar filters ---------
-def render_filters_sidebar(df: pd.DataFrame) -> pd.DataFrame:
-    with st.sidebar:
-        st.markdown("### Filtres")
+# --------- UI Containers ---------
+def start_layout():
+    st.markdown('<div class="smbg-layout">', unsafe_allow_html=True)
 
-        df_scoped = df.copy()
+def end_layout():
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # Région (checkboxes with scroll)
-        regions = sorted([r for r in df_scoped["Région"].dropna().astype(str).unique() if r not in ["-","/",""]])
-        sel_regions = checkbox_group("Région", regions, key_prefix="reg")
+# --------- Left Filters (fixed) ---------
+def render_left_filters(df: pd.DataFrame) -> pd.DataFrame:
+    # Left fixed panel container
+    st.markdown('<div class="smbg-left">', unsafe_allow_html=True)
+    st.markdown("### Filtres")
 
-        # Département (only if regions selected)
-        if sel_regions:
-            df_scoped = df_scoped[df_scoped["Région"].astype(str).isin(sel_regions)]
-            deps = sorted([d for d in df_scoped["Département"].dropna().astype(str).unique() if d not in ["-","/",""]])
-            sel_deps = checkbox_group("Département", deps, key_prefix="dep", indent=True)
-            if sel_deps:
-                df_scoped = df_scoped[df_scoped["Département"].astype(str).isin(sel_deps)]
+    scoped = df.copy()
 
-        # Typologie (checkboxes)
-        typo_vals = sorted([t for t in df_scoped["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
-        sel_typo = checkbox_group("Typologie d'actif", typo_vals, key_prefix="typo")
-        if sel_typo:
-            df_scoped = df_scoped[df_scoped["Typologie"].astype(str).isin(sel_typo)]
+    # Région
+    regions = sorted([r for r in scoped["Région"].dropna().astype(str).unique() if r not in ["-","/",""]])
+    sel_regions = checkbox_group("Région", regions, key_prefix="reg")
 
-        # Extraction (checkboxes)
-        extr_vals = ["oui","non","faisable"]
-        sel_extr = checkbox_group("Extraction", extr_vals, key_prefix="extr")
-        if sel_extr:
-            extr_norm = df_scoped["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
-            df_scoped = df_scoped[extr_norm.isin(sel_extr)]
+    # Département (only if region selected)
+    if sel_regions:
+        scoped = scoped[scoped["Région"].astype(str).isin(sel_regions)]
+        deps = sorted([d for d in scoped["Département"].dropna().astype(str).unique() if d not in ["-","/",""]])
+        sel_deps = checkbox_group("Département", deps, key_prefix="dep", indent=True)
+        if sel_deps:
+            scoped = scoped[scoped["Département"].astype(str).isin(sel_deps)]
 
-        # Emplacement (checkboxes) — above Loyer
-        empl_vals = [e for e in df_scoped["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
-        base_empl = ["Centre-ville","Périphérie"]
-        options_empl = [e for e in base_empl if e in empl_vals] + [e for e in empl_vals if e not in base_empl]
-        sel_empl = checkbox_group("Emplacement", options_empl, key_prefix="empl")
-        if sel_empl:
-            df_scoped = df_scoped[df_scoped["Emplacement"].astype(str).isin(sel_empl)]
+    # Typologie
+    typologies = sorted([t for t in scoped["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
+    sel_typo = checkbox_group("Typologie d'actif", typologies, key_prefix="typo")
+    if sel_typo:
+        scoped = scoped[scoped["Typologie"].astype(str).isin(sel_typo)]
 
-        # Surface slider
-        surf_series = pd.to_numeric(df_scoped.get("Surface GLA", pd.Series(dtype=float)), errors="coerce").dropna()
-        if not surf_series.empty:
-            smin, smax = int(surf_series.min()), int(surf_series.max())
-            sel_surf = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax), step=1, key="surf")
-            df_scoped = df_scoped[pd.to_numeric(df_scoped["Surface GLA"], errors="coerce").between(sel_surf[0], sel_surf[1])]
+    # Extraction
+    extr_vals = ["oui","non","faisable"]
+    sel_extr = checkbox_group("Extraction", extr_vals, key_prefix="extr")
+    if sel_extr:
+        en = scoped["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
+        scoped = scoped[en.isin(sel_extr)]
 
-        # Loyer annuel slider
-        loyer_series = pd.to_numeric(df_scoped.get("Loyer annuel", pd.Series(dtype=float)), errors="coerce").dropna()
-        if not loyer_series.empty:
-            lmin, lmax = int(loyer_series.min()), int(loyer_series.max())
-            sel_loyer = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax), step=1000, key="loyer")
-            df_scoped = df_scoped[pd.to_numeric(df_scoped["Loyer annuel"], errors="coerce").between(sel_loyer[0], sel_loyer[1])]
+    # Emplacement (above loyer)
+    empl_vals = [e for e in scoped["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
+    base_empl = ["Centre-ville","Périphérie"]
+    options_empl = [e for e in base_empl if e in empl_vals] + [e for e in empl_vals if e not in base_empl]
+    sel_empl = checkbox_group("Emplacement", options_empl, key_prefix="empl")
+    if sel_empl:
+        scoped = scoped[scoped["Emplacement"].astype(str).isin(sel_empl)]
 
-        # Restauration autorisée
-        rest_vals = ["oui","non"]
-        sel_rest = checkbox_group("Restauration autorisée", rest_vals, key_prefix="rest")
-        if sel_rest:
-            rest_norm = df_scoped["Restauration"].astype(str).str.strip().str.lower()
-            df_scoped = df_scoped[rest_norm.isin(sel_rest)]
+    # Surface slider
+    surf_series = pd.to_numeric(scoped.get("Surface GLA", pd.Series(dtype=float)), errors="coerce").dropna()
+    if not surf_series.empty:
+        smin, smax = int(surf_series.min()), int(surf_series.max())
+        sel_surf = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax), step=1, key="surf")
+        scoped = scoped[pd.to_numeric(scoped["Surface GLA"], errors="coerce").between(sel_surf[0], sel_surf[1])]
 
-        # Actions
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Réinitialiser filtres"):
-                st.experimental_rerun()
-        with c2:
-            st.button("Je suis intéressé")
+    # Loyer slider
+    loyer_series = pd.to_numeric(scoped.get("Loyer annuel", pd.Series(dtype=float)), errors="coerce").dropna()
+    if not loyer_series.empty:
+        lmin, lmax = int(loyer_series.min()), int(loyer_series.max())
+        sel_loyer = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax), step=1000, key="loyer")
+        scoped = scoped[pd.to_numeric(scoped["Loyer annuel"], errors="coerce").between(sel_loyer[0], sel_loyer[1])]
 
-    return df_scoped
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Réinitialiser"):
+            st.experimental_rerun()
+    with c2:
+        st.button("Je suis intéressé")
+
+    st.markdown('</div>', unsafe_allow_html=True)  # end left
+
+    return scoped
 
 # --------- Map builder ---------
 def build_map(df_valid: pd.DataFrame, ref_col: Optional[str] = "Référence annonce"):
@@ -207,8 +213,6 @@ def build_map(df_valid: pd.DataFrame, ref_col: Optional[str] = "Référence anno
     for _, r in df_valid.iterrows():
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r[rc]) if rc else ""
-
-        # Make the DivIcon clickable: navigate to ?ref=<REFERENCE> to let Streamlit open drawer
         href = "?ref=" + ref_text
         html = '<a href="' + href + '" style="text-decoration:none;"><div style="' + css + '">' + ref_text + '</div></a>'
         icon = folium.DivIcon(html=html)
@@ -265,13 +269,12 @@ def render_drawer(selected_row: pd.Series, open_state: bool = True):
 
 # --------- Main ---------
 def main():
-    # Read Excel
     df = load_excel()
     if df is None or df.empty:
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
-    # Filter to active + with coords
+    # Keep active with coordinates
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
@@ -280,17 +283,24 @@ def main():
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    # Sidebar filters
-    filtered = render_filters_sidebar(df)
+    # Start layout
+    start_layout()
 
-    # Map (almost full page height)
+    # LEFT fixed filters
+    filtered = render_left_filters(df)
+
+    # RIGHT: map
+    st.markdown('<div class="smbg-right">', unsafe_allow_html=True)
     ref_col = "Référence annonce" if "Référence annonce" in filtered.columns else None
     mapp = build_map(filtered, ref_col)
     st_html(mapp.get_root().render(), height=1000, scrolling=False)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # End layout
+    end_layout()
 
     # Open drawer if ?ref present
     try:
-        # Streamlit >= 1.30
         params = st.query_params
     except Exception:
         params = st.experimental_get_query_params()
@@ -298,7 +308,7 @@ def main():
     ref_value = None
     if isinstance(params, dict):
         ref_value = params.get("ref", None)
-        if isinstance(ref_value, list):  # older API returns list
+        if isinstance(ref_value, list):
             ref_value = ref_value[0] if ref_value else None
 
     if ref_value and "Référence annonce" in filtered.columns:
