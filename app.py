@@ -296,7 +296,7 @@ def main():
                 for k in list(st.session_state.keys()):
                     if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
                         del st.session_state[k]
-                st.experimental_rerun()
+                st.rerun()
         with c2:
             st.button("Je suis intéressé")
 
