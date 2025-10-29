@@ -23,8 +23,8 @@ CSS = f"""
   [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
-  [data-testid="stSidebar"] .smbg-scroll {{ max-height: 200px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-  [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #ffffff !important; font-weight: 700; border-radius: 10px; border: none; }}
+  [data-testid="stSidebar"] .stButton > button,
+  [data-testid="stSidebar"] .stButton > button * {{ background: {COPPER} !important; color: #ffffff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
   .block-container {{ padding-top: 8px !important; padding-left: 0 !important; padding-right: 0 !important; }}
@@ -35,7 +35,7 @@ CSS = f"""
              border-left: 1px solid #e9eaee; box-shadow: -14px 0 28px rgba(0,0,0,.12); overflow-y:auto; }}
   .drawer.open {{ transform: translateX(0); }}
   .drawer-banner {{ background:{LOGO_BLUE}; color:#fff; padding:12px 16px; font-weight:800; font-size:18px; position:sticky; top:0; }}
-  .drawer-body {{ padding:14px 16px 24px 16px; }}
+  .drawer-body {{ padding:14px 16px 24px; }}
   .kv {{ display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }}
   .kv .k {{ min-width:140px; color:#4b5563; font-weight:600; }}
   .kv .v {{ color:#111827; }}
@@ -80,12 +80,27 @@ def sanitize_value(v):
     s = str(v).strip()
     return "" if s in ["", "-", "/"] else s
 
-def drawer(row: pd.Series):
-    ref_val = str(row.get("Référence annonce", ""))
+def find_col(df: pd.DataFrame, *candidates) -> str:
+    """Find a column by fuzzy normalized match."""
+    norm_map = {c: norm_txt(c) for c in df.columns}
+    for cand in candidates:
+        cn = norm_txt(cand)
+        # exact first
+        for c, n in norm_map.items():
+            if n == cn:
+                return c
+        # contains
+        for c, n in norm_map.items():
+            if all(part in n for part in cn.split()):
+                return c
+    return ""
+
+def drawer(row: pd.Series, cols_range: Tuple[int,int]=(6,33)):
+    ref_val = str(row.get("Référence annonce", row.get("Reference", "")))
     gm = row.get("Lien Google Maps", row.get("Google Maps", ""))
 
     cols = list(row.index)
-    start_idx, end_idx = 6, 33  # G..AH
+    start_idx, end_idx = cols_range
     display_cols = cols[start_idx:end_idx+1] if len(cols) > end_idx else cols[start_idx:]
 
     st.markdown('<div class="drawer open">', unsafe_allow_html=True)
@@ -96,42 +111,53 @@ def drawer(row: pd.Series):
         st.markdown(f'<a href="{gm.strip()}" target="_blank"><button class="stButton">Cliquer ici</button></a>', unsafe_allow_html=True)
 
     for c in display_cols:
-        if c in ["Lien Google Maps", "Google Maps"]: continue
+        if norm_txt(c) in ["lien google maps", "google maps"]: 
+            continue
         val = sanitize_value(row.get(c))
-        if not val: continue
+        if not val: 
+            continue
         st.markdown(f'<div class="kv"><div class="k">{c}</div><div class="v">{val}</div></div>', unsafe_allow_html=True)
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
 def clear_all_filters_once():
-    # Ensure first load shows everything
     if not st.session_state.get("_smbg_cleared", False):
         for k in list(st.session_state.keys()):
             if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
                 del st.session_state[k]
         st.session_state["_smbg_cleared"] = True
 
-def region_department_nested(df: pd.DataFrame):
+def region_department_ui(df: pd.DataFrame):
     sel_regions: List[str] = []
     sel_deps: List[str] = []
-    st.markdown("### Région")
-    st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-    regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-","/"]])
-    for reg in regions:
-        if st.checkbox(reg, key=f"reg_{reg}"):
-            sel_regions.append(reg)
-            deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
-            for dep in deps:
-                col_pad, col_box = st.columns([1, 10])
-                with col_pad: st.write("")
-                with col_box:
-                    if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
-                        sel_deps.append(dep)
-    st.markdown('</div>', unsafe_allow_html=True)
+    with st.expander("Région / Département", expanded=True):
+        regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-","/"]])
+        for reg in regions:
+            if st.checkbox(reg, key=f"reg_{reg}"):
+                sel_regions.append(reg)
+                deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
+                for dep in deps:
+                    col_pad, col_box = st.columns([1, 10])
+                    with col_pad: st.write("")
+                    with col_box:
+                        if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
+                            sel_deps.append(dep)
     return sel_regions, sel_deps
 
-def latlon_key(lat: float, lon: float, ndigits: int = 6) -> Tuple[float, float]:
-    return (round(float(lat), ndigits), round(float(lon), ndigits))
+def anti_overlap_positions(group: pd.DataFrame) -> List[Tuple[float,float]]:
+    """Return list of (lat,lon) slightly spread on a circle when same coords."""
+    n = len(group)
+    if n == 1:
+        return [(float(group.iloc[0]["_lat"]), float(group.iloc[0]["_lon"]))]
+    # radius ~ 60m in degrees ~ 0.0008 (approx)
+    r = 0.0008
+    base_lat = float(group.iloc[0]["_lat"])
+    base_lon = float(group.iloc[0]["_lon"])
+    out = []
+    for i in range(n):
+        angle = 2*math.pi * i / n
+        out.append((base_lat + r*math.sin(angle), base_lon + r*math.cos(angle)))
+    return out
 
 def main():
     df = load_excel()
@@ -140,85 +166,107 @@ def main():
 
     clear_all_filters_once()
 
-    df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
-    df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
-    df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
-    df["_typologie_n"] = df.get("Typologie", "").astype(str).map(norm_txt)
-    df["_empl_n"] = df.get("Emplacement", "").astype(str).map(norm_txt)
-    df["_extr_n"] = df.get("Extraction", "").astype(str).map(norm_txt)
+    # Column detection
+    col_lat = find_col(df, "Latitude")
+    col_lon = find_col(df, "Longitude")
+    col_actif = find_col(df, "Actif")
+    col_typo = find_col(df, "Typologie", "Typologie d'actif")
+    col_empl = find_col(df, "Emplacement")
+    col_extr = find_col(df, "Extraction")
+    col_loyer = find_col(df, "Loyer annuel", "Loyer annuel (€)", "Loyer annuel (euros)")
+    col_surface = find_col(df, "Surface", "Surface GLA", "GLA")
+    col_region = find_col(df, "Région")
+    col_dept = find_col(df, "Département")
+    col_ref = find_col(df, "Référence annonce", "Reference")
+    col_gmaps = find_col(df, "Lien Google Maps", "Google Maps")
 
+    # Prepare data
+    df["_actif"] = (df[col_actif] if col_actif else "oui")
+    df["_actif"] = df["_actif"].apply(normalize_bool)
+    df["_lat"] = pd.to_numeric(df[col_lat], errors="coerce") if col_lat else pd.NA
+    df["_lon"] = pd.to_numeric(df[col_lon], errors="coerce") if col_lon else pd.NA
+    if col_typo: df["_typologie_n"] = df[col_typo].astype(str).map(norm_txt)
+    else: df["_typologie_n"] = ""
+    if col_empl: df["_empl_n"] = df[col_empl].astype(str).map(norm_txt)
+    else: df["_empl_n"] = ""
+    if col_extr: df["_extr_n"] = df[col_extr].astype(str).map(norm_txt)
+    else: df["_extr_n"] = ""
+
+    # Drop invalid
     df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
     if df.empty:
         st.warning("Aucune ligne active avec coordonnées valides."); st.stop()
 
+    # --------------- Sidebar ---------------
     with st.sidebar:
         st.markdown("### Filtres")
         working = df.copy()
 
-        if "Région" in working.columns and "Département" in working.columns:
-            sel_regions, sel_deps = region_department_nested(working)
+        # Region / Department
+        if col_region and col_dept:
+            working = working.rename(columns={col_region:"Région", col_dept:"Département"})
+            sel_regions, sel_deps = region_department_ui(working)
             if sel_regions:
                 working = working[working["Région"].astype(str).isin(sel_regions)]
             if sel_deps:
                 working = working[working["Département"].astype(str).isin(sel_deps)]
 
-        if "Typologie" in working.columns:
+        # Typologie
+        if col_typo:
             st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
-            st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            typos_raw = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
+            typos_raw = sorted([t for t in working[col_typo].dropna().astype(str).unique() if t not in ["-","/",""]])
             chosen_norm = []
             for t in typos_raw:
                 if st.checkbox(t, key=f"typo_{t}"):
                     chosen_norm.append(norm_txt(t))
-            st.markdown("</div>", unsafe_allow_html=True)
             if chosen_norm:
                 working = working[working["_typologie_n"].isin(chosen_norm)]
 
-        if "Extraction" in working.columns:
+        # Extraction
+        if col_extr:
             st.markdown("<div class='group-title'>Extraction</div>", unsafe_allow_html=True)
-            st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
             extr_opts = ["oui","non","faisable"]
             sel_extr = []
             for e in extr_opts:
                 if st.checkbox(e, key=f"extr_{e}"):
                     sel_extr.append(norm_txt(e))
-            st.markdown("</div>", unsafe_allow_html=True)
             if sel_extr:
                 working = working[working["_extr_n"].isin(sel_extr)]
 
-        if "Emplacement" in working.columns:
+        # Emplacement
+        if col_empl:
             st.markdown("<div class='group-title'>Emplacement</div>", unsafe_allow_html=True)
-            st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            vals = [e for e in working["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
+            vals = [e for e in working[col_empl].dropna().astype(str).unique() if e not in ["-","/",""]]
             base = ["Centre-ville","Périphérie"]
             ordered = [e for e in base if e in vals] + [e for e in vals if e not in base]
             sel_empl = []
             for e in ordered:
                 if st.checkbox(e, key=f"empl_{e}"):
                     sel_empl.append(norm_txt(e))
-            st.markdown("</div>", unsafe_allow_html=True)
             if sel_empl:
                 working = working[working["_empl_n"].isin(sel_empl)]
 
-        if "Surface GLA" in working.columns:
-            series = pd.to_numeric(working["Surface GLA"], errors="coerce").dropna()
+        # Surface
+        if col_surface and working[col_surface].notna().any():
+            series = pd.to_numeric(working[col_surface], errors="coerce").dropna()
             if not series.empty:
                 vmin, vmax = int(series.min()), int(series.max())
                 if vmin == vmax:
                     st.number_input("Surface (m²)", value=vmin, step=1, disabled=True, key="surf_single")
                 else:
                     rng = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
-                    working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rng[0], rng[1])]
+                    working = working[pd.to_numeric(working[col_surface], errors="coerce").between(rng[0], rng[1])]
 
-        if "Loyer annuel" in working.columns:
-            series = pd.to_numeric(working["Loyer annuel"], errors="coerce").dropna()
+        # Loyer annuel
+        if col_loyer and working[col_loyer].notna().any():
+            series = pd.to_numeric(working[col_loyer], errors="coerce").dropna()
             if not series.empty:
                 vmin, vmax = int(series.min()), int(series.max())
                 if vmin == vmax:
                     st.number_input("Loyer annuel (€)", value=vmin, step=1, disabled=True, key="loyer_single")
                 else:
                     rng = st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1000, key="loyer_range")
-                    working = working[pd.to_numeric(working["Loyer annuel"], errors="coerce").between(rng[0], rng[1])]
+                    working = working[pd.to_numeric(working[col_loyer], errors="coerce").between(rng[0], rng[1])]
 
         c1, c2 = st.columns(2)
         with c1:
@@ -230,15 +278,28 @@ def main():
         with c2:
             st.button("Je suis intéressé")
 
+    # --------------- Map ---------------
     data = working.copy()
     if data.empty:
         st.info("Aucun résultat pour ces filtres.")
         return
 
-    # Build index by rounded lat/lon for click lookup
+    # Build anti-overlap positions
     data["_lat_r"] = data["_lat"].round(6)
     data["_lon_r"] = data["_lon"].round(6)
-    idx = {(row["_lat_r"], row["_lon_r"]): i for i, row in data.reset_index().iterrows()}
+    groups = data.groupby(["_lat_r","_lon_r"], sort=False)
+
+    # Rebuild a Plot DF with spread positions
+    plot_rows = []
+    for (_, _), grp in groups:
+        coords = anti_overlap_positions(grp)
+        for (coords_pair, (_, row)) in zip(coords, grp.iterrows()):
+            rlat, rlon = coords_pair
+            row = row.copy()
+            row["_lat_plot"] = rlat
+            row["_lon_plot"] = rlon
+            plot_rows.append(row)
+    plot_df = pd.DataFrame(plot_rows)
 
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
     m = folium.Map(location=[FR_LAT, FR_LON], zoom_start=FR_ZOOM,
@@ -246,26 +307,24 @@ def main():
                    attr="© OpenStreetMap contributors")
 
     css = f"background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
-    group = folium.FeatureGroup(name="Annonces").add_to(m)
+    group_layer = folium.FeatureGroup(name="Annonces").add_to(m)
 
-    for _, r in data.iterrows():
-        lat, lon = float(r["_lat"]), float(r["_lon"])
-        ref_text = str(r.get("Référence annonce", ""))
+    for _, r in plot_df.iterrows():
+        lat, lon = float(r["_lat_plot"]), float(r["_lon_plot"])
+        ref_text = str(r.get(col_ref, ""))
         icon = folium.DivIcon(html=f'<div style="{css}">{ref_text}</div>')
-        folium.Marker(location=[lat, lon], icon=icon).add_to(group)  # NO POPUP
+        folium.Marker(location=[lat, lon], icon=icon).add_to(group_layer)  # NO POPUP
 
     out = st_folium(m, height=950, width=None, returned_objects=[])
 
-    # Detect marker click via last_object_clicked (lat/lon). Open drawer if match.
-    ref_clicked = None
     if isinstance(out, dict):
         loc = out.get("last_object_clicked")
         if isinstance(loc, dict) and "lat" in loc and "lng" in loc:
-            key = (round(float(loc["lat"]),6), round(float(loc["lng"]),6))
-            row_idx = idx.get(key, None)
-            if row_idx is not None:
-                row = data.reset_index().iloc[row_idx]
-                drawer(row)
+            # Find nearest original row by distance
+            lat_click, lon_click = float(loc["lat"]), float(loc["lng"])
+            plot_df["__d2"] = (plot_df["_lat_plot"]-lat_click)**2 + (plot_df["_lon_plot"]-lon_click)**2
+            row = plot_df.loc[plot_df["__d2"].idxmin()]
+            drawer(row)
 
 if __name__ == "__main__":
     main()
