@@ -20,9 +20,9 @@ CSS = f"""
   }}
   [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
-  [data-testid="stSidebar"] .group-title {{ margin-top: 10px; font-weight: 700; color: {COPPER}; }}
+  [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
   [data-testid="stSidebar"] .smbg-scroll {{ max-height: 190px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-  [data-testid="stSidebar"] .smbg-indent {{ padding-left: 14px; }}
+  [data-testid="stSidebar"] .smbg-indent {{ padding-left: 18px; }}
   [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
@@ -97,25 +97,26 @@ def drawer(row: pd.Series):
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-def nested_region_department_filters(df: pd.DataFrame) -> Dict[str, List[str]]:
-    selected_regions: List[str] = []
-    selected_departments: List[str] = []
+def region_department_nested(df: pd.DataFrame) -> Dict[str, List[str]]:
+    sel_regions: List[str] = []
+    sel_deps: List[str] = []
     st.markdown("**Région**")
     st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-    regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-", "/"]])
+    regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-","/"]])
     for reg in regions:
-        reg_key = f"reg_{reg}"
-        reg_checked = st.checkbox(reg, key=reg_key)
-        if reg_checked:
-            selected_regions.append(reg)
-            deps_reg = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
-            for dep in deps_reg:
-                dep_key = f"dep_{reg}_{dep}"
-                dep_checked = st.checkbox(dep, key=dep_key)
-                if dep_checked:
-                    selected_departments.append(dep)
-    st.markdown("</div>", unsafe_allow_html=True)
-    return {"regions": selected_regions, "departements": selected_departments}
+        if st.checkbox(reg, key=f"reg_{reg}"):
+            sel_regions.append(reg)
+            deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
+            if deps:
+                st.markdown('<div class="smbg-indent">', unsafe_allow_html=True)
+                for dep in deps:
+                    # visual indent via label prefix ensures clear hierarchy; unique key keeps state
+                    st.checkbox(f"  {dep}", key=f"dep_{reg}_{dep}")
+                    if st.session_state.get(f"dep_{reg}_{dep}"):
+                        sel_deps.append(dep)
+                st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return {"regions": sel_regions, "departements": sel_deps}
 
 def main():
     df = load_excel()
@@ -134,70 +135,76 @@ def main():
         st.markdown("### Filtres")
         working = df.copy()
 
+        # Nested Region -> Department
         if "Région" in working.columns and "Département" in working.columns:
-            sel = nested_region_department_filters(working)
+            sel = region_department_nested(working)
             if sel["regions"]:
                 working = working[working["Région"].astype(str).isin(sel["regions"])]
             if sel["departements"]:
                 working = working[working["Département"].astype(str).isin(sel["departements"])]
 
+        # Typologie
         if "Typologie" in working.columns:
             st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
             typos = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
-            sel_typos = []
+            chosen_typos = []
             for t in typos:
                 if st.checkbox(t, key=f"typo_{t}"):
-                    sel_typos.append(t)
+                    chosen_typos.append(t)
             st.markdown("</div>", unsafe_allow_html=True)
-            if sel_typos:
-                working = working[working["Typologie"].astype(str).isin(sel_typos)]
+            if chosen_typos:
+                working = working[working["Typologie"].astype(str).isin(chosen_typos)]
 
+        # Extraction
         if "Extraction" in working.columns:
-            st.markdown('<div class="group-title">Extraction</div>', unsafe_allow_html=True)
+            st.markdown("<div class='group-title'>Extraction</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            sel_extr = []
+            extr_sel = []
             for e in ["oui","non","faisable"]:
                 if st.checkbox(e, key=f"extr_{e}"):
-                    sel_extr.append(e)
+                    extr_sel.append(e)
             st.markdown("</div>", unsafe_allow_html=True)
-            if sel_extr:
+            if extr_sel:
                 en = working["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
-                working = working[en.isin(sel_extr)]
+                working = working[en.isin(extr_sel)]
 
+        # Emplacement
         if "Emplacement" in working.columns:
-            st.markdown('<div class="group-title">Emplacement</div>', unsafe_allow_html=True)
+            st.markdown("<div class='group-title'>Emplacement</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            empl_vals = [e for e in working["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
+            vals = [e for e in working["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
             base = ["Centre-ville","Périphérie"]
-            options_empl = [e for e in base if e in empl_vals] + [e for e in empl_vals if e not in base]
-            sel_empl = []
-            for e in options_empl:
+            options = [e for e in base if e in vals] + [e for e in vals if e not in base]
+            em_sel = []
+            for e in options:
                 if st.checkbox(e, key=f"empl_{e}"):
-                    sel_empl.append(e)
+                    em_sel.append(e)
             st.markdown("</div>", unsafe_allow_html=True)
-            if sel_empl:
-                working = working[working["Emplacement"].astype(str).isin(sel_empl)]
+            if em_sel:
+                working = working[working["Emplacement"].astype(str).isin(em_sel)]
 
+        # Surface slider
         if "Surface GLA" in working.columns:
             series = pd.to_numeric(working["Surface GLA"], errors="coerce").dropna()
             if not series.empty:
                 vmin, vmax = int(series.min()), int(series.max())
                 if vmin == vmax:
-                    st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=vmin, step=1, key="surf_single")
+                    st.number_input("Surface (m²)", value=vmin, step=1, disabled=True, key="surf_single")
                 else:
-                    sel = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
-                    working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(sel[0], sel[1])]
+                    rang = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
+                    working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rang[0], rang[1])]
 
+        # Loyer slider (robust to min==max)
         if "Loyer annuel" in working.columns:
             series = pd.to_numeric(working["Loyer annuel"], errors="coerce").dropna()
             if not series.empty:
                 vmin, vmax = int(series.min()), int(series.max())
                 if vmin == vmax:
-                    st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=vmin, step=1000, key="loyer_single")
+                    st.number_input("Loyer annuel (€)", value=vmin, step=1, disabled=True, key="loyer_single_readonly")
                 else:
-                    sel = st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1000, key="loyer_range")
-                    working = working[pd.to_numeric(working["Loyer annuel"], errors="coerce").between(sel[0], sel[1])]
+                    rang = st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1000, key="loyer_range")
+                    working = working[pd.to_numeric(working["Loyer annuel"], errors="coerce").between(rang[0], rang[1])]
 
         c1, c2 = st.columns(2)
         with c1:
