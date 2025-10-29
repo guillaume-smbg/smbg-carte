@@ -14,6 +14,8 @@ COPPER = "#c47e47"
 CSS = f"""
 <style>
   [data-testid="collapsedControl"] {{ display: none !important; }}
+
+  /* Sidebar fixed at 275px with SMBG branding */
   [data-testid="stSidebar"] {{
     width: 275px; min-width: 275px; max-width: 275px;
     background: {LOGO_BLUE}; color: {COPPER};
@@ -21,12 +23,18 @@ CSS = f"""
   [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
-  [data-testid="stSidebar"] .smbg-scroll {{ max-height: 190px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-  [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
+  /* Mini scroll blocks */
+  [data-testid="stSidebar"] .smbg-scroll {{ max-height: 200px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
+
+  /* Buttons copper */
+  [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #ffffff !important; font-weight: 700; border-radius: 10px; border: none; }}
+
+  /* App paddings reduced */
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
   .block-container {{ padding-top: 8px !important; padding-left: 0 !important; padding-right: 0 !important; }}
 
+  /* Right drawer */
   .drawer {{ position: fixed; top:0; right:0; width:275px; height:100vh; background:#fff;
              transform: translateX(100%); transition: transform .24s ease; z-index: 9999;
              border-left: 1px solid #e9eaee; box-shadow: -14px 0 28px rgba(0,0,0,.12); overflow-y:auto; }}
@@ -37,6 +45,7 @@ CSS = f"""
   .kv .k {{ min-width:140px; color:#4b5563; font-weight:600; }}
   .kv .v {{ color:#111827; }}
 
+  /* Hide Leaflet popups (kept only to capture pin click) */
   .leaflet-popup-pane, .leaflet-popup {{ display: none !important; }}
 </style>
 """
@@ -46,7 +55,7 @@ DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
 
 def normalize_excel_url(url: str) -> str:
     if not url: return url
-    return re.sub(r"https://github\.com/(.+)/blob/([^ ]+)", r"https://github.com/\1/raw/\2", url.strip())
+    return re.sub(r"https://github\\.com/(.+)/blob/([^ ]+)", r"https://github.com/\\1/raw/\\2", url.strip())
 
 @st.cache_data(show_spinner=False)
 def load_excel() -> pd.DataFrame:
@@ -71,7 +80,7 @@ def norm_txt(x: str) -> str:
     if x is None: return ""
     s = str(x).strip().lower()
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\\s+", " ", s)
     return s
 
 def sanitize_value(v):
@@ -84,7 +93,7 @@ def drawer(row: pd.Series):
     gm = row.get("Lien Google Maps", row.get("Google Maps", ""))
 
     cols = list(row.index)
-    start_idx, end_idx = 6, 33
+    start_idx, end_idx = 6, 33  # G..AH
     display_cols = cols[start_idx:end_idx+1] if len(cols) > end_idx else cols[start_idx:]
 
     st.markdown('<div class="drawer open">', unsafe_allow_html=True)
@@ -112,19 +121,18 @@ def clear_all_filters_once():
 def region_department_nested(df: pd.DataFrame):
     sel_regions: List[str] = []
     sel_deps: List[str] = []
-    st.markdown("**Région**")
+    st.markdown("### Région")
     st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
     regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-","/"]])
     for reg in regions:
         if st.checkbox(reg, key=f"reg_{reg}"):
             sel_regions.append(reg)
             deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
-            # Indented rendering via columns (robust)
             for dep in deps:
-                cpad, cbox = st.columns([1, 10])
-                with cpad:
-                    st.write("")  # spacer for visual indent
-                with cbox:
+                col_pad, col_box = st.columns([1, 10])
+                with col_pad:
+                    st.write("")  # spacer indent
+                with col_box:
                     if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
                         sel_deps.append(dep)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -135,7 +143,6 @@ def main():
     if df is None or df.empty:
         st.warning("Excel vide ou introuvable."); st.stop()
 
-    # Clear filters on first load so all pins show
     clear_all_filters_once()
 
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
@@ -153,7 +160,6 @@ def main():
         st.markdown("### Filtres")
         working = df.copy()
 
-        # Région -> Département (nested)
         if "Région" in working.columns and "Département" in working.columns:
             sel_regions, sel_deps = region_department_nested(working)
             if sel_regions:
@@ -161,7 +167,6 @@ def main():
             if sel_deps:
                 working = working[working["Département"].astype(str).isin(sel_deps)]
 
-        # Typologie (normalized set-OR)
         if "Typologie" in working.columns:
             st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
@@ -174,7 +179,6 @@ def main():
             if chosen_norm:
                 working = working[working["_typologie_n"].isin(chosen_norm)]
 
-        # Extraction
         if "Extraction" in working.columns:
             st.markdown("<div class='group-title'>Extraction</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
@@ -187,7 +191,6 @@ def main():
             if sel_extr:
                 working = working[working["_extr_n"].isin(sel_extr)]
 
-        # Emplacement
         if "Emplacement" in working.columns:
             st.markdown("<div class='group-title'>Emplacement</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
@@ -202,7 +205,6 @@ def main():
             if sel_empl:
                 working = working[working["_empl_n"].isin(sel_empl)]
 
-        # Surface slider -> robust
         if "Surface GLA" in working.columns:
             series = pd.to_numeric(working["Surface GLA"], errors="coerce").dropna()
             if not series.empty:
@@ -213,7 +215,6 @@ def main():
                     rng = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
                     working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rng[0], rng[1])]
 
-        # Loyer slider -> robust
         if "Loyer annuel" in working.columns:
             series = pd.to_numeric(working["Loyer annuel"], errors="coerce").dropna()
             if not series.empty:
@@ -226,8 +227,7 @@ def main():
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("Réinitialiser"):
-                # Hard reset: clear states and rerun
+            if st.button("Réinitialiser les filtres"):
                 for k in list(st.session_state.keys()):
                     if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
                         del st.session_state[k]
@@ -235,7 +235,6 @@ def main():
         with c2:
             st.button("Je suis intéressé")
 
-    # Map (working reflects any chosen filters; otherwise full df)
     data = working.copy()
     if data.empty:
         st.info("Aucun résultat pour ces filtres.")
