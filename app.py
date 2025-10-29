@@ -2,7 +2,7 @@
 import os
 import io
 import re
-from typing import Optional
+from typing import Optional, List
 import pandas as pd
 import streamlit as st
 import requests
@@ -13,27 +13,24 @@ from streamlit.components.v1 import html as st_html
 st.set_page_config(page_title="SMBG Carte — Leaflet (Mapnik)", layout="wide")
 LOGO_BLUE = "#05263d"
 
-CSS = '''
+STYLES = '''
 <style>
-  @font-face {font-family: "Futura"; src: local("Futura");}
   html, body {height:100%;}
   [data-testid="stAppViewContainer"]{padding:0; margin:0; height:100vh;}
   [data-testid="stMain"]{padding:0; margin:0; height:100vh;}
   .block-container{padding:0 !important; margin:0 !important;}
   header, footer {visibility:hidden; height:0;}
   .smbg-badge{background:#eeefe9; border:1px solid #d9d7cf; color:#333; padding:2px 8px; border-radius:10px; font-size:12px;}
-  .smbg-button{background:__BLUE__; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;}
-  .smbg-label{color:__BLUE__; font-weight:700;}
+  .smbg-button{background:%s; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600;}
   .smbg-drawer{height:calc(100vh - 24px); overflow:auto; padding:16px 20px 24px 20px; border-left:1px solid #e7e7e7; box-shadow:-8px 0 16px rgba(0,0,0,0.04);}
-  .smbg-grid{display:grid; grid-template-columns: 1fr; gap:8px;}
-  .smbg-photo{width:100%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
-  .smbg-item{display:flex; gap:8px; align-items:flex-start;}
+  .smbg-photo{width:100%%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
+  .smbg-item{display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;}
   .smbg-key{min-width:160px; color:#4b5563; font-weight:600;}
   .smbg-val{color:#111827;}
 </style>
-'''.replace("__BLUE__", LOGO_BLUE)
+''' % LOGO_BLUE
 
-st.markdown(CSS, unsafe_allow_html=True)
+st.markdown(STYLES, unsafe_allow_html=True)
 
 # ================== HELPERS: Excel Loading ==================
 DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
@@ -97,19 +94,15 @@ def find_col(df, *candidates):
 
 def build_mapping(df):
     m = {}
-    # Business / display columns (E→AD conceptually).
-    m["adresse"]       = find_col(df, "Adresse")
-    m["gmap"]          = find_col(df, "Lien Google Maps", "Google Maps", "Maps")
-    m["photos"]        = find_col(df, "Photos annonce", "photos_urls", "photos")
-    m["photo_main"]    = find_col(df, "photo_principale", "Photo principale")
-    m["ref"]           = find_col(df, "Référence annonce", "Référence", "Reference")
+    m["ref"]        = find_col(df, "Référence annonce", "Référence", "Reference")
+    m["gmap"]       = find_col(df, "Lien Google Maps", "Google Maps", "Maps")
+    m["photos"]     = find_col(df, "Photos annonce", "photos_urls", "photos")
+    m["photo_main"] = find_col(df, "photo_principale", "Photo principale")
 
-    # Tech columns
-    m["lat"]           = find_col(df, "Latitude", "Lat")
-    m["lon"]           = find_col(df, "Longitude", "Lon", "Lng", "Long")
-    m["actif"]         = find_col(df, "Actif", "Active")
-    m["date_pub"]      = find_col(df, "Date publication", "Date de publication")
-
+    m["lat"]        = find_col(df, "Latitude", "Lat")
+    m["lon"]        = find_col(df, "Longitude", "Lon", "Lng", "Long")
+    m["actif"]      = find_col(df, "Actif", "Active")
+    m["date_pub"]   = find_col(df, "Date publication", "Date de publication")
     return m
 
 def normalize_bool(val):
@@ -121,67 +114,59 @@ def normalize_bool(val):
     return False
 
 # ================== DATA PREP (no geocoding) ==================
-def prepare_df(df: pd.DataFrame, mapcols: dict) -> pd.DataFrame:
+def prepare_df(df: pd.DataFrame, m: dict) -> pd.DataFrame:
     # Actif
-    actif_col = mapcols["actif"]
+    actif_col = m["actif"]
     df["_actif"] = True if actif_col is None else df[actif_col].apply(normalize_bool)
 
-    # Lat/Lon: trust provided values; drop rows without valid coords
-    latc, lonc = mapcols["lat"], mapcols["lon"]
+    # Lat/Lon
+    latc, lonc = m["lat"], m["lon"]
     if latc is None or lonc is None:
-        st.error("Colonnes Latitude/Longitude introuvables. Merci d'ajouter deux colonnes 'Latitude' et 'Longitude' (nombres décimaux).")
+        st.error("Colonnes Latitude/Longitude introuvables. Merci d'ajouter deux colonnes 'Latitude' et 'Longitude' (décimaux).")
         st.stop()
     df["_lat"] = pd.to_numeric(df[latc], errors="coerce")
     df["_lon"] = pd.to_numeric(df[lonc], errors="coerce")
+
+    # Filtrer lignes valides
     df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
 
-    # Compute "is_new" badge if date_pub exists
-    if mapcols["date_pub"] in df.columns and mapcols["date_pub"] is not None:
+    # Badge "Nouveau" si publication < 30 jours
+    if m["date_pub"] is not None and m["date_pub"] in df.columns:
         def _is_new(x):
             try:
                 d = pd.to_datetime(x)
-                return (pd.Timestamp.now(tz=None) - d) <= pd.Timedelta(days=30)
+                return (pd.Timestamp.now() - d) <= pd.Timedelta(days=30)
             except Exception:
                 return False
-        df["_is_new"] = df[mapcols["date_pub"]].apply(_is_new)
+        df["_is_new"] = df[m["date_pub"]].apply(_is_new)
     else:
         df["_is_new"] = False
 
     return df
 
-# ================== MAP (Leaflet via Folium, iframe) ==================
+# ================== MAP (Folium/Mapnik) ==================
 def build_map(df_valid: pd.DataFrame, ref_col: Optional[str]):
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
-    m = folium.Map(
-        location=[FR_LAT, FR_LON],
-        zoom_start=FR_ZOOM,
-        tiles=None,
-        control_scale=False,
-        zoom_control=True
-    )
-
+    m = folium.Map(location=[FR_LAT, FR_LON], zoom_start=FR_ZOOM, tiles=None, control_scale=False, zoom_control=True)
     folium.TileLayer(
         tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         attr="© OpenStreetMap contributors",
         name="OpenStreetMap.Mapnik",
-        max_zoom=19,
-        min_zoom=0,
-        opacity=1.0
+        max_zoom=19, min_zoom=0, opacity=1.0
     ).add_to(m)
 
     group = folium.FeatureGroup(name="Annonces").add_to(m)
-    CSS = "background:" + LOGO_BLUE + "; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
+    css = "background:" + LOGO_BLUE + "; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
 
     for _, r in df_valid.iterrows():
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r[ref_col]) if ref_col else ""
-        html = f'<div style="{CSS}">{ref_text}</div>'
+        html = f'<div style="{css}">{ref_text}</div>'
         icon = folium.DivIcon(html=html)
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
-
     return m
 
-# ================== RIGHT PANEL RENDERING ==================
+# ================== RIGHT PANEL ==================
 def sanitize_value(val):
     if val is None: return ""
     s = str(val).strip()
@@ -189,14 +174,13 @@ def sanitize_value(val):
         return ""
     return s
 
-def pictures(listing, photos_col, photo_main_col):
-    urls = []
+def pictures(listing: pd.Series, photos_col, photo_main_col) -> List[str]:
+    urls: List[str] = []
     if photos_col and photos_col in listing and isinstance(listing[photos_col], str):
         for u in str(listing[photos_col]).split("|"):
             u = u.strip()
             if u:
                 urls.append(u)
-    # put main photo first if specified
     main = None
     if photo_main_col and photo_main_col in listing:
         mv = str(listing[photo_main_col]).strip()
@@ -206,49 +190,47 @@ def pictures(listing, photos_col, photo_main_col):
         urls.insert(0, main)
     return urls
 
-def render_right_panel(df_valid: pd.DataFrame, mapcols: dict):
-    # Reference selector (kept simple and robust)
-    ref_col = mapcols.get("ref")
+def render_right_panel(df_valid: pd.DataFrame, m: dict):
+    ref_col = m.get("ref")
     refs = df_valid[ref_col].astype(str).tolist() if ref_col else [f"#{i+1}" for i in range(len(df_valid))]
+    if not refs:
+        st.info("Aucune annonce à afficher.")
+        return
+
     if "selected_ref" not in st.session_state:
-        st.session_state["selected_ref"] = refs[0] if refs else ""
+        st.session_state["selected_ref"] = refs[0]
 
     sel = st.selectbox("Référence annonce", refs, index=refs.index(st.session_state["selected_ref"]) if st.session_state["selected_ref"] in refs else 0)
     st.session_state["selected_ref"] = sel
 
-    # Selected row
+    # ligne sélectionnée
     if ref_col:
         row = df_valid[df_valid[ref_col].astype(str) == sel].iloc[0]
     else:
         row = df_valid.iloc[refs.index(sel)]
 
-    # Header
     st.markdown(f"### Détails annonce **{sel}**")
     if row.get("_is_new", False):
         st.markdown('<span class="smbg-badge">Nouveau</span>', unsafe_allow_html=True)
     st.write("")
 
-    # Google Maps button
-    gmap_col = mapcols.get("gmap")
-    gmap_val = row.get(gmap_col) if gmap_col else None
-    if isinstance(gmap_val, str) and gmap_val.strip():
-        url = gmap_val.strip()
-        st.markdown(f'<a href="{url}" target="_blank"><button class="smbg-button">Ouvrir dans Google Maps</button></a>', unsafe_allow_html=True)
+    # Bouton Google Maps
+    gmap_col = m.get("gmap")
+    if gmap_col and isinstance(row.get(gmap_col), str) and row[gmap_col].strip():
+        st.markdown(f'<a href="{row[gmap_col].strip()}" target="_blank"><button class="smbg-button">Ouvrir dans Google Maps</button></a>', unsafe_allow_html=True)
 
-    # Grid of fields (respect Excel order, hide '/', '-' and empty)
-    # Build display list: take all columns except technical ones; skip internal helper columns
-    skip_cols = {mapcols.get("lat"), mapcols.get("lon"), mapcols.get("actif"), mapcols.get("photos"), mapcols.get("photo_main"), mapcols.get("gmap"),
-                 "_lat", "_lon", "_actif", "_is_new"}
-    display_cols = [c for c in df_valid.columns if c not in skip_cols]
+    # Champs (respect ordre Excel et masquer colonnes techniques)
+    skip = {m.get("lat"), m.get("lon"), m.get("actif"), m.get("photos"), m.get("photo_main"), m.get("gmap"), "_lat", "_lon", "_actif", "_is_new"}
+    display_cols = [c for c in df_valid.columns if c not in skip]
 
     for c in display_cols:
         val = sanitize_value(row.get(c))
-        if val == "":  # hide / - ""
+        if val == "":
             continue
         st.markdown(f'<div class="smbg-item"><div class="smbg-key">{c}</div><div class="smbg-val">{val}</div></div>', unsafe_allow_html=True)
 
     # Photos
-    ph_urls = pictures(row, mapcols.get("photos"), mapcols.get("photo_main"))
+    ph_urls = pictures(row, m.get("photos"), m.get("photo_main"))
     if ph_urls:
         st.markdown("#### Photos")
         for u in ph_urls:
@@ -261,25 +243,23 @@ def main():
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
-    mapcols = build_mapping(df)
-    df_valid = prepare_df(df, mapcols)
+    m = build_mapping(df)
+    df_valid = prepare_df(df, m)
     if df_valid.empty:
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    ref_col = mapcols.get("ref") if mapcols.get("ref") in df_valid.columns else None
+    ref_col = m.get("ref") if m.get("ref") in df_valid.columns else None
 
-    # Layout: map (left) + right drawer
     col_map, col_right = st.columns([7, 5], gap="small")
 
     with col_map:
-        m = build_map(df_valid, ref_col)
-        html_str = m.get_root().render()
-        st_html(html_str, height=900, scrolling=False)
+        mapp = build_map(df_valid, ref_col)
+        st_html(mapp.get_root().render(), height=900, scrolling=False)
 
     with col_right:
         st.markdown('<div class="smbg-drawer">', unsafe_allow_html=True)
-        render_right_panel(df_valid, mapcols)
+        render_right_panel(df_valid, m)
         st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
