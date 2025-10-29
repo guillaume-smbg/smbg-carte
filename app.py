@@ -1,5 +1,5 @@
 
-import os, io, re
+import os, io, re, unicodedata
 from typing import List, Dict
 import pandas as pd
 import streamlit as st
@@ -22,7 +22,7 @@ CSS = f"""
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
   [data-testid="stSidebar"] .smbg-scroll {{ max-height: 190px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-  [data-testid="stSidebar"] .smbg-indent {{ padding-left: 18px; }}
+  [data-testid="stSidebar"] .smbg-indent {{ padding-left: 26px; }} /* stronger indent */
   [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
@@ -38,7 +38,6 @@ CSS = f"""
   .kv .k {{ min-width:140px; color:#4b5563; font-weight:600; }}
   .kv .v {{ color:#111827; }}
 
-  /* Hide Leaflet popups visually (we still use them to capture clicks) */
   .leaflet-popup-pane, .leaflet-popup {{ display: none !important; }}
 </style>
 """
@@ -69,6 +68,13 @@ def normalize_bool(val):
     if isinstance(val, bool): return val
     return False
 
+def norm_txt(x: str) -> str:
+    if x is None: return ""
+    s = str(x).strip().lower()
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"\s+", " ", s)
+    return s
+
 def sanitize_value(v):
     if v is None: return ""
     s = str(v).strip()
@@ -97,7 +103,7 @@ def drawer(row: pd.Series):
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
-def region_department_nested(df: pd.DataFrame) -> Dict[str, List[str]]:
+def region_department_nested(df: pd.DataFrame):
     sel_regions: List[str] = []
     sel_deps: List[str] = []
     st.markdown("**Région**")
@@ -110,13 +116,13 @@ def region_department_nested(df: pd.DataFrame) -> Dict[str, List[str]]:
             if deps:
                 st.markdown('<div class="smbg-indent">', unsafe_allow_html=True)
                 for dep in deps:
-                    # visual indent via label prefix ensures clear hierarchy; unique key keeps state
-                    st.checkbox(f"  {dep}", key=f"dep_{reg}_{dep}")
+                    label = f"↳ {dep}"
+                    st.checkbox(label, key=f"dep_{reg}_{dep}")
                     if st.session_state.get(f"dep_{reg}_{dep}"):
                         sel_deps.append(dep)
                 st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    return {"regions": sel_regions, "departements": sel_deps}
+    return sel_regions, sel_deps
 
 def main():
     df = load_excel()
@@ -126,63 +132,70 @@ def main():
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
+    # normalized helper cols
+    df["_typologie_n"] = df.get("Typologie", "").astype(str).map(norm_txt)
+    df["_empl_n"] = df.get("Emplacement", "").astype(str).map(norm_txt)
+    df["_extr_n"] = df.get("Extraction", "").astype(str).map(norm_txt)
+
     df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
     if df.empty:
         st.warning("Aucune ligne active avec coordonnées valides."); st.stop()
 
-    # Sidebar filters
     with st.sidebar:
         st.markdown("### Filtres")
         working = df.copy()
 
-        # Nested Region -> Department
+        # Région -> Département (nested)
         if "Région" in working.columns and "Département" in working.columns:
-            sel = region_department_nested(working)
-            if sel["regions"]:
-                working = working[working["Région"].astype(str).isin(sel["regions"])]
-            if sel["departements"]:
-                working = working[working["Département"].astype(str).isin(sel["departements"])]
+            sel_regions, sel_deps = region_department_nested(working)
+            if sel_regions:
+                working = working[working["Région"].astype(str).isin(sel_regions)]
+            if sel_deps:
+                working = working[working["Département"].astype(str).isin(sel_deps)]
 
-        # Typologie
+        # Typologie (normalized)
         if "Typologie" in working.columns:
             st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            typos = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
-            chosen_typos = []
-            for t in typos:
+            # Build display list from raw values present after region/dep filters
+            typos_raw = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
+            # Map display -> normalized
+            selected_norm = []
+            for t in typos_raw:
                 if st.checkbox(t, key=f"typo_{t}"):
-                    chosen_typos.append(t)
+                    selected_norm.append(norm_txt(t))
             st.markdown("</div>", unsafe_allow_html=True)
-            if chosen_typos:
-                working = working[working["Typologie"].astype(str).isin(chosen_typos)]
+            if selected_norm:
+                working = working[working["_typologie_n"].isin(selected_norm)]
 
-        # Extraction
+        # Extraction (normalized)
         if "Extraction" in working.columns:
             st.markdown("<div class='group-title'>Extraction</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
-            extr_sel = []
-            for e in ["oui","non","faisable"]:
+            opts = ["oui","non","faisable"]
+            sel_extr = []
+            for e in opts:
                 if st.checkbox(e, key=f"extr_{e}"):
-                    extr_sel.append(e)
+                    sel_extr.append(norm_txt(e))
             st.markdown("</div>", unsafe_allow_html=True)
-            if extr_sel:
-                en = working["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
-                working = working[en.isin(extr_sel)]
+            if sel_extr:
+                working = working[working["_extr_n"].isin(sel_extr)]
 
-        # Emplacement
+        # Emplacement (normalized)
         if "Emplacement" in working.columns:
             st.markdown("<div class='group-title'>Emplacement</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
             vals = [e for e in working["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
+            # order: Centre-ville / Périphérie first if present
             base = ["Centre-ville","Périphérie"]
-            options = [e for e in base if e in vals] + [e for e in vals if e not in base]
-            em_sel = []
-            for e in options:
+            ordered = [e for e in base if e in vals] + [e for e in vals if e not in base]
+            sel_empl_norm = []
+            for e in ordered:
                 if st.checkbox(e, key=f"empl_{e}"):
-                    em_sel.append(e)
+                    sel_empl_norm.append(norm_txt(e))
             st.markdown("</div>", unsafe_allow_html=True)
-            if em_sel:
-                working = working[working["Emplacement"].astype(str).isin(em_sel)]
+            if sel_empl_norm:
+                working = working[working["_empl_n"].isin(sel_empl_norm)]
 
         # Surface slider
         if "Surface GLA" in working.columns:
@@ -192,19 +205,19 @@ def main():
                 if vmin == vmax:
                     st.number_input("Surface (m²)", value=vmin, step=1, disabled=True, key="surf_single")
                 else:
-                    rang = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
-                    working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rang[0], rang[1])]
+                    rng = st.slider("Surface (m²)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1, key="surf_range")
+                    working = working[pd.to_numeric(working["Surface GLA"], errors="coerce").between(rng[0], rng[1])]
 
-        # Loyer slider (robust to min==max)
+        # Loyer annuel slider
         if "Loyer annuel" in working.columns:
             series = pd.to_numeric(working["Loyer annuel"], errors="coerce").dropna()
             if not series.empty:
                 vmin, vmax = int(series.min()), int(series.max())
                 if vmin == vmax:
-                    st.number_input("Loyer annuel (€)", value=vmin, step=1, disabled=True, key="loyer_single_readonly")
+                    st.number_input("Loyer annuel (€)", value=vmin, step=1, disabled=True, key="loyer_single")
                 else:
-                    rang = st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1000, key="loyer_range")
-                    working = working[pd.to_numeric(working["Loyer annuel"], errors="coerce").between(rang[0], rang[1])]
+                    rng = st.slider("Loyer annuel (€)", min_value=vmin, max_value=vmax, value=(vmin, vmax), step=1000, key="loyer_range")
+                    working = working[pd.to_numeric(working["Loyer annuel"], errors="coerce").between(rng[0], rng[1])]
 
         c1, c2 = st.columns(2)
         with c1:
