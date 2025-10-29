@@ -12,14 +12,14 @@ from streamlit.components.v1 import html as st_html
 # ================== THEME ==================
 st.set_page_config(page_title="SMBG Carte — Map", layout="wide")
 LOGO_BLUE = "#05263d"
-COPPER = "#7a5133"  # extracted or default
+COPPER = "#c47e47"  # peut être affiné si on échantillonne le logo côté serveur
 
-# Global CSS: fixed left filter pane (~275px), drawer on the right, brand colors
-st.markdown(f"""
+# CSS avec placeholders pour éviter les conflits d'accolades dans les f-strings
+_STYLES = """
 <style>
   :root {
-    --smbg-blue: #05263d;
-    --smbg-copper: #7a5133;
+    --smbg-blue: __BLUE__;
+    --smbg-copper: __COPPER__;
   }
   html, body {height:100%;}
   [data-testid="stAppViewContainer"]{padding:0; margin:0; min-height:100vh;}
@@ -27,7 +27,8 @@ st.markdown(f"""
   .block-container{padding:0 !important; margin:0 !important;}
   header, footer {visibility:hidden; height:0;}
 
-  /* 3-column layout: left (filters), center (map), right (drawer overlay) */
+  /* 2 zones structurelles dans le flux Streamlit: left (filtres) + map container
+     Le tiroir droit est en overlay (position: fixed) */
   .smbg-row { display: grid; grid-template-columns: 275px 1fr; gap: 0; }
   .smbg-left {
     background: var(--smbg-blue);
@@ -45,14 +46,14 @@ st.markdown(f"""
   .smbg-btn.secondary { background: transparent; color: var(--smbg-copper); border: 1px solid var(--smbg-copper); }
   .smbg-section { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.15);}
 
-  /* Streamlit inputs inside left panel */
+  /* Inputs côté gauche */
   .smbg-left .stSelectbox div[data-baseweb="select"] > div { background: rgba(255,255,255,0.06); color: #fff; }
   .smbg-left .stMultiSelect div[data-baseweb="select"] > div { background: rgba(255,255,255,0.06); color: #fff; }
   .smbg-left .stSlider > div { color: var(--smbg-copper); }
   .smbg-left .stButton > button { background: var(--smbg-copper); color: #fff; border: none; border-radius: 10px; }
   .smbg-left .stButton > button:hover { filter: brightness(0.92); }
 
-  /* Right drawer */
+  /* Tiroir droit en overlay */
   .smbg-drawer {
     position: fixed; top: 0; right: 0; width: 420px; max-width: 96vw;
     height: 100vh; background: #fff; transform: translateX(100%);
@@ -71,7 +72,9 @@ st.markdown(f"""
   .smbg-photo{width:100%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
   .smbg-map { height: calc(100vh - 0px); overflow: hidden; }
 </style>
-""", unsafe_allow_html=True)
+"""
+STYLES = _STYLES.replace("__BLUE__", LOGO_BLUE).replace("__COPPER__", COPPER)
+st.markdown(STYLES, unsafe_allow_html=True)
 
 # ================== DATA LOADING ==================
 DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
@@ -131,7 +134,7 @@ def sanitize_value(val):
     s = str(val).strip()
     return "" if s in ["/", "-", ""] else s
 
-# ================== FILTER LOGIC ==================
+# ================== FILTER LOGIC (LEFT PANE) ==================
 def build_filters(df: pd.DataFrame):
     df = df.copy()
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
@@ -144,6 +147,7 @@ def build_filters(df: pd.DataFrame):
         st.markdown('<div class="smbg-left">', unsafe_allow_html=True)
         st.markdown("### Filtres")
 
+        # Région -> Département
         regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-", "/",""]])
         sel_region = st.selectbox("Région", ["(Toutes)"] + regions, index=0)
         df_region = df if sel_region == "(Toutes)" else df[df["Région"].astype(str) == sel_region]
@@ -151,13 +155,16 @@ def build_filters(df: pd.DataFrame):
         deps = sorted([d for d in df_region["Département"].dropna().astype(str).unique() if d not in ["-","/",""]])
         sel_dep = st.selectbox("Département", ["(Tous)"] + deps, index=0)
 
+        # Typologie (multi)
         typo_vals = sorted([t for t in df_region["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
         sel_typo = st.multiselect("Typologie d'actif", options=typo_vals, default=[])
 
+        # Extraction
         extr_vals = ["oui","non","faisable"]
         extr_col = df_region["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
         sel_extr = st.multiselect("Extraction", options=extr_vals, default=[])
 
+        # Surface GLA slider
         surf_series = pd.to_numeric(df_region.get("Surface GLA", pd.Series(dtype=float)), errors="coerce").dropna()
         if not surf_series.empty:
             smin, smax = int(surf_series.min()), int(surf_series.max())
@@ -165,6 +172,7 @@ def build_filters(df: pd.DataFrame):
         else:
             sel_surf = (0, 10**9)
 
+        # Loyer annuel slider
         loyer_series = pd.to_numeric(df_region.get("Loyer annuel", pd.Series(dtype=float)), errors="coerce").dropna()
         if not loyer_series.empty:
             lmin, lmax = int(loyer_series.min()), int(loyer_series.max())
@@ -172,14 +180,17 @@ def build_filters(df: pd.DataFrame):
         else:
             sel_loyer = (0, 10**12)
 
+        # Restauration autorisée
         rest_vals = ["oui","non"]
         sel_rest = st.selectbox("Restauration autorisée", ["(Toutes)"] + rest_vals, index=0)
 
+        # Emplacement
         empl_vals = [e for e in df_region["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
         base_empl = ["Centre-ville","Périphérie"]
         options_empl = [e for e in base_empl if e in empl_vals] + [e for e in empl_vals if e not in base_empl]
         sel_empl = st.selectbox("Emplacement", ["(Tous)"] + options_empl, index=0)
 
+        # Actions
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Réinitialiser filtres"):
@@ -187,9 +198,11 @@ def build_filters(df: pd.DataFrame):
         with c2:
             st.button("Je suis intéressé")
 
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)  # end left pane
 
+    st.markdown('</div>', unsafe_allow_html=True)  # end row
+
+    # Apply filters
     filtered = df_region.copy()
     if sel_dep != "(Tous)":
         filtered = filtered[filtered["Département"].astype(str) == sel_dep]
@@ -224,7 +237,7 @@ def build_map(df_valid: pd.DataFrame, ref_col: Optional[str]):
     for _, r in df_valid.iterrows():
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r.get(ref_col, ""))
-        html = f'<div style="{css}">{ref_text}</div>'
+        html = '<div style="' + css + '">' + ref_text + '</div>'
         icon = folium.DivIcon(html=html)
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
     return m
@@ -251,12 +264,12 @@ def render_drawer(selected_row: pd.Series, open_state: bool = True):
     display_cols = slice_g_to_ah(selected_row.to_frame().T)
 
     drawer_class = "smbg-drawer open" if open_state else "smbg-drawer"
-    st.markdown(f'<div class="{drawer_class}">', unsafe_allow_html=True)
-    st.markdown(f'<div class="smbg-banner">Référence : {ref_val}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="' + drawer_class + '">', unsafe_allow_html=True)
+    st.markdown('<div class="smbg-banner">Référence : ' + ref_val + '</div>', unsafe_allow_html=True)
     st.markdown('<div class="smbg-body">', unsafe_allow_html=True)
 
     if isinstance(gm, str) and gm.strip():
-        st.markdown(f'<a href="{gm.strip()}" target="_blank"><button class="smbg-btn">Cliquer ici</button></a>', unsafe_allow_html=True)
+        st.markdown('<a href="' + gm.strip() + '" target="_blank"><button class="smbg-btn">Cliquer ici</button></a>', unsafe_allow_html=True)
 
     rec = selected_row
     for c in display_cols:
@@ -265,13 +278,13 @@ def render_drawer(selected_row: pd.Series, open_state: bool = True):
         val = sanitize_value(rec.get(c))
         if not val:
             continue
-        st.markdown(f'<div class="smbg-item"><div class="smbg-key">{c}</div><div class="smbg-val">{val}</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="smbg-item"><div class="smbg-key">' + str(c) + '</div><div class="smbg-val">' + str(val) + '</div></div>', unsafe_allow_html=True)
 
     ph_urls = pictures(rec)
     if ph_urls:
         st.markdown("#### Photos")
         for u in ph_urls:
-            st.markdown(f'<img class="smbg-photo" loading="lazy" src="{u}" />', unsafe_allow_html=True)
+            st.markdown('<img class="smbg-photo" loading="lazy" src="' + u + '" />', unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -283,6 +296,7 @@ def main():
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
+    # Actif + coords
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
@@ -291,8 +305,10 @@ def main():
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
+    # Filtres (gauche)
     filtered = build_filters(df)
 
+    # Carte (centre)
     with st.container():
         st.markdown('<div class="smbg-map">', unsafe_allow_html=True)
         ref_col = "Référence annonce" if "Référence annonce" in filtered.columns else None
@@ -300,13 +316,15 @@ def main():
         st_html(mapp.get_root().render(), height=900, scrolling=False)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    ref_list = filtered["Référence annonce"].astype(str).tolist() if "Référence annonce" in filtered.columns else [f"#{i+1}" for i in range(len(filtered))]
+    # Sélecteur d'annonce (temporaire) pour ouvrir le tiroir
+    ref_list = filtered["Référence annonce"].astype(str).tolist() if "Référence annonce" in filtered.columns else ['#' + str(i+1) for i in range(len(filtered))]
     if not ref_list:
         return
     default_idx = 0
     selected = st.selectbox("Sélection annonce (pour le volet droit)", ref_list, index=default_idx, key="sel_ref")
     row = filtered[filtered["Référence annonce"].astype(str) == selected].iloc[0] if "Référence annonce" in filtered.columns else filtered.iloc[default_idx]
 
+    # Tiroir droit ouvert (coulissant)
     render_drawer(row, open_state=True)
 
 if __name__ == "__main__":
