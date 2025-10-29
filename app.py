@@ -1,6 +1,6 @@
 
-import os, io, re, unicodedata
-from typing import List, Dict
+import os, io, re, unicodedata, math
+from typing import List, Dict, Tuple
 import pandas as pd
 import streamlit as st
 import folium
@@ -15,7 +15,7 @@ CSS = f"""
 <style>
   [data-testid="collapsedControl"] {{ display: none !important; }}
 
-  /* Sidebar fixed at 275px with SMBG branding */
+  /* Sidebar fixed 275px */
   [data-testid="stSidebar"] {{
     width: 275px; min-width: 275px; max-width: 275px;
     background: {LOGO_BLUE}; color: {COPPER};
@@ -23,14 +23,9 @@ CSS = f"""
   [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3,
   [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {{ color: {COPPER} !important; }}
   [data-testid="stSidebar"] .group-title {{ margin: 8px 0 4px 0; font-weight: 700; color: {COPPER}; }}
-
-  /* Mini scroll blocks */
   [data-testid="stSidebar"] .smbg-scroll {{ max-height: 200px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }}
-
-  /* Buttons copper */
   [data-testid="stSidebar"] .stButton > button {{ background: {COPPER} !important; color: #ffffff !important; font-weight: 700; border-radius: 10px; border: none; }}
 
-  /* App paddings reduced */
   [data-testid="stAppViewContainer"] {{ padding-top: 0; padding-bottom: 0; }}
   .block-container {{ padding-top: 8px !important; padding-left: 0 !important; padding-right: 0 !important; }}
 
@@ -44,9 +39,6 @@ CSS = f"""
   .kv {{ display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }}
   .kv .k {{ min-width:140px; color:#4b5563; font-weight:600; }}
   .kv .v {{ color:#111827; }}
-
-  /* Hide Leaflet popups (kept only to capture pin click) */
-  .leaflet-popup-pane, .leaflet-popup {{ display: none !important; }}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -55,7 +47,7 @@ DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
 
 def normalize_excel_url(url: str) -> str:
     if not url: return url
-    return re.sub(r"https://github\\.com/(.+)/blob/([^ ]+)", r"https://github.com/\\1/raw/\\2", url.strip())
+    return re.sub(r"https://github\.com/(.+)/blob/([^ ]+)", r"https://github.com/\1/raw/\2", url.strip())
 
 @st.cache_data(show_spinner=False)
 def load_excel() -> pd.DataFrame:
@@ -80,7 +72,7 @@ def norm_txt(x: str) -> str:
     if x is None: return ""
     s = str(x).strip().lower()
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    s = re.sub(r"\\s+", " ", s)
+    s = re.sub(r"\s+", " ", s)
     return s
 
 def sanitize_value(v):
@@ -112,6 +104,7 @@ def drawer(row: pd.Series):
     st.markdown('</div></div>', unsafe_allow_html=True)
 
 def clear_all_filters_once():
+    # Ensure first load shows everything
     if not st.session_state.get("_smbg_cleared", False):
         for k in list(st.session_state.keys()):
             if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
@@ -130,13 +123,15 @@ def region_department_nested(df: pd.DataFrame):
             deps = sorted([d for d in df[df["Région"].astype(str)==reg]["Département"].dropna().astype(str).unique() if d not in ["-","/"]])
             for dep in deps:
                 col_pad, col_box = st.columns([1, 10])
-                with col_pad:
-                    st.write("")  # spacer indent
+                with col_pad: st.write("")
                 with col_box:
                     if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
                         sel_deps.append(dep)
     st.markdown('</div>', unsafe_allow_html=True)
     return sel_regions, sel_deps
+
+def latlon_key(lat: float, lon: float, ndigits: int = 6) -> Tuple[float, float]:
+    return (round(float(lat), ndigits), round(float(lon), ndigits))
 
 def main():
     df = load_excel()
@@ -240,10 +235,16 @@ def main():
         st.info("Aucun résultat pour ces filtres.")
         return
 
+    # Build index by rounded lat/lon for click lookup
+    data["_lat_r"] = data["_lat"].round(6)
+    data["_lon_r"] = data["_lon"].round(6)
+    idx = {(row["_lat_r"], row["_lon_r"]): i for i, row in data.reset_index().iterrows()}
+
     FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6
     m = folium.Map(location=[FR_LAT, FR_LON], zoom_start=FR_ZOOM,
                    tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                    attr="© OpenStreetMap contributors")
+
     css = f"background:{LOGO_BLUE}; color:#fff; border:2px solid #fff; width:28px; height:28px; line-height:28px; border-radius:50%; text-align:center; font-size:11px; font-weight:600;"
     group = folium.FeatureGroup(name="Annonces").add_to(m)
 
@@ -251,19 +252,20 @@ def main():
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r.get("Référence annonce", ""))
         icon = folium.DivIcon(html=f'<div style="{css}">{ref_text}</div>')
-        popup = folium.Popup(ref_text, max_width=1, show=False)
-        folium.Marker(location=[lat, lon], icon=icon, popup=popup).add_to(group)
+        folium.Marker(location=[lat, lon], icon=icon).add_to(group)  # NO POPUP
 
     out = st_folium(m, height=950, width=None, returned_objects=[])
 
+    # Detect marker click via last_object_clicked (lat/lon). Open drawer if match.
     ref_clicked = None
     if isinstance(out, dict):
-        ref_clicked = out.get("last_object_clicked_popup")
-
-    if ref_clicked and "Référence annonce" in data.columns:
-        row = data[data["Référence annonce"].astype(str) == str(ref_clicked)]
-        if not row.empty:
-            drawer(row.iloc[0])
+        loc = out.get("last_object_clicked")
+        if isinstance(loc, dict) and "lat" in loc and "lng" in loc:
+            key = (round(float(loc["lat"]),6), round(float(loc["lng"]),6))
+            row_idx = idx.get(key, None)
+            if row_idx is not None:
+                row = data.reset_index().iloc[row_idx]
+                drawer(row)
 
 if __name__ == "__main__":
     main()
