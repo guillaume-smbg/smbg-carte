@@ -33,7 +33,7 @@ _CSS = """
   .smbg-left-fixed .stButton > button { background: var(--smbg-copper) !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }
 
   /* Main content shifted to the right of fixed panel */
-  .smbg-content { padding-left: 275px; }
+  .smbg-content { padding-left: 275px; width: calc(100vw - 275px); }
 
   /* Right drawer overlay */
   .smbg-drawer {
@@ -206,7 +206,7 @@ def build_map(df_valid: pd.DataFrame, ref_col: Optional[str] = "Référence anno
         lat, lon = float(r["_lat"]), float(r["_lon"])
         ref_text = str(r[rc]) if rc else ""
         href = "?ref=" + ref_text
-        html = '<a href="' + href + '" style="text-decoration:none;"><div style="' + css + '">' + ref_text + '</div></a>'
+        html = '<a href="' + href + '" target="_top" style="text-decoration:none;"><div style="' + css + '">' + ref_text + '</div></a>'
         icon = folium.DivIcon(html=html)
         folium.Marker(location=[lat, lon], icon=icon).add_to(group)
 
@@ -281,20 +281,20 @@ def main():
     st.markdown('<div class="smbg-content">', unsafe_allow_html=True)
     ref_col = "Référence annonce" if "Référence annonce" in filtered.columns else None
     mapp = build_map(filtered, ref_col)
-    st_html(mapp.get_root().render(), height= int(0.92 * 1080), scrolling=False)  # approx 92vh
+    html_map = mapp.get_root().render().replace("height: 100.0%;", "height: 100vh;")
+    st_html(html_map, height=900, scrolling=False)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Open drawer if ?ref present
+    ref_value = None
     try:
         params = st.query_params
-    except Exception:
-        params = st.experimental_get_query_params()
-
-    ref_value = None
-    if isinstance(params, dict):
         ref_value = params.get("ref", None)
-        if isinstance(ref_value, list):
-            ref_value = ref_value[0] if ref_value else None
+    except Exception:
+        qp = st.experimental_get_query_params()
+        if isinstance(qp, dict):
+            rv = qp.get("ref", None)
+            ref_value = rv[0] if isinstance(rv, list) and rv else rv
 
     if ref_value and "Référence annonce" in filtered.columns:
         subset = filtered[filtered["Référence annonce"].astype(str) == str(ref_value)]
