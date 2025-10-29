@@ -142,7 +142,7 @@ def main():
                 working = working[working["Département"].astype(str).isin(sel["departements"])]
 
         if "Typologie" in working.columns:
-            st.markdown('<div class="group-title">Typologie d'actif</div>', unsafe_allow_html=True)
+            st.markdown("<div class='group-title'>Typologie d'actif</div>", unsafe_allow_html=True)
             st.markdown('<div class="smbg-scroll">', unsafe_allow_html=True)
             typos = sorted([t for t in working["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
             sel_typos = []
