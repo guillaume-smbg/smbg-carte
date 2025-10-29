@@ -13,33 +13,34 @@ st.set_page_config(page_title="SMBG Carte — Map", layout="wide")
 LOGO_BLUE = "#05263d"
 COPPER = "#c47e47"
 
-# --------- CSS (fixed left panel 275px) ---------
+# --------- CSS: fixed overlays ---------
 _CSS = """
 <style>
   :root { --smbg-blue: __BLUE__; --smbg-copper: __COPPER__; }
   [data-testid="stAppViewContainer"] { padding: 0; }
   header, footer { visibility: hidden; height: 0; }
 
-  /* Two-column app layout */
-  .smbg-layout { display: grid; grid-template-columns: 275px 1fr; }
-  .smbg-left {
+  /* Fixed left panel */
+  .smbg-left-fixed {
+    position: fixed; left: 0; top: 0; width: 275px; height: 100vh;
     background: var(--smbg-blue); color: var(--smbg-copper);
-    min-height: 100vh; height: 100vh; position: sticky; top: 0;
-    padding: 14px; border-right: 1px solid rgba(255,255,255,0.08); overflow-y: auto;
+    padding: 14px; border-right: 1px solid rgba(255,255,255,0.08);
+    overflow-y: auto; z-index: 1000;
   }
-  .smbg-left h3, .smbg-left label, .smbg-left p { color: var(--smbg-copper) !important; }
-  .smbg-left .smbg-scroll { max-height: 180px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }
-  .smbg-left .smbg-indent { padding-left: 12px; }
-  .smbg-left .stButton > button { background: var(--smbg-copper) !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }
+  .smbg-left-fixed h3, .smbg-left-fixed label, .smbg-left-fixed p { color: var(--smbg-copper) !important; }
+  .smbg-left-fixed .smbg-scroll { max-height: 180px; overflow-y: auto; padding: 6px 8px; background: rgba(255,255,255,0.06); border-radius: 8px; }
+  .smbg-left-fixed .smbg-indent { padding-left: 12px; }
+  .smbg-left-fixed .stButton > button { background: var(--smbg-copper) !important; color: #fff !important; font-weight: 700; border-radius: 10px; border: none; }
 
-  .smbg-right { min-height: 100vh; padding: 0 0 0 0; }
+  /* Main content shifted to the right of fixed panel */
+  .smbg-content { padding-left: 275px; }
 
   /* Right drawer overlay */
   .smbg-drawer {
     position: fixed; top: 0; right: 0; width: 275px; max-width: 96vw;
     height: 100vh; background: #fff; transform: translateX(100%);
     transition: transform 240ms ease; box-shadow: -14px 0 28px rgba(0,0,0,0.12);
-    border-left: 1px solid #e9eaee; z-index: 9999; overflow-y: auto;
+    border-left: 1px solid #e9eaee; z-index: 1100; overflow-y: auto;
   }
   .smbg-drawer.open { transform: translateX(0); }
   .smbg-banner { background: var(--smbg-blue); color: #fff; padding: 12px 16px; font-weight: 800; font-size: 18px; position: sticky; top:0; }
@@ -122,17 +123,9 @@ def checkbox_group(title: str, options: List[str], key_prefix: str, indent: bool
     st.markdown("</div>", unsafe_allow_html=True)
     return selected
 
-# --------- UI Containers ---------
-def start_layout():
-    st.markdown('<div class="smbg-layout">', unsafe_allow_html=True)
-
-def end_layout():
-    st.markdown('</div>', unsafe_allow_html=True)
-
 # --------- Left Filters (fixed) ---------
 def render_left_filters(df: pd.DataFrame) -> pd.DataFrame:
-    # Left fixed panel container
-    st.markdown('<div class="smbg-left">', unsafe_allow_html=True)
+    st.markdown('<div class="smbg-left-fixed">', unsafe_allow_html=True)
     st.markdown("### Filtres")
 
     scoped = df.copy()
@@ -191,8 +184,7 @@ def render_left_filters(df: pd.DataFrame) -> pd.DataFrame:
     with c2:
         st.button("Je suis intéressé")
 
-    st.markdown('</div>', unsafe_allow_html=True)  # end left
-
+    st.markdown('</div>', unsafe_allow_html=True)  # end fixed left
     return scoped
 
 # --------- Map builder ---------
@@ -274,7 +266,6 @@ def main():
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
-    # Keep active with coordinates
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
@@ -283,21 +274,15 @@ def main():
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    # Start layout
-    start_layout()
-
-    # LEFT fixed filters
+    # Render fixed left filters
     filtered = render_left_filters(df)
 
-    # RIGHT: map
-    st.markdown('<div class="smbg-right">', unsafe_allow_html=True)
+    # Content wrapper for map
+    st.markdown('<div class="smbg-content">', unsafe_allow_html=True)
     ref_col = "Référence annonce" if "Référence annonce" in filtered.columns else None
     mapp = build_map(filtered, ref_col)
-    st_html(mapp.get_root().render(), height=1000, scrolling=False)
+    st_html(mapp.get_root().render(), height= int(0.92 * 1080), scrolling=False)  # approx 92vh
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # End layout
-    end_layout()
 
     # Open drawer if ?ref present
     try:
