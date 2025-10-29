@@ -12,9 +12,9 @@ from streamlit.components.v1 import html as st_html
 # ================== THEME ==================
 st.set_page_config(page_title="SMBG Carte — Map", layout="wide")
 LOGO_BLUE = "#05263d"
-COPPER = "#c47e47"  # peut être affiné si on échantillonne le logo côté serveur
+COPPER = "#c47e47"
 
-# CSS avec placeholders pour éviter les conflits d'accolades dans les f-strings
+# Minimal, safe CSS (no f-strings inside CSS)
 _STYLES = """
 <style>
   :root {
@@ -27,33 +27,24 @@ _STYLES = """
   .block-container{padding:0 !important; margin:0 !important;}
   header, footer {visibility:hidden; height:0;}
 
-  /* 2 zones structurelles dans le flux Streamlit: left (filtres) + map container
-     Le tiroir droit est en overlay (position: fixed) */
-  .smbg-row { display: grid; grid-template-columns: 275px 1fr; gap: 0; }
-  .smbg-left {
-    background: var(--smbg-blue);
-    color: var(--smbg-copper);
-    padding: 14px 14px 18px 14px;
-    height: calc(100vh - 2px);
-    overflow: auto;
-    border-right: 1px solid rgba(255,255,255,0.08);
+  /* Left column look */
+  .smbg-left-box {
+    background: var(--smbg-blue); color: var(--smbg-copper);
+    padding: 14px 14px 18px 14px; min-height: 100vh; border-right: 1px solid rgba(255,255,255,0.08);
   }
-  .smbg-left h3, .smbg-left label, .smbg-left .stMarkdown p { color: var(--smbg-copper) !important; }
+  .smbg-left-box h3, .smbg-left-box label, .smbg-left-box .stMarkdown p { color: var(--smbg-copper) !important; }
   .smbg-btn {
     background: var(--smbg-copper); color: #fff; border: none; border-radius: 10px;
     padding: 8px 12px; font-weight: 700; cursor: pointer;
   }
   .smbg-btn.secondary { background: transparent; color: var(--smbg-copper); border: 1px solid var(--smbg-copper); }
-  .smbg-section { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.15);}
+  .smbg-left-box .stSelectbox div[data-baseweb="select"] > div,
+  .smbg-left-box .stMultiSelect div[data-baseweb="select"] > div { background: rgba(255,255,255,0.06); color: #fff; }
+  .smbg-left-box .stSlider > div { color: var(--smbg-copper); }
+  .smbg-left-box .stButton > button { background: var(--smbg-copper); color: #fff; border: none; border-radius: 10px; }
+  .smbg-left-box .stButton > button:hover { filter: brightness(0.92); }
 
-  /* Inputs côté gauche */
-  .smbg-left .stSelectbox div[data-baseweb="select"] > div { background: rgba(255,255,255,0.06); color: #fff; }
-  .smbg-left .stMultiSelect div[data-baseweb="select"] > div { background: rgba(255,255,255,0.06); color: #fff; }
-  .smbg-left .stSlider > div { color: var(--smbg-copper); }
-  .smbg-left .stButton > button { background: var(--smbg-copper); color: #fff; border: none; border-radius: 10px; }
-  .smbg-left .stButton > button:hover { filter: brightness(0.92); }
-
-  /* Tiroir droit en overlay */
+  /* Right drawer (overlay) */
   .smbg-drawer {
     position: fixed; top: 0; right: 0; width: 420px; max-width: 96vw;
     height: 100vh; background: #fff; transform: translateX(100%);
@@ -61,16 +52,12 @@ _STYLES = """
     border-left: 1px solid #e9eaee; z-index: 9999; overflow: auto;
   }
   .smbg-drawer.open { transform: translateX(0); }
-  .smbg-banner {
-    background: var(--smbg-blue); color: #fff; padding: 12px 16px; font-weight: 800; font-size: 18px;
-  }
+  .smbg-banner { background: var(--smbg-blue); color: #fff; padding: 12px 16px; font-weight: 800; font-size: 18px; }
   .smbg-body { padding: 14px 16px 24px 16px; }
-  .smbg-badge{background:#eeefe9; border:1px solid #d9d7cf; color:#333; padding:2px 8px; border-radius:10px; font-size:12px;}
   .smbg-item{display:flex; gap:8px; align-items:flex-start; margin-bottom:6px;}
   .smbg-key{min-width:180px; color:#4b5563; font-weight:600;}
   .smbg-val{color:#111827;}
   .smbg-photo{width:100%; height:auto; border-radius:12px; display:block; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
-  .smbg-map { height: calc(100vh - 0px); overflow: hidden; }
 </style>
 """
 STYLES = _STYLES.replace("__BLUE__", LOGO_BLUE).replace("__COPPER__", COPPER)
@@ -134,73 +121,55 @@ def sanitize_value(val):
     s = str(val).strip()
     return "" if s in ["/", "-", ""] else s
 
-# ================== FILTER LOGIC (LEFT PANE) ==================
-def build_filters(df: pd.DataFrame):
-    df = df.copy()
-    df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
-    df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
-    df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
-    df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()]
+# ================== FILTER LOGIC ==================
+def render_filters(df: pd.DataFrame):
+    st.markdown('<div class="smbg-left-box">', unsafe_allow_html=True)
+    st.markdown("### Filtres")
 
-    st.markdown('<div class="smbg-row">', unsafe_allow_html=True)
-    with st.container():
-        st.markdown('<div class="smbg-left">', unsafe_allow_html=True)
-        st.markdown("### Filtres")
+    regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-", "/",""]])
+    sel_region = st.selectbox("Région", ["(Toutes)"] + regions, index=0)
+    df_region = df if sel_region == "(Toutes)" else df[df["Région"].astype(str) == sel_region]
 
-        # Région -> Département
-        regions = sorted([r for r in df["Région"].dropna().astype(str).unique() if r not in ["-", "/",""]])
-        sel_region = st.selectbox("Région", ["(Toutes)"] + regions, index=0)
-        df_region = df if sel_region == "(Toutes)" else df[df["Région"].astype(str) == sel_region]
+    deps = sorted([d for d in df_region["Département"].dropna().astype(str).unique() if d not in ["-","/",""]])
+    sel_dep = st.selectbox("Département", ["(Tous)"] + deps, index=0)
 
-        deps = sorted([d for d in df_region["Département"].dropna().astype(str).unique() if d not in ["-","/",""]])
-        sel_dep = st.selectbox("Département", ["(Tous)"] + deps, index=0)
+    typo_vals = sorted([t for t in df_region["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
+    sel_typo = st.multiselect("Typologie d'actif", options=typo_vals, default=[])
 
-        # Typologie (multi)
-        typo_vals = sorted([t for t in df_region["Typologie"].dropna().astype(str).unique() if t not in ["-","/",""]])
-        sel_typo = st.multiselect("Typologie d'actif", options=typo_vals, default=[])
+    extr_vals = ["oui","non","faisable"]
+    extr_col = df_region["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
+    sel_extr = st.multiselect("Extraction", options=extr_vals, default=[])
 
-        # Extraction
-        extr_vals = ["oui","non","faisable"]
-        extr_col = df_region["Extraction"].astype(str).str.strip().str.lower().replace({"-":"","/":""})
-        sel_extr = st.multiselect("Extraction", options=extr_vals, default=[])
+    surf_series = pd.to_numeric(df_region.get("Surface GLA", pd.Series(dtype=float)), errors="coerce").dropna()
+    if not surf_series.empty:
+        smin, smax = int(surf_series.min()), int(surf_series.max())
+        sel_surf = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax), step=1)
+    else:
+        sel_surf = (0, 10**9)
 
-        # Surface GLA slider
-        surf_series = pd.to_numeric(df_region.get("Surface GLA", pd.Series(dtype=float)), errors="coerce").dropna()
-        if not surf_series.empty:
-            smin, smax = int(surf_series.min()), int(surf_series.max())
-            sel_surf = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax), step=1)
-        else:
-            sel_surf = (0, 10**9)
+    loyer_series = pd.to_numeric(df_region.get("Loyer annuel", pd.Series(dtype=float)), errors="coerce").dropna()
+    if not loyer_series.empty:
+        lmin, lmax = int(loyer_series.min()), int(loyer_series.max())
+        sel_loyer = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax), step=1000)
+    else:
+        sel_loyer = (0, 10**12)
 
-        # Loyer annuel slider
-        loyer_series = pd.to_numeric(df_region.get("Loyer annuel", pd.Series(dtype=float)), errors="coerce").dropna()
-        if not loyer_series.empty:
-            lmin, lmax = int(loyer_series.min()), int(loyer_series.max())
-            sel_loyer = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax), step=1000)
-        else:
-            sel_loyer = (0, 10**12)
+    rest_vals = ["oui","non"]
+    sel_rest = st.selectbox("Restauration autorisée", ["(Toutes)"] + rest_vals, index=0)
 
-        # Restauration autorisée
-        rest_vals = ["oui","non"]
-        sel_rest = st.selectbox("Restauration autorisée", ["(Toutes)"] + rest_vals, index=0)
+    empl_vals = [e for e in df_region["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
+    base_empl = ["Centre-ville","Périphérie"]
+    options_empl = [e for e in base_empl if e in empl_vals] + [e for e in empl_vals if e not in base_empl]
+    sel_empl = st.selectbox("Emplacement", ["(Tous)"] + options_empl, index=0)
 
-        # Emplacement
-        empl_vals = [e for e in df_region["Emplacement"].dropna().astype(str).unique() if e not in ["-","/",""]]
-        base_empl = ["Centre-ville","Périphérie"]
-        options_empl = [e for e in base_empl if e in empl_vals] + [e for e in empl_vals if e not in base_empl]
-        sel_empl = st.selectbox("Emplacement", ["(Tous)"] + options_empl, index=0)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Réinitialiser filtres"):
+            st.experimental_rerun()
+    with c2:
+        st.button("Je suis intéressé")
 
-        # Actions
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Réinitialiser filtres"):
-                st.experimental_rerun()
-        with c2:
-            st.button("Je suis intéressé")
-
-        st.markdown('</div>', unsafe_allow_html=True)  # end left pane
-
-    st.markdown('</div>', unsafe_allow_html=True)  # end row
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Apply filters
     filtered = df_region.copy()
@@ -296,7 +265,6 @@ def main():
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
-    # Actif + coords
     df["_actif"] = df.get("Actif", "oui").apply(normalize_bool)
     df["_lat"] = pd.to_numeric(df.get("Latitude", None), errors="coerce")
     df["_lon"] = pd.to_numeric(df.get("Longitude", None), errors="coerce")
@@ -305,27 +273,23 @@ def main():
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    # Filtres (gauche)
-    filtered = build_filters(df)
+    # Layout in columns to guarantee side-by-side rendering
+    left_col, map_col = st.columns([1, 2], gap="small")
 
-    # Carte (centre)
-    with st.container():
-        st.markdown('<div class="smbg-map">', unsafe_allow_html=True)
+    with left_col:
+        filtered = render_filters(df)
+
+    with map_col:
         ref_col = "Référence annonce" if "Référence annonce" in filtered.columns else None
         mapp = build_map(filtered, ref_col)
         st_html(mapp.get_root().render(), height=900, scrolling=False)
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Sélecteur d'annonce (temporaire) pour ouvrir le tiroir
+    # Simple selector to open drawer for one listing
     ref_list = filtered["Référence annonce"].astype(str).tolist() if "Référence annonce" in filtered.columns else ['#' + str(i+1) for i in range(len(filtered))]
-    if not ref_list:
-        return
-    default_idx = 0
-    selected = st.selectbox("Sélection annonce (pour le volet droit)", ref_list, index=default_idx, key="sel_ref")
-    row = filtered[filtered["Référence annonce"].astype(str) == selected].iloc[0] if "Référence annonce" in filtered.columns else filtered.iloc[default_idx]
-
-    # Tiroir droit ouvert (coulissant)
-    render_drawer(row, open_state=True)
+    if ref_list:
+        selected = st.selectbox("Sélection annonce (pour le volet droit)", ref_list, index=0, key="sel_ref")
+        row = filtered[filtered["Référence annonce"].astype(str) == selected].iloc[0] if "Référence annonce" in filtered.columns else filtered.iloc[0]
+        render_drawer(row, open_state=True)
 
 if __name__ == "__main__":
     main()
