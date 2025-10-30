@@ -53,7 +53,7 @@ CSS = f"""
     border: none;
   }}
 
-  /* Conteneur principal Streamlit */
+  /* container global */
   [data-testid="stAppViewContainer"] {{
     padding-top: 0;
     padding-bottom: 0;
@@ -65,29 +65,15 @@ CSS = f"""
     max-width: 100% !important;
   }}
 
-  /* Layout interne (en plus de la sidebar Streamlit) :
-     carte au centre + panneau droit fixe 275px */
-  .main-wrapper {{
-    display: flex;
-    flex-direction: row;
-    width: 100%;
-    height: calc(100vh - 8px);
-    overflow: hidden;
-  }}
-  .map-zone {{
-    flex: 1;
-    min-width: 0;
-  }}
-
-  /* Panneau droit PERMANENT (275px) */
-  .right-panel {{
-    width:275px;
-    min-width:275px;
-    max-width:275px;
-    height:100%;
+  /* colonne droite = panneau info */
+  .right-panel-box {{
+    width: 275px;
+    min-width: 275px;
+    max-width: 275px;
     border-left:1px solid #e9eaee;
     box-shadow:-14px 0 28px rgba(0,0,0,.12);
     background:#fff;
+    height: calc(100vh - 16px);
     display:flex;
     flex-direction:column;
     font-family: system-ui, sans-serif;
@@ -106,6 +92,7 @@ CSS = f"""
     padding:14px 16px 24px;
     font-size:14px;
     line-height:1.4;
+    background:#fff;
   }}
 
   .panel-title {{
@@ -280,10 +267,6 @@ def clean_latlon_series(series: pd.Series) -> pd.Series:
 def reset_filters_defaults():
     """
     Hard reset : supprime les clés de filtres dans session_state puis rerun.
-    On supprime :
-     - reg_*, dep_*
-     - typo_*, extr_*, empl_*
-     - surf_range, loyer_range
     """
     for k in list(st.session_state.keys()):
         if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_")):
@@ -291,7 +274,6 @@ def reset_filters_defaults():
                 del st.session_state[k]
             except Exception:
                 pass
-    # sliders
     for k in ["surf_range", "loyer_range"]:
         if k in st.session_state:
             try:
@@ -362,92 +344,58 @@ def overlaps(a_min, a_max, b_min, b_max):
 
 
 # -------------------------------------------------
-# PANNEAU DROIT PERMANENT
+# PANNEAU DROIT : rendu
 # -------------------------------------------------
 
-def render_layout_open(selected_ref: Optional[str],
+def render_right_panel(selected_ref: Optional[str],
                        df_full: pd.DataFrame,
                        col_ref: str,
                        col_gmaps: str):
     """
-    Ouvre la structure HTML globale :
-    <div class="main-wrapper">
-      <div class="map-zone">   <-- on ne ferme pas encore
-    et prépare le contenu du panneau droit dans st.session_state["_panel_payload"].
+    Construit le contenu du panneau info à droite.
     """
+    def normalize_ref_str(x: str) -> str:
+        x = str(x).strip()
+        if re.match(r"^\d+\.0+$", x):
+            return x.split(".")[0]
+        return x
 
-    st.markdown('<div class="main-wrapper">', unsafe_allow_html=True)
-    st.markdown('<div class="map-zone">', unsafe_allow_html=True)
-
-    # Contenu du panneau droit sera stocké ici puis rendu à la fin :
-    st.session_state["_panel_payload"] = {}
-
-    if selected_ref is None or selected_ref == "":
-        # pas de sélection
-        st.session_state["_panel_payload"]["empty"] = True
-    else:
-        # normalisation des références style "7.0" -> "7"
-        def normalize_ref_str(x: str) -> str:
-            x = str(x).strip()
-            if re.match(r"^\d+\.0+$", x):
-                return x.split(".")[0]
-            return x
-
-        lots_for_ref = df_full[
-            df_full[col_ref].astype(str).map(normalize_ref_str)
-            ==
-            normalize_ref_str(selected_ref)
-        ].copy()
-
-        table_df = build_lots_table(lots_for_ref)
-        gmaps_link = get_first_gmaps_link(lots_for_ref, col_gmaps)
-
-        st.session_state["_panel_payload"]["empty"] = False
-        st.session_state["_panel_payload"]["ref_title"] = normalize_ref_str(selected_ref)
-        st.session_state["_panel_payload"]["gmaps"] = gmaps_link
-        st.session_state["_panel_payload"]["lots_df"] = table_df
-
-
-def render_layout_close():
-    """
-    Ferme la map-zone, et rend le panneau droit permanent (275px).
-    Ferme ensuite le wrapper global.
-    """
-    # fermer .map-zone
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    payload = st.session_state.get("_panel_payload", {})
-
-    st.markdown('<div class="right-panel">', unsafe_allow_html=True)
-
-    if payload.get("empty", True):
-        # pas d'annonce sélectionnée
+    if not selected_ref:
+        st.markdown('<div class="right-panel-box">', unsafe_allow_html=True)
         st.markdown('<div class="panel-banner">Aucune sélection</div>', unsafe_allow_html=True)
         st.markdown('<div class="panel-body"><p>Sélectionnez une annonce sur la carte.</p></div>', unsafe_allow_html=True)
-    else:
-        ref_title = payload.get("ref_title", "")
-        gmaps_link = payload.get("gmaps", None)
-        lots_df = payload.get("lots_df", pd.DataFrame())
+        st.markdown('</div>', unsafe_allow_html=True)
+        return
 
+    lots_for_ref = df_full[
+        df_full[col_ref].astype(str).map(normalize_ref_str)
+        ==
+        normalize_ref_str(selected_ref)
+    ].copy()
+
+    table_df = build_lots_table(lots_for_ref)
+    gmaps_link = get_first_gmaps_link(lots_for_ref, col_gmaps)
+
+    ref_title = normalize_ref_str(selected_ref)
+
+    st.markdown('<div class="right-panel-box">', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="panel-banner">Référence : {ref_title}</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown('<div class="panel-body">', unsafe_allow_html=True)
+
+    if gmaps_link:
         st.markdown(
-            f'<div class="panel-banner">Référence : {ref_title}</div>',
+            f'<div class="gmaps-btn"><a href="{gmaps_link}" target="_blank"><button>Cliquer ici</button></a></div>',
             unsafe_allow_html=True
         )
-        st.markdown('<div class="panel-body">', unsafe_allow_html=True)
 
-        if gmaps_link:
-            st.markdown(
-                f'<div class="gmaps-btn"><a href="{gmaps_link}" target="_blank"><button>Cliquer ici</button></a></div>',
-                unsafe_allow_html=True
-            )
+    st.markdown('<div class="panel-title">Lots de l’annonce</div>', unsafe_allow_html=True)
+    st.dataframe(table_df, use_container_width=True, height=500)
 
-        st.markdown('<div class="panel-title">Lots de l’annonce</div>', unsafe_allow_html=True)
-        st.dataframe(lots_df, use_container_width=True, height=500)
-
-        st.markdown('</div>', unsafe_allow_html=True)  # close .panel-body
-
-    st.markdown('</div>', unsafe_allow_html=True)  # close .right-panel
-    st.markdown('</div>', unsafe_allow_html=True)  # close .main-wrapper
+    st.markdown('</div>', unsafe_allow_html=True)  # .panel-body
+    st.markdown('</div>', unsafe_allow_html=True)  # .right-panel-box
 
 
 # -------------------------------------------------
@@ -724,7 +672,7 @@ def main():
         .reset_index(drop=True)
     )
 
-    # on filtre encore les refs en fonction des sliders min/max (multi-lots)
+    # on filtre les refs selon sliders (multi-lots)
     # surface
     if smin is not None and smax is not None and "surf_range" in st.session_state:
         rmin, rmax = st.session_state["surf_range"]
@@ -750,14 +698,20 @@ def main():
         ]
 
     if refs.empty:
-        # pas d'annonces après filtres
-        # on affiche quand même le layout global + panneau droit vide
         if "selected_ref" not in st.session_state:
             st.session_state["selected_ref"] = None
-        render_layout_open(st.session_state["selected_ref"], df, col_ref, col_gmaps)
 
-        st.write("Aucun résultat pour ces filtres.")
-        render_layout_close()
+        # même si pas d'annonces après filtres,
+        # on affiche quand même la mise en page à 2 colonnes
+        left_col, right_col = st.columns([1, 0.28], gap="small")
+
+        with left_col:
+            st.write("Aucun résultat pour ces filtres.")
+
+        with right_col:
+            render_right_panel(
+                st.session_state["selected_ref"], df, col_ref, col_gmaps
+            )
         return
 
     # anti-overlap sur les coord groupées
@@ -785,84 +739,74 @@ def main():
     if "selected_ref" not in st.session_state:
         st.session_state["selected_ref"] = None
 
-    # on prépare le layout global (ouvre <div class="main-wrapper"><div class="map-zone">)
-    render_layout_open(
-        st.session_state["selected_ref"],
-        df,
-        col_ref,
-        col_gmaps
-    )
-
     # ------------------------------
-    # CARTE LEAFLET
+    # AFFICHAGE PRINCIPAL EN 2 COLONNES
     # ------------------------------
-    FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6  # centre France
-    m = folium.Map(
-        location=[FR_LAT, FR_LON],
-        zoom_start=FR_ZOOM,
-        tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attr="© OpenStreetMap contributors",
-    )
+    left_col, right_col = st.columns([1, 0.28], gap="small")
 
-    css_marker = (
-        f"background:{LOGO_BLUE};"
-        "color:#fff;"
-        "border:2px solid #fff;"
-        "width:28px; height:28px; line-height:28px;"
-        "border-radius:50%; text-align:center;"
-        "font-size:11px; font-weight:600;"
-    )
+    # colonne carte
+    with left_col:
+        FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6  # centre France
+        m = folium.Map(
+            location=[FR_LAT, FR_LON],
+            zoom_start=FR_ZOOM,
+            tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            attr="© OpenStreetMap contributors",
+        )
 
-    layer = folium.FeatureGroup(name="Annonces").add_to(m)
+        css_marker = (
+            f"background:{LOGO_BLUE};"
+            "color:#fff;"
+            "border:2px solid #fff;"
+            "width:28px; height:28px; line-height:28px;"
+            "border-radius:50%; text-align:center;"
+            "font-size:11px; font-weight:600;"
+        )
 
-    for _, r in plot_df.iterrows():
-        lat = float(r["_lat_plot"])
-        lon = float(r["_lon_plot"])
+        layer = folium.FeatureGroup(name="Annonces").add_to(m)
 
-        raw_label = str(r.get("ref_label", "")).strip()
-        # assurer pas de ".0"
-        if re.match(r"^\d+\.0+$", raw_label):
-            raw_label = raw_label.split(".")[0]
+        for _, r in plot_df.iterrows():
+            lat = float(r["_lat_plot"])
+            lon = float(r["_lon_plot"])
 
-        icon = folium.DivIcon(html=f'<div style="{css_marker}">{raw_label}</div>')
+            raw_label = str(r.get("ref_label", "")).strip()
+            if re.match(r"^\d+\.0+$", raw_label):
+                raw_label = raw_label.split(".")[0]
 
-        # popup=raw_label → streamlit_folium renvoie cette valeur dans last_object_clicked.popup
-        folium.Marker(
-            location=[lat, lon],
-            icon=icon,
-            tooltip=raw_label,
-            popup=raw_label,
-        ).add_to(layer)
+            icon = folium.DivIcon(html=f'<div style="{css_marker}">{raw_label}</div>')
 
-    # appel st_folium
-    out = st_folium(m, height=950, width=None, returned_objects=[])
+            # IMPORTANT :
+            # - pas de popup=... -> donc pas de bulle blanche sur la carte
+            # - tooltip=raw_label -> on lit tooltip côté Streamlit
+            folium.Marker(
+                location=[lat, lon],
+                icon=icon,
+                tooltip=raw_label,
+            ).add_to(layer)
 
-    # ------------------------------
-    # GESTION DU CLIC
-    # ------------------------------
-    clicked_ref = None
-    if isinstance(out, dict):
-        loc_info = out.get("last_object_clicked")
+        out = st_folium(m, height=950, width=None, returned_objects=[])
 
-        # Si on clique un pin, on reçoit un dict avec "popup"
-        if isinstance(loc_info, dict):
-            popv = loc_info.get("popup")
-            if popv:
-                clicked_ref = str(popv).strip()
+        # GESTION DU CLIC SUR LA CARTE
+        clicked_ref = None
+        if isinstance(out, dict):
+            loc_info = out.get("last_object_clicked")
 
-            # Si on clique ailleurs (pas de popup),
-            # Streamlit envoie lat/lng mais popup vide
-            elif "lat" in loc_info and "lng" in loc_info:
-                clicked_ref = ""  # -> panneau doit passer en mode "Aucune sélection"
+            if isinstance(loc_info, dict):
+                tt = loc_info.get("tooltip")
+                if tt:  # clic sur un pin
+                    clicked_ref = str(tt).strip()
+                elif "lat" in loc_info and "lng" in loc_info:
+                    # clic sur fond de carte
+                    clicked_ref = ""  # => repasse panneau à "Aucune sélection"
 
-    # si l'utilisateur a cliqué (pin ou fond de carte), on met à jour la sélection
-    if clicked_ref is not None:
-        st.session_state["selected_ref"] = clicked_ref
+        if clicked_ref is not None:
+            st.session_state["selected_ref"] = clicked_ref
 
-    # ------------------------------
-    # FERMETURE LAYOUT : affiche le panneau droit permanent
-    # ------------------------------
-    render_layout_close()
+    # colonne panneau droit
+    with right_col:
+        render_right_panel(
+            st.session_state["selected_ref"], df, col_ref, col_gmaps
+        )
 
 
 def run():
