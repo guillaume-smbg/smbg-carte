@@ -1,5 +1,5 @@
 import os, io, re, unicodedata, math
-from typing import List, Tuple, Optional
+from typing import Optional
 import pandas as pd
 import streamlit as st
 import folium
@@ -62,14 +62,13 @@ CSS = f"""
     width:275px;
     height:100vh;
     background:#fff;
-    transform: translateX(100%);
+    transform: translateX(0);
     transition: transform .24s ease;
     z-index: 9999;
     border-left: 1px solid #e9eaee;
     box-shadow: -14px 0 28px rgba(0,0,0,.12);
     overflow-y:auto;
   }}
-  .drawer.open {{ transform: translateX(0); }}
 
   .drawer-banner {{
     background:{LOGO_BLUE};
@@ -111,8 +110,7 @@ def normalize_excel_url(url: str) -> str:
 @st.cache_data(show_spinner=False)
 def load_excel() -> pd.DataFrame:
     """
-    Load the Excel from EXCEL_URL (Streamlit secrets or env)
-    or local fallback.
+    Charge l'Excel depuis EXCEL_URL (Streamlit secrets/env) ou local.
     """
     excel_url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL", "")).strip()
     excel_url = normalize_excel_url(excel_url)
@@ -155,22 +153,29 @@ def sanitize_value(v):
 
 def find_col(df: pd.DataFrame, *candidates) -> str:
     """
-    Find the column in df that best matches any of the given candidates.
-    Matching is done with normalized text (lowercase + accent stripped).
+    Trouve la colonne du df qui correspond le mieux à une des propositions.
     """
-    norm_map = {c: norm_txt(c) for c in df.columns}
+    def _norm(x: str) -> str:
+        if x is None:
+            return ""
+        y = str(x).strip().lower()
+        y = unicodedata.normalize("NFKD", y).encode("ascii","ignore").decode("ascii")
+        y = re.sub(r"\s+"," ",y)
+        return y
+
+    norm_map = {c: _norm(c) for c in df.columns}
 
     for cand in candidates:
-        cn = norm_txt(cand)
+        cn = _norm(cand)
 
-        # exact normalized match
+        # match exact normalisé
         for c, n in norm_map.items():
             if n == cn:
                 return c
 
-        # fuzzy "all parts included" match
+        # match fuzzy (tous les morceaux présents)
+        parts = cn.split()
         for c, n in norm_map.items():
-            parts = cn.split()
             if all(part in n for part in parts):
                 return c
 
@@ -178,8 +183,7 @@ def find_col(df: pd.DataFrame, *candidates) -> str:
 
 def to_number(value) -> Optional[float]:
     """
-    Clean things like '1 200 m²', '36 000 €', '817200', '1,5', etc.
-    Return float or None.
+    Nettoie '1 200 m²', '36 000 €', etc. => float
     """
     if value is None:
         return None
@@ -222,10 +226,9 @@ def clean_latlon_series(series: pd.Series) -> pd.Series:
 
 def reset_filters_defaults():
     """
-    Hard reset:
-    - delete all filter keys in session_state
-    - rerun
-    This guarantees all checkboxes are unchecked and sliders re-init.
+    Reset dur :
+    - supprime toutes les clés session_state liées aux filtres
+    - relance l'app
     """
     for k in list(st.session_state.keys()):
         if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
@@ -237,9 +240,8 @@ def reset_filters_defaults():
 
 def build_lots_table(df_ref: pd.DataFrame) -> pd.DataFrame:
     """
-    Table shown in the right drawer.
-    We keep columns G→AH if available (like tu voulais),
-    otherwise we fall back to full row.
+    Tableau dans le volet droit.
+    On garde G→AH si dispo, sinon tout.
     """
     cols = list(df_ref.columns)
     if len(cols) > 33:
@@ -254,16 +256,16 @@ def build_lots_table(df_ref: pd.DataFrame) -> pd.DataFrame:
 
 def drawer_for_reference(df_lots: pd.DataFrame, gm_col: str, ref_value: str):
     """
-    Render the right drawer (volet droit).
+    Affiche le volet droit avec toutes les infos de l'annonce.
     """
-    st.markdown('<div class="drawer open">', unsafe_allow_html=True)
+    st.markdown('<div class="drawer">', unsafe_allow_html=True)
     st.markdown(
         f'<div class="drawer-banner">Référence : {ref_value}</div>',
         unsafe_allow_html=True,
     )
     st.markdown('<div class="drawer-body">', unsafe_allow_html=True)
 
-    # Google Maps button (first non-empty link)
+    # Lien Google Maps (premier lien non vide)
     gm_link = None
     if gm_col and gm_col in df_lots.columns:
         for v in df_lots[gm_col].astype(str):
@@ -286,15 +288,15 @@ def drawer_for_reference(df_lots: pd.DataFrame, gm_col: str, ref_value: str):
 
     st.markdown("</div></div>", unsafe_allow_html=True)
 
-def anti_overlap_positions(n: int, base_lat: float, base_lon: float) -> list[tuple[float, float]]:
+def anti_overlap_positions(n: int, base_lat: float, base_lon: float):
     """
-    If multiple references share the exact same coords,
-    spread them slightly in a circle so they don't overlap visually.
+    Si plusieurs références ont exactement les mêmes coords,
+    on les décale légèrement en cercle.
     """
     if n <= 1:
         return [(base_lat, base_lon)]
 
-    r = 0.0006  # ~60m offset
+    r = 0.0006  # ~60m de décalage
     out = []
     for i in range(n):
         angle = 2 * math.pi * i / n
@@ -311,7 +313,7 @@ def main():
         st.warning("Excel vide ou introuvable.")
         st.stop()
 
-    # Detect columns dynamically from your Excel
+    # Colonnes
     col_lat = find_col(df, "Latitude")
     col_lon = find_col(df, "Longitude")
     col_actif = find_col(df, "Actif")
@@ -325,7 +327,7 @@ def main():
     col_ref = find_col(df, "Référence annonce", "Reference")
     col_gmaps = find_col(df, "Lien Google Maps", "Google Maps")
 
-    # Prepare lot-level data
+    # Préparation des lignes (lots)
     df["_actif"] = df[col_actif] if col_actif else "oui"
     df["_actif"] = df["_actif"].apply(normalize_bool)
 
@@ -347,13 +349,13 @@ def main():
     else:
         df["_extr_n"] = ""
 
-    # Keep only active rows with valid coordinates
+    # Garde uniquement les lignes actives et coordonnées valides
     df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
     if df.empty:
         st.warning("Aucune ligne active avec coordonnées valides.")
         st.stop()
 
-    # Compute global numeric ranges for sliders
+    # Ranges globaux sliders
     surf_global = clean_numeric_series(df[col_surface]).dropna() if col_surface else pd.Series([], dtype=float)
     loyer_global = clean_numeric_series(df[col_loyer]).dropna() if col_loyer else pd.Series([], dtype=float)
 
@@ -366,7 +368,7 @@ def main():
 
         lots_working = df.copy()
 
-        # Région / Département
+        # Région / Département imbriqués
         if col_region and col_dept:
             with st.expander("Région / Département", expanded=True):
                 regions = sorted(
@@ -492,7 +494,7 @@ def main():
                     lots_working["_empl_n"].isin(sel_empl)
                 ]
 
-        # Sliders (Surface / Loyer) with safe session_state handling
+        # Sliders
         if smin is not None and smax is not None:
             if "surf_range" not in st.session_state:
                 st.session_state["surf_range"] = (smin, smax)
@@ -526,7 +528,7 @@ def main():
         with c2:
             st.button("Je suis intéressé")
 
-    # ---------- Construction des pins (1 pin = 1 référence annonce) ----------
+    # ---------- Agrégat par référence (1 pin = 1 annonce) ----------
 
     if not col_ref:
         st.error("Colonne 'Référence annonce' introuvable.")
@@ -536,7 +538,7 @@ def main():
 
     def ref_agg(group: pd.DataFrame) -> pd.Series:
         """
-        On agrège par référence :
+        Pour une référence :
         - coords moyennes
         - surface min/max
         - loyer min/max
@@ -556,6 +558,13 @@ def main():
             out["loyer_min"] = float(l.min()) if not l.empty else None
             out["loyer_max"] = float(l.max()) if not l.empty else None
 
+        # garder la référence brute en string pour l'affichage
+        ref_val = str(group.iloc[0][col_ref])
+        # nettoyer style "7.0" -> "7"
+        if re.match(r"^\d+\.0+$", ref_val):
+            ref_val = ref_val.split(".")[0]
+        out["ref_label"] = ref_val
+
         return pd.Series(out)
 
     refs = (
@@ -566,8 +575,8 @@ def main():
 
     def overlaps(a_min, a_max, b_min, b_max):
         """
-        Garde une annonce si sa plage [a_min ; a_max] a
-        un chevauchement avec le range sélectionné [b_min ; b_max].
+        On garde une annonce si sa plage [a_min ; a_max]
+        chevauche le range [b_min ; b_max] du slider.
         """
         if (
             a_min is None
@@ -575,13 +584,13 @@ def main():
             or b_min is None
             or b_max is None
         ):
-            return True  # si on n'a pas les infos, on garde
+            return True
         try:
             return not (a_max < b_min or a_min > b_max)
         except TypeError:
             return True
 
-    # Filtre slider Surface (plage min/max par annonce contre plage sélectionnée)
+    # filtre Surface
     if smin is not None and smax is not None:
         rmin, rmax = st.session_state.get("surf_range", (smin, smax))
         refs = refs[
@@ -593,7 +602,7 @@ def main():
             )
         ]
 
-    # Filtre slider Loyer (même logique)
+    # filtre Loyer
     if lmin is not None and lmax is not None:
         rmin, rmax = st.session_state.get("loyer_range", (lmin, lmax))
         refs = refs[
@@ -609,7 +618,7 @@ def main():
         st.info("Aucun résultat pour ces filtres.")
         return
 
-    # Anti-overlap pour les refs exactement sur les mêmes coordonnées
+    # anti-overlap
     refs["_lat_r"] = refs["_lat"].round(6)
     refs["_lon_r"] = refs["_lon"].round(6)
 
@@ -629,8 +638,7 @@ def main():
     plot_df = pd.DataFrame(rows)
 
     # ---------- Carte Leaflet ----------
-
-    FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6  # France
+    FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6  # centre France
     m = folium.Map(
         location=[FR_LAT, FR_LON],
         zoom_start=FR_ZOOM,
@@ -652,37 +660,63 @@ def main():
     for _, r in plot_df.iterrows():
         lat = float(r["_lat_plot"])
         lon = float(r["_lon_plot"])
-        ref_text = str(r.get(col_ref, ""))
+
+        # s'assurer que le label n'a pas .0
+        raw_label = str(r.get("ref_label", ""))
+        if re.match(r"^\d+\.0+$", raw_label):
+            raw_label = raw_label.split(".")[0]
 
         icon = folium.DivIcon(
-            html=f'<div style="{css_marker}">{ref_text}</div>'
+            html=f'<div style="{css_marker}">{raw_label}</div>'
         )
 
+        # on stocke ref_label dans le tooltip pour aider le debug
         folium.Marker(
             location=[lat, lon],
             icon=icon,
+            tooltip=raw_label
         ).add_to(group_layer)
 
     out = st_folium(m, height=950, width=None, returned_objects=[])
 
-    # ---------- Volet droit (drawer) au clic ----------
+    # ---------- Volet droit (drawer) ----------
 
+    # Récupérer le clic
+    # Certaines versions renvoient "last_object_clicked",
+    # on garde un fallback "last_clicked"
+    click_info = None
     if isinstance(out, dict):
-        loc = out.get("last_object_clicked")
-        if isinstance(loc, dict) and "lat" in loc and "lng" in loc:
-            lat_click = float(loc["lat"])
-            lon_click = float(loc["lng"])
+        if "last_object_clicked" in out and out["last_object_clicked"]:
+            click_info = out["last_object_clicked"]
+        elif "last_clicked" in out and out["last_clicked"]:
+            click_info = out["last_clicked"]
 
-            # ref la plus proche du clic
-            plot_df["__d2"] = (
-                (plot_df["_lat_plot"] - lat_click) ** 2
-                + (plot_df["_lon_plot"] - lon_click) ** 2
+    if isinstance(click_info, dict) and "lat" in click_info and "lng" in click_info:
+        lat_click = float(click_info["lat"])
+        lon_click = float(click_info["lng"])
+
+        # On prend le pin le plus proche du clic
+        plot_df["__d2"] = (
+            (plot_df["_lat_plot"] - lat_click) ** 2
+            + (plot_df["_lon_plot"] - lon_click) ** 2
+        )
+        clicked_row = plot_df.loc[plot_df["__d2"].idxmin()]
+
+        ref_val = str(clicked_row.get("ref_label", ""))
+        if re.match(r"^\d+\.0+$", ref_val):
+            ref_val = ref_val.split(".")[0]
+
+        # Extraire tous les lots de cette référence depuis df original
+        lots_for_ref = df[
+            df[col_ref].astype(str).map(
+                lambda x: x.split(".")[0] if re.match(r"^\d+\.0+$", str(x)) else str(x)
             )
-            clicked_row = plot_df.loc[plot_df["__d2"].idxmin()]
-            ref_val = str(clicked_row[col_ref])
+            ==
+            ref_val
+        ].copy()
 
-            lots_for_ref = df[df[col_ref].astype(str) == ref_val].copy()
-            drawer_for_reference(lots_for_ref, col_gmaps, ref_val)
+        drawer_for_reference(lots_for_ref, col_gmaps, ref_val)
+
 
 def run():
     main()
