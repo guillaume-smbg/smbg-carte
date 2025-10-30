@@ -1,5 +1,5 @@
 import os, io, re, unicodedata, math
-from typing import Optional
+from typing import Optional, Tuple, Dict
 import pandas as pd
 import streamlit as st
 import folium
@@ -37,13 +37,11 @@ CSS = f"""
   [data-testid="stSidebar"] label {{
     color: {COPPER} !important;
   }}
-
   [data-testid="stSidebar"] .group-title {{
-    margin: 8px 0 4px 0;
+    margin: 16px 0 4px 0;
     font-weight: 700;
     color: {COPPER};
   }}
-
   [data-testid="stSidebar"] .stButton > button,
   [data-testid="stSidebar"] .stButton > button * {{
     background: {COPPER} !important;
@@ -77,6 +75,7 @@ CSS = f"""
     display:flex;
     flex-direction:column;
     font-family: system-ui, sans-serif;
+    overflow: hidden;
   }}
 
   .panel-banner {{
@@ -94,7 +93,6 @@ CSS = f"""
     line-height:1.4;
     background:#fff;
   }}
-
   .panel-title {{
     margin-top: 12px;
     font-weight: 800;
@@ -635,7 +633,7 @@ def main():
          - loyer min/max
          - libellé ref sans .0
         """
-        out = {
+        out_d = {
             "_lat": group["_lat"].mean(),
             "_lon": group["_lon"].mean(),
         }
@@ -643,28 +641,28 @@ def main():
         # plage de surfaces
         if col_surface:
             s = clean_numeric_series(group[col_surface]).dropna()
-            out["surf_min"] = float(s.min()) if not s.empty else None
-            out["surf_max"] = float(s.max()) if not s.empty else None
+            out_d["surf_min"] = float(s.min()) if not s.empty else None
+            out_d["surf_max"] = float(s.max()) if not s.empty else None
         else:
-            out["surf_min"] = None
-            out["surf_max"] = None
+            out_d["surf_min"] = None
+            out_d["surf_max"] = None
 
         # plage de loyers
         if col_loyer:
             l = clean_numeric_series(group[col_loyer]).dropna()
-            out["loyer_min"] = float(l.min()) if not l.empty else None
-            out["loyer_max"] = float(l.max()) if not l.empty else None
+            out_d["loyer_min"] = float(l.min()) if not l.empty else None
+            out_d["loyer_max"] = float(l.max()) if not l.empty else None
         else:
-            out["loyer_min"] = None
-            out["loyer_max"] = None
+            out_d["loyer_min"] = None
+            out_d["loyer_max"] = None
 
         # label ref propre
         ref_val = str(group.iloc[0][col_ref]).strip()
         if re.match(r"^\d+\.0+$", ref_val):
             ref_val = ref_val.split(".")[0]
-        out["ref_label"] = ref_val
+        out_d["ref_label"] = ref_val
 
-        return pd.Series(out)
+        return pd.Series(out_d)
 
     refs = (
         lots_working.groupby(col_ref, as_index=False)
@@ -672,7 +670,7 @@ def main():
         .reset_index(drop=True)
     )
 
-    # on filtre les refs selon sliders (multi-lots)
+    # Filtre sur sliders (multi-lots = on garde si la plage chevauche)
     # surface
     if smin is not None and smax is not None and "surf_range" in st.session_state:
         rmin, rmax = st.session_state["surf_range"]
@@ -697,17 +695,14 @@ def main():
             )
         ]
 
+    # si plus rien après filtres -> on affiche quand même la structure page
     if refs.empty:
         if "selected_ref" not in st.session_state:
             st.session_state["selected_ref"] = None
 
-        # même si pas d'annonces après filtres,
-        # on affiche quand même la mise en page à 2 colonnes
         left_col, right_col = st.columns([1, 0.28], gap="small")
-
         with left_col:
             st.write("Aucun résultat pour ces filtres.")
-
         with right_col:
             render_right_panel(
                 st.session_state["selected_ref"], df, col_ref, col_gmaps
@@ -765,6 +760,9 @@ def main():
 
         layer = folium.FeatureGroup(name="Annonces").add_to(m)
 
+        # nouveau registre des clics : coords arrondies -> ref annonce
+        click_registry: Dict[Tuple[float,float], str] = {}
+
         for _, r in plot_df.iterrows():
             lat = float(r["_lat_plot"])
             lon = float(r["_lon_plot"])
@@ -775,29 +773,32 @@ def main():
 
             icon = folium.DivIcon(html=f'<div style="{css_marker}">{raw_label}</div>')
 
+            # on enregistre la ref avec les coords arrondies
+            key = (round(lat, 6), round(lon, 6))
+            click_registry[key] = raw_label
+
             # IMPORTANT :
-            # - pas de popup=... -> donc pas de bulle blanche sur la carte
-            # - tooltip=raw_label -> on lit tooltip côté Streamlit
+            # - ni popup ni tooltip -> plus d'affichage au survol ni au clic sur la carte
             folium.Marker(
                 location=[lat, lon],
                 icon=icon,
-                tooltip=raw_label,
             ).add_to(layer)
 
-        out = st_folium(m, height=950, width=None, returned_objects=[])
+        out = st_folium(m, height=800, width=None, returned_objects=[])
 
-        # GESTION DU CLIC SUR LA CARTE
+        # GESTION DU CLIC SUR LA CARTE -> mise à jour selected_ref
         clicked_ref = None
         if isinstance(out, dict):
             loc_info = out.get("last_object_clicked")
-
             if isinstance(loc_info, dict):
-                tt = loc_info.get("tooltip")
-                if tt:  # clic sur un pin
-                    clicked_ref = str(tt).strip()
-                elif "lat" in loc_info and "lng" in loc_info:
-                    # clic sur fond de carte
-                    clicked_ref = ""  # => repasse panneau à "Aucune sélection"
+                if "lat" in loc_info and "lng" in loc_info:
+                    # clic sur un point de la carte (pin OU fond)
+                    lat_clicked = round(float(loc_info["lat"]), 6)
+                    lon_clicked = round(float(loc_info["lng"]), 6)
+                    key = (lat_clicked, lon_clicked)
+                    # si la coord correspond à un pin, on récupère sa ref
+                    # sinon "", ce qui veut dire "aucune sélection"
+                    clicked_ref = click_registry.get(key, "")
 
         if clicked_ref is not None:
             st.session_state["selected_ref"] = clicked_ref
