@@ -47,7 +47,7 @@ DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
 
 def normalize_excel_url(url: str) -> str:
     if not url: return url
-    return re.sub(r"https://github\.com/(.+)/blob/([^ ]+)", r"https://github.com/\1/raw/\2", url.strip())
+    return re.sub(r"https://github\\.com/(.+)/blob/([^ ]+)", r"https://github.com/\\1/raw/\\2", url.strip())
 
 @st.cache_data(show_spinner=False)
 def load_excel() -> pd.DataFrame:
@@ -72,7 +72,7 @@ def norm_txt(x: str) -> str:
     if x is None: return ""
     s = str(x).strip().lower()
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\\s+", " ", s)
     return s
 
 def sanitize_value(v):
@@ -100,9 +100,9 @@ def to_number(value) -> Optional[float]:
         return None
     s = s.replace("€","").replace("euro","").replace("euros","")
     s = s.replace("m²","").replace("m2","").replace("mÂ²","")
-    s = s.replace("\xa0"," ").replace(" ", "")
+    s = s.replace("\\xa0"," ").replace(" ", "")
     s = s.replace(",", ".")
-    m = re.findall(r"-?\d+(?:\.\d+)?", s)
+    m = re.findall(r"-?\\d+(?:\\.\\d+)?", s)
     if not m:
         return None
     try:
@@ -120,27 +120,35 @@ def clear_all_filters_once():
     if not st.session_state.get("_smbg_cleared", False):
         for k in list(st.session_state.keys()):
             if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
-                del st.session_state[k]
+                st.session_state[k] = False
         st.session_state["_smbg_cleared"] = True
 
-def anti_overlap_positions(group_size: int, base_lat: float, base_lon: float) -> List[Tuple[float,float]]:
-    if group_size <= 1:
-        return [(base_lat, base_lon)]
-    r = 0.0006
-    out = []
-    for i in range(group_size):
-        angle = 2*math.pi * i / group_size
-        out.append((base_lat + r*math.sin(angle), base_lon + r*math.cos(angle)))
-    return out
+def reset_filters_defaults(df: pd.DataFrame, col_surface: str, col_loyer: str):
+    # Reset all checkboxes to False + sliders to full range then rerun
+    keys = [k for k in st.session_state.keys() if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_"))]
+    for k in keys:
+        st.session_state[k] = False
+
+    if col_surface and df[col_surface].notna().any():
+        s_series = clean_numeric_series(df[col_surface]).dropna()
+        if not s_series.empty:
+            st.session_state["surf_range"] = (int(s_series.min()), int(s_series.max()))
+            st.session_state["surf_single"] = int(s_series.min())
+
+    if col_loyer and df[col_loyer].notna().any():
+        l_series = clean_numeric_series(df[col_loyer]).dropna()
+        if not l_series.empty:
+            st.session_state["loyer_range"] = (int(l_series.min()), int(l_series.max()))
+            st.session_state["loyer_single"] = int(l_series.min())
+
+    st.rerun()
 
 def build_lots_table(df_ref: pd.DataFrame) -> pd.DataFrame:
     cols = list(df_ref.columns)
-    # show G..AH if available, else all columns
     if len(cols) > 33:
         view = df_ref.iloc[:, 6:34].copy()
     else:
         view = df_ref.copy()
-    # clean display values
     for c in view.columns:
         view[c] = view[c].apply(sanitize_value)
     return view
@@ -150,7 +158,6 @@ def drawer_for_reference(df_lots: pd.DataFrame, gm_col: str, ref_value: str):
     st.markdown(f'<div class="drawer-banner">Référence : {ref_value}</div>', unsafe_allow_html=True)
     st.markdown('<div class="drawer-body">', unsafe_allow_html=True)
 
-    # Google Maps button from the first non-empty link
     gm_link = None
     if gm_col and gm_col in df_lots.columns:
         for v in df_lots[gm_col].astype(str):
@@ -165,12 +172,20 @@ def drawer_for_reference(df_lots: pd.DataFrame, gm_col: str, ref_value: str):
 
     st.markdown('</div></div>', unsafe_allow_html=True)
 
+def anti_overlap_positions(group_size: int, base_lat: float, base_lon: float) -> List[Tuple[float,float]]:
+    if group_size <= 1:
+        return [(base_lat, base_lon)]
+    r = 0.0006
+    out = []
+    for i in range(group_size):
+        angle = 2*math.pi * i / group_size
+        out.append((base_lat + r*math.sin(angle), base_lon + r*math.cos(angle)))
+    return out
+
 def main():
     df = load_excel()
     if df is None or df.empty:
         st.warning("Excel vide ou introuvable."); st.stop()
-
-    clear_all_filters_once()
 
     # Detect columns
     col_lat = find_col(df, "Latitude")
@@ -186,13 +201,11 @@ def main():
     col_ref = find_col(df, "Référence annonce", "Reference")
     col_gmaps = find_col(df, "Lien Google Maps", "Google Maps")
 
-    # Prepare data
+    # Prepare data (lot level)
     df["_actif"] = df[col_actif] if col_actif else "oui"
     df["_actif"] = df["_actif"].apply(normalize_bool)
-
     df["_lat"] = clean_latlon_series(df[col_lat]) if col_lat else pd.NA
     df["_lon"] = clean_latlon_series(df[col_lon]) if col_lon else pd.NA
-
     if col_typo: df["_typologie_n"] = df[col_typo].astype(str).map(norm_txt)
     else: df["_typologie_n"] = ""
     if col_empl: df["_empl_n"] = df[col_empl].astype(str).map(norm_txt)
@@ -200,17 +213,28 @@ def main():
     if col_extr: df["_extr_n"] = df[col_extr].astype(str).map(norm_txt)
     else: df["_extr_n"] = ""
 
-    # Filter valid rows
     df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
     if df.empty:
         st.warning("Aucune ligne active avec coordonnées valides."); st.stop()
 
-    # --------------- Sidebar ---------------
+    # Cache initial ranges for sliders (full dataset)
+    if "surf_init" not in st.session_state and col_surface:
+        s_series = clean_numeric_series(df[col_surface]).dropna()
+        if not s_series.empty:
+            st.session_state["surf_init"] = (int(s_series.min()), int(s_series.max()))
+    if "loyer_init" not in st.session_state and col_loyer:
+        l_series = clean_numeric_series(df[col_loyer]).dropna()
+        if not l_series.empty:
+            st.session_state["loyer_init"] = (int(l_series.min()), int(l_series.max()))
+
+    clear_all_filters_once()
+
+    # --------------- Sidebar (lot-level filters first for categories) ---------------
     with st.sidebar:
         st.markdown("### Filtres")
         lots_working = df.copy()
 
-        # Region / Département
+        # Région / Département
         if col_region and col_dept:
             with st.expander("Région / Département", expanded=True):
                 regions = sorted([r for r in lots_working[col_region].dropna().astype(str).unique() if r not in ["-","/"]])
@@ -266,66 +290,83 @@ def main():
             if sel_empl:
                 lots_working = lots_working[lots_working["_empl_n"].isin(sel_empl)]
 
-        # Surface (ANY lot)
-        if col_surface and lots_working[col_surface].notna().any():
-            s_series = clean_numeric_series(lots_working[col_surface]).dropna()
+        # Surface slider (we DON'T filter here yet; we use it at reference-level with overlap logic)
+        smin, smax = None, None
+        if col_surface:
+            s_series = clean_numeric_series(df[col_surface]).dropna()
             if not s_series.empty:
                 smin, smax = int(s_series.min()), int(s_series.max())
-                if smin == smax:
-                    st.number_input("Surface (m²)", value=smin, step=1, disabled=True, key="surf_single")
-                else:
-                    sr = st.slider("Surface (m²)", min_value=smin, max_value=smax, value=(smin, smax), step=1, key="surf_range")
-                    s_clean_all = clean_numeric_series(lots_working[col_surface])
-                    lots_working = lots_working[s_clean_all.between(sr[0], sr[1])]
+                default_s = st.session_state.get("surf_init", (smin, smax))
+                st.session_state.setdefault("surf_range", default_s)
+                st.session_state["surf_range"] = st.slider("Surface (m²)", min_value=smin, max_value=smax,
+                                                           value=tuple(st.session_state["surf_range"]), step=1, key="surf_range")
 
-        # Loyer annuel (ANY lot)
-        if col_loyer and lots_working[col_loyer].notna().any():
-            l_series = clean_numeric_series(lots_working[col_loyer]).dropna()
+        # Loyer slider (same: used at reference-level with overlap logic)
+        lmin, lmax = None, None
+        if col_loyer:
+            l_series = clean_numeric_series(df[col_loyer]).dropna()
             if not l_series.empty:
                 lmin, lmax = int(l_series.min()), int(l_series.max())
-                if lmin == lmax:
-                    st.number_input("Loyer annuel (€)", value=lmin, step=1, disabled=True, key="loyer_single")
-                else:
-                    lr = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax, value=(lmin, lmax), step=1000, key="loyer_range")
-                    l_clean_all = clean_numeric_series(lots_working[col_loyer])
-                    lots_working = lots_working[l_clean_all.between(lr[0], lr[1])]
+                default_l = st.session_state.get("loyer_init", (lmin, lmax))
+                st.session_state.setdefault("loyer_range", default_l)
+                st.session_state["loyer_range"] = st.slider("Loyer annuel (€)", min_value=lmin, max_value=lmax,
+                                                            value=tuple(st.session_state["loyer_range"]), step=1000, key="loyer_range")
 
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Réinitialiser les filtres"):
-                for k in list(st.session_state.keys()):
-                    if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_", "surf_", "loyer_")):
-                        del st.session_state[k]
-                st.rerun()
+                reset_filters_defaults(df, col_surface, col_loyer)
         with c2:
             st.button("Je suis intéressé")
 
-    # --------------- Group by Reference ---------------
+    # --------------- Build reference-level dataset ---------------
     if not col_ref:
         st.error("Colonne 'Référence annonce' introuvable."); st.stop()
 
-    # Keep only refs present after lot-level filters
-    filtered_refs = lots_working[col_ref].astype(str).unique().tolist()
-    df_refs = df[df[col_ref].astype(str).isin(filtered_refs)].copy()
+    # Keep only lots that passed categorical filters
+    filtered_lots = lots_working.copy()
 
-    # Coordinates per reference (mean if tiny differences)
-    ref_coords = df_refs.groupby(col_ref).agg(
-        _lat=(' _lat' if ' _lat' in df_refs.columns else '_lat', 'mean'),
-        _lon=(' _lon' if ' _lon' in df_refs.columns else '_lon', 'mean'),
-    ).reset_index()
+    # Aggregations per Reference (min/max for overlap logic; mean coords)
+    agg_dict = {
+        "_lat": ("_lat", "mean"),
+        "_lon": ("_lon", "mean"),
+    }
+    if col_surface:
+        agg_dict["surf_min"] = (col_surface, lambda s: clean_numeric_series(s).min())
+        agg_dict["surf_max"] = (col_surface, lambda s: clean_numeric_series(s).max())
+    if col_loyer:
+        agg_dict["loyer_min"] = (col_loyer, lambda s: clean_numeric_series(s).min())
+        agg_dict["loyer_max"] = (col_loyer, lambda s: clean_numeric_series(s).max())
 
-    # Prepare plot dataset: one row per reference
-    plot_df = ref_coords.merge(
-        df_refs[[col_ref]].drop_duplicates(),
-        on=col_ref, how='left'
-    )
+    refs = filtered_lots.groupby(col_ref).agg(**agg_dict).reset_index()
 
-    # Anti-overlap between references that share same coords
-    plot_df["_lat_r"] = plot_df["_lat"].round(6)
-    plot_df["_lon_r"] = plot_df["_lon"].round(6)
-    groups = plot_df.groupby(["_lat_r","_lon_r"], sort=False)
+    # Overlap logic for sliders: keep a ref if its [min,max] overlaps chosen range
+    def overlaps(a_min, a_max, b_min, b_max):
+        if a_min is None or a_max is None or b_min is None or b_max is None:
+            return True
+        try:
+            return not (a_max < b_min or a_min > b_max)
+        except TypeError:
+            return True
+
+    # Apply surface overlap
+    if col_surface and "surf_min" in refs.columns and "surf_max" in refs.columns and smin is not None:
+        rmin, rmax = st.session_state.get("surf_range", (smin, smax))
+        refs = refs[refs.apply(lambda r: overlaps(r["surf_min"], r["surf_max"], rmin, rmax), axis=1)]
+
+    # Apply loyer overlap
+    if col_loyer and "loyer_min" in refs.columns and "loyer_max" in refs.columns and lmin is not None:
+        rmin, rmax = st.session_state.get("loyer_range", (lmin, lmax))
+        refs = refs[refs.apply(lambda r: overlaps(r["loyer_min"], r["loyer_max"], rmin, rmax), axis=1)]
+
+    if refs.empty:
+        st.info("Aucun résultat pour ces filtres."); return
+
+    # Anti-overlap between references at same coords
+    refs["_lat_r"] = refs["_lat"].round(6)
+    refs["_lon_r"] = refs["_lon"].round(6)
     rows = []
-    for _, grp in groups:
+    for (_, _), grp in refs.groupby(["_lat_r","_lon_r"], sort=False):
         coords = anti_overlap_positions(len(grp), float(grp.iloc[0]["_lat"]), float(grp.iloc[0]["_lon"]))
         for (lat,lon), (_, r) in zip(coords, grp.iterrows()):
             rr = r.copy()
@@ -351,7 +392,7 @@ def main():
 
     out = st_folium(m, height=950, width=None, returned_objects=[])
 
-    # --------------- Drawer on Click ---------------
+    # Drawer: show all lots of clicked reference (from original df, not filtered_lots)
     if isinstance(out, dict):
         loc = out.get("last_object_clicked")
         if isinstance(loc, dict) and "lat" in loc and "lng" in loc:
@@ -360,7 +401,6 @@ def main():
             clicked_row = plot_df.loc[plot_df["__d2"].idxmin()]
             ref_val = str(clicked_row[col_ref])
 
-            # All lots for this reference (after initial df filter, not after working filters)
             lots_for_ref = df[df[col_ref].astype(str) == ref_val].copy()
             drawer_for_reference(lots_for_ref, col_gmaps, ref_val)
 
