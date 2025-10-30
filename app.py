@@ -1,620 +1,817 @@
-import streamlit as st
+import os, io, re, unicodedata, math
+from typing import Optional, Tuple, Dict
 import pandas as pd
+import streamlit as st
 import folium
-from streamlit_folium import st_folium
-from io import BytesIO
 import requests
-import math
-
+from streamlit_folium import st_folium
 
 # -------------------------------------------------
-# CONFIG GÉNÉRALE / THEME
+# CONFIG GLOBALE / STYLE
 # -------------------------------------------------
 
-st.set_page_config(
-    page_title="SMBG Carte",
-    layout="wide",
-)
+st.set_page_config(page_title="SMBG Carte — Leaflet (Mapnik)", layout="wide")
 
-# Couleurs / style validés
-BLEU_SMBG = "#05263d"   # fond panneau gauche
-CUIVRE_SMBG = "#b87333" # accents / boutons cuivre doux
-PANEL_WIDTH_PX = 275    # largeur des panneaux fixes
+LOGO_BLUE = "#05263d"
+COPPER = "#c47e47"
 
-CUSTOM_CSS = f"""
+CSS = f"""
 <style>
-/* Reset Streamlit background */
-.stApp {{
-    background-color: #ffffff;
-    font-family: 'Futura', sans-serif;
-}}
+  /* cache le bouton hamburger de Streamlit */
+  [data-testid="collapsedControl"] {{
+    display: none !important;
+  }}
 
-/* Cacher l'en-tête par défaut si besoin */
-header[data-testid="stHeader"] {{
-    background: transparent;
-}}
+  /* Sidebar gauche = panneau filtres */
+  [data-testid="stSidebar"] {{
+    width: 275px !important;
+    min-width: 275px !important;
+    max-width: 275px !important;
+    background: {LOGO_BLUE};
+    color: {COPPER};
+  }}
+  [data-testid="stSidebar"] h1,
+  [data-testid="stSidebar"] h2,
+  [data-testid="stSidebar"] h3,
+  [data-testid="stSidebar"] p,
+  [data-testid="stSidebar"] label {{
+    color: {COPPER} !important;
+  }}
+  [data-testid="stSidebar"] .group-title {{
+    margin: 16px 0 4px 0;
+    font-weight: 700;
+    color: {COPPER};
+  }}
+  [data-testid="stSidebar"] .stButton > button,
+  [data-testid="stSidebar"] .stButton > button * {{
+    background: {COPPER} !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    border-radius: 10px;
+    border: none;
+  }}
 
-/* Layout principal: panneau gauche fixe, carte milieu, panneau droit fixe */
-.main-container {{
+  /* container global */
+  [data-testid="stAppViewContainer"] {{
+    padding-top: 0;
+    padding-bottom: 0;
+  }}
+  .block-container {{
+    padding-top: 8px !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    max-width: 100% !important;
+  }}
+
+  /* colonne droite = panneau info */
+  .right-panel-box {{
+    width: 275px;
+    min-width: 275px;
+    max-width: 275px;
+    border-left:1px solid #e9eaee;
+    box-shadow:-14px 0 28px rgba(0,0,0,.12);
+    background:#fff;
+    height: calc(100vh - 16px);
+    display:flex;
+    flex-direction:column;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+  }}
+
+  .panel-banner {{
+    background:{LOGO_BLUE};
+    color:#fff;
+    padding:12px 16px;
+    font-weight:800;
+    font-size:18px;
+  }}
+  .panel-body {{
+    flex:1;
+    overflow-y:auto;
+    padding:14px 16px 24px;
+    font-size:14px;
+    line-height:1.4;
+    background:#fff;
+  }}
+  .panel-title {{
+    margin-top: 12px;
+    font-weight: 800;
+    color: {LOGO_BLUE};
+  }}
+
+  .gmaps-btn button {{
+    background: {COPPER} !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    border-radius: 10px;
+    border: none;
+    padding: 6px 10px;
+    font-size:14px;
+    cursor:pointer;
+  }}
+
+  /* indentation des départements sous les régions */
+  .dept-row {{
     display: flex;
     flex-direction: row;
-    width: 100%;
-    height: calc(100vh - 2rem);
-    overflow: hidden;
-    position: relative;
-    box-sizing: border-box;
-    padding: 0;
-    margin: 0;
-}}
-
-/* Panneau gauche (filtres) */
-.left-panel {{
-    width: {PANEL_WIDTH_PX}px;
-    min-width: {PANEL_WIDTH_PX}px;
-    max-width: {PANEL_WIDTH_PX}px;
-    background-color: {BLEU_SMBG};
-    color: #ffffff;
-    padding: 16px;
-    box-sizing: border-box;
-    overflow-y: auto;
-    border-right: 1px solid rgba(255,255,255,0.1);
-}}
-
-/* Titres panneau gauche */
-.left-panel h2,
-.left-panel h3,
-.left-panel h4,
-.left-panel label,
-.left-panel p,
-.left-panel span,
-.left-panel div {{
-    color: #ffffff !important;
-    font-family: 'Futura', sans-serif !important;
-}}
-
-/* Boutons cuivre */
-.cuivre-btn {{
-    background-color: {CUIVRE_SMBG};
-    color: #fff;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 14px;
-    cursor: pointer;
-    font-family: 'Futura', sans-serif;
-    width: 100%;
-    text-align: center;
-    margin-bottom: 8px;
-}}
-.cuivre-btn:hover {{
-    filter: brightness(1.08);
-}}
-
-/* Zone carte */
-.map-panel {{
-    flex: 1 1 auto;
-    position: relative;
-    height: 100%;
-    overflow: hidden;
-    background-color: #f5f5f5;
-}}
-
-/* Conteneur intérieur carte */
-.map-container-inner {{
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-}}
-.map-container-inner iframe {{
-    width: 100%;
-    height: 100%;
-    border: none;
-}}
-
-/* Panneau droit (détails annonce) */
-.right-panel {{
-    width: {PANEL_WIDTH_PX}px;
-    min-width: {PANEL_WIDTH_PX}px;
-    max-width: {PANEL_WIDTH_PX}px;
-    background-color: #ffffff;
-    color: #000000;
-    padding: 16px;
-    box-sizing: border-box;
-    overflow-y: auto;
-    border-left: 1px solid rgba(0,0,0,0.1);
-    font-family: 'Futura', sans-serif;
-}}
-
-/* Bloc référence en haut du panneau droit */
-.ref-banner {{
-    font-weight: 600;
-    font-size: 16px;
-    color: {BLEU_SMBG};
-    border-left: 4px solid {CUIVRE_SMBG};
-    padding-left: 8px;
-    margin-bottom: 12px;
-    line-height: 1.3;
-}}
-
-/* Tableau des lots dans le panneau droit */
-.lot-table {{
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    margin-bottom: 16px;
-}}
-.lot-table th {{
-    text-align: left;
-    background: {BLEU_SMBG};
-    color: #fff;
-    padding: 6px 8px;
-    font-weight: 500;
-    font-size: 12px;
-}}
-.lot-table td {{
-    border-bottom: 1px solid #ddd;
-    padding: 6px 8px;
-    vertical-align: top;
-    font-size: 12px;
-}}
-
-/* Badge "Nouveau" */
-.badge-nouveau {{
-    display: inline-block;
-    background-color: {CUIVRE_SMBG};
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-left: 8px;
-}}
-
-/* Bouton lien Google Maps */
-.gmaps-btn {{
-    background-color: {BLEU_SMBG};
-    color: #ffffff;
-    text-decoration: none;
-    font-size: 13px;
-    padding: 6px 10px;
-    border-radius: 4px;
-    display: inline-block;
-    margin-bottom: 12px;
-    font-weight: 500;
-}}
-
-/* Scrollbars fins */
-.left-panel::-webkit-scrollbar,
-.right-panel::-webkit-scrollbar {{
-    width: 4px;
-}}
-.left-panel::-webkit-scrollbar-thumb,
-.right-panel::-webkit-scrollbar-thumb {{
-    background-color: rgba(255,255,255,0.4);
-    border-radius: 999px;
-}}
-.left-panel::-webkit-scrollbar-track,
-.right-panel::-webkit-scrollbar-track {{
-    background-color: rgba(0,0,0,0.1);
-}}
+    align-items: center;
+  }}
+  .dept-pad {{
+    width: 16px;
+  }}
 </style>
 """
+st.markdown(CSS, unsafe_allow_html=True)
 
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-
-# -------------------------------------------------
-# SESSION STATE
-# -------------------------------------------------
-
-if "selected_ref" not in st.session_state:
-    st.session_state["selected_ref"] = None
-
-if "df" not in st.session_state:
-    st.session_state["df"] = None
+DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
 
 
 # -------------------------------------------------
-# CHARGEMENT DONNÉES EXCEL
+# OUTILS / HELPERS
 # -------------------------------------------------
 
-def load_excel_from_url(url: str) -> pd.DataFrame:
+def normalize_excel_url(url: str) -> str:
+    """Transforme une URL GitHub /blob/ en /raw/ si besoin."""
+    if not url:
+        return url
+    return re.sub(
+        r"https://github\.com/(.+)/blob/([^ ]+)",
+        r"https://github.com/\1/raw/\2",
+        url.strip()
+    )
+
+@st.cache_data(show_spinner=False)
+def load_excel() -> pd.DataFrame:
     """
-    Lis l'Excel brut métier directement depuis une URL raw (GitHub, Supabase public, etc.).
-    On suppose que la première ligne = en-têtes.
+    Charge l'Excel depuis EXCEL_URL (Streamlit secrets/env) ou local fallback.
     """
-    resp = requests.get(url)
-    resp.raise_for_status()
-    data = resp.content
-    df_local = pd.read_excel(BytesIO(data))
-    return df_local
+    excel_url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL", "")).strip()
+    excel_url = normalize_excel_url(excel_url)
 
-# IMPORTANT : tu dois renseigner cette URL dans les secrets Streamlit.
-EXCEL_URL = st.secrets.get("EXCEL_URL", "")
+    if excel_url:
+        r = requests.get(excel_url, timeout=25)
+        r.raise_for_status()
+        return pd.read_excel(io.BytesIO(r.content))
 
-if EXCEL_URL and st.session_state["df"] is None:
-    try:
-        st.session_state["df"] = load_excel_from_url(EXCEL_URL)
-    except Exception as e:
-        st.error(f"Erreur chargement Excel : {e}")
+    if not os.path.exists(DEFAULT_LOCAL_PATH):
+        st.stop()
 
-df = st.session_state["df"]
+    return pd.read_excel(DEFAULT_LOCAL_PATH)
 
-if df is None or df.empty:
-    st.warning("Aucune donnée chargée. Vérifie EXCEL_URL dans les secrets.")
-    st.stop()
+def normalize_bool(val):
+    """Convertit 'oui' / 1 / True en bool."""
+    if isinstance(val, str):
+        return val.strip().lower() in ["oui", "yes", "true", "1", "vrai"]
+    if isinstance(val, (int, float)):
+        try:
+            return int(val) == 1
+        except Exception:
+            return False
+    if isinstance(val, bool):
+        return val
+    return False
 
-
-# -------------------------------------------------
-# NORMALISATION / PRÉP
-# -------------------------------------------------
-
-# On va supposer ici certaines colonnes présentes dans l'Excel,
-# en cohérence avec nos specs communes :
-# - "Référence annonce" (identifie l'annonce)
-# - "Latitude" / "Longitude"
-# - "Adresse complète" / "Adresse"
-# - "Ville"
-# - "Lien Google Maps"
-# - "Loyer mensuel (€)"
-# - "Charges mensuelles (€)"
-# - "Taxe foncière annuelle (€)"
-# - "Commentaires"
-# - "Surface totale (m²)"
-# - "Actif"
-# - "Date publication"
-#
-# Si des colonnes n'existent pas dans le fichier: on les crée vides pour éviter les KeyError.
-
-EXPECTED_COLS = [
-    "Référence annonce",
-    "Latitude",
-    "Longitude",
-    "Adresse",
-    "Adresse complète",
-    "Ville",
-    "Lien Google Maps",
-    "Surface totale (m²)",
-    "Loyer mensuel (€)",
-    "Charges mensuelles (€)",
-    "Taxe foncière annuelle (€)",
-    "Commentaires",
-    "Actif",
-    "Date publication",
-]
-
-for col in EXPECTED_COLS:
-    if col not in df.columns:
-        df[col] = ""
-
-# Filtrer seulement les lignes Actif = "oui"
-df_active = df[df["Actif"].astype(str).str.lower().eq("oui")].copy()
-
-# Drop lignes sans coordonnées valides
-def is_number(x):
-    try:
-        return not math.isnan(float(x))
-    except:
-        return False
-
-df_active = df_active[df_active["Latitude"].apply(is_number) & df_active["Longitude"].apply(is_number)].copy()
-
-# Nettoyage Référence annonce pour l'affichage du label (suppression ".0")
-def clean_ref(val):
-    if pd.isna(val):
+def norm_txt(x: str) -> str:
+    """Normalise du texte (minuscule, sans accent, espaces réduits)."""
+    if x is None:
         return ""
-    txt = str(val)
-    if txt.endswith(".0"):
-        txt = txt[:-2]
-    return txt.strip()
+    s = str(x).strip().lower()
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-df_active["ref_clean"] = df_active["Référence annonce"].apply(clean_ref)
+def sanitize_value(v):
+    """Pour l'affichage du tableau de lots : remplace -, /, vide par ''. """
+    if v is None:
+        return ""
+    s = str(v).strip()
+    return "" if s in ["", "-", "/"] else s
+
+def find_col(df: pd.DataFrame, *candidates) -> str:
+    """
+    Trouve la colonne du df qui correspond le mieux à une des propositions.
+    (matching exact normalisé ou fuzzy 'contient tous les mots')
+    """
+    def _norm(x: str) -> str:
+        if x is None:
+            return ""
+        y = str(x).strip().lower()
+        y = unicodedata.normalize("NFKD", y).encode("ascii","ignore").decode("ascii")
+        y = re.sub(r"\s+"," ",y)
+        return y
+
+    norm_map = {c: _norm(c) for c in df.columns}
+
+    for cand in candidates:
+        cn = _norm(cand)
+
+        # match exact normalisé
+        for c, n in norm_map.items():
+            if n == cn:
+                return c
+
+        # match fuzzy
+        parts = cn.split()
+        for c, n in norm_map.items():
+            if all(part in n for part in parts):
+                return c
+
+    return ""
+
+def to_number(value) -> Optional[float]:
+    """
+    Nettoie '1 200 m²', '36 000 €', etc. et renvoie un float.
+    """
+    if value is None:
+        return None
+
+    s = str(value).strip()
+    if s == "":
+        return None
+
+    s = (
+        s.replace("€", "")
+         .replace("euro", "")
+         .replace("euros", "")
+         .replace("m²", "")
+         .replace("m2", "")
+         .replace("mÂ²", "")
+         .replace("\xa0", " ")
+         .replace(" ", "")
+         .replace(",", ".")
+    )
+
+    m = re.findall(r"-?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
+
+    try:
+        return float(m[0])
+    except Exception:
+        return None
+
+def clean_numeric_series(series: pd.Series) -> pd.Series:
+    return series.map(to_number)
+
+def clean_latlon_series(series: pd.Series) -> pd.Series:
+    """Convertit latitude/longitude en float, supportant les virgules."""
+    return (
+        series.astype(str)
+        .str.strip()
+        .str.replace(",", ".", regex=False)
+        .map(to_number)
+    )
+
+def reset_filters_defaults():
+    """
+    Hard reset : supprime les clés de filtres dans session_state puis rerun.
+    """
+    for k in list(st.session_state.keys()):
+        if k.startswith(("reg_", "dep_", "typo_", "extr_", "empl_")):
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+    for k in ["surf_range", "loyer_range"]:
+        if k in st.session_state:
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+    st.rerun()
+
+def build_lots_table(df_ref: pd.DataFrame) -> pd.DataFrame:
+    """
+    Table affichée dans le panneau droit.
+    On garde G→AH si dispo (6:34), sinon tout df_ref.
+    On nettoie les '-' '/' ''.
+    """
+    cols = list(df_ref.columns)
+    if len(cols) > 33:
+        view = df_ref.iloc[:, 6:34].copy()
+    else:
+        view = df_ref.copy()
+
+    for c in view.columns:
+        view[c] = view[c].apply(sanitize_value)
+
+    return view
+
+def get_first_gmaps_link(df_lots: pd.DataFrame, gm_col: str) -> Optional[str]:
+    """Retourne le premier lien Google Maps non vide pour l'annonce."""
+    if gm_col and gm_col in df_lots.columns:
+        for v in df_lots[gm_col].astype(str):
+            v_clean = v.strip()
+            if v_clean and v_clean not in ["-", "/"]:
+                return v_clean
+    return None
+
+def anti_overlap_positions(n: int, base_lat: float, base_lon: float):
+    """
+    Si plusieurs annonces partagent exactement les mêmes coords,
+    on les décale un peu en cercle pour éviter la superposition visuelle.
+    """
+    if n <= 1:
+        return [(base_lat, base_lon)]
+
+    r = 0.0006  # ~60m décalage
+    out = []
+    for i in range(n):
+        angle = 2 * math.pi * i / n
+        out.append(
+            (base_lat + r * math.sin(angle), base_lon + r * math.cos(angle))
+        )
+    return out
+
+def overlaps(a_min, a_max, b_min, b_max):
+    """
+    Vérifie si [a_min ; a_max] chevauche [b_min ; b_max].
+    Si une info manque => True (on garde).
+    """
+    if (
+        a_min is None
+        or a_max is None
+        or b_min is None
+        or b_max is None
+    ):
+        return True
+    try:
+        return not (a_max < b_min or a_min > b_max)
+    except TypeError:
+        return True
 
 
 # -------------------------------------------------
-# OUTILS / FONCTIONS
+# PANNEAU DROIT : rendu
 # -------------------------------------------------
 
-def build_folium_map(df_map: pd.DataFrame):
+def render_right_panel(selected_ref: Optional[str],
+                       df_full: pd.DataFrame,
+                       col_ref: str,
+                       col_gmaps: str):
     """
-    Construit la carte Folium centrée sur la France.
-    Chaque annonce => 1 pin.
-    Le label du pin = ref_clean.
-    Au clic: on ne veut pas de popup Folium, car on gère le panneau droit côté Streamlit.
-    Du coup, on met quand même un popup minimal avec la ref, qui sera utilisé juste
-    pour identifier le click dans Streamlit (via st_folium).
+    Construit le contenu du panneau info à droite.
     """
-    # centre France approx
-    m = folium.Map(location=[46.5, 2.5], zoom_start=6, tiles="OpenStreetMap")
+    def normalize_ref_str(x: str) -> str:
+        x = str(x).strip()
+        if re.match(r"^\d+\.0+$", x):
+            return x.split(".")[0]
+        return x
 
-    for _, row in df_map.iterrows():
-        lat = float(row["Latitude"])
-        lon = float(row["Longitude"])
-        ref_display = row["ref_clean"]
-        raw_ref = row["Référence annonce"]
-
-        # Étiquette custom bleue pour le pin
-        html_label = f"""
-        <div style="
-            background-color:{BLEU_SMBG};
-            color:#fff;
-            border-radius:6px;
-            padding:4px 6px;
-            font-size:12px;
-            font-weight:600;
-            font-family:'Futura',sans-serif;
-            border:1px solid #fff;
-            box-shadow:0 2px 4px rgba(0,0,0,0.3);
-            ">
-            {ref_display}
-        </div>
-        """
-
-        icon = folium.DivIcon(
-            html=html_label,
-            class_name="smbg-divicon",
-            icon_size=(50, 18),
-            icon_anchor=(25, 18),
-        )
-
-        # Pour détecter quel pin a été cliqué côté Streamlit,
-        # on met un popup simple = ref brute
-        folium.Marker(
-            location=[lat, lon],
-            icon=icon,
-            popup=str(raw_ref),
-        ).add_to(m)
-
-    return m
-
-
-def get_lots_for_ref(ref_value: str, df_source: pd.DataFrame) -> pd.DataFrame:
-    """
-    Retourne toutes les lignes (lots) correspondant à cette référence annonce.
-    """
-    if ref_value is None:
-        return pd.DataFrame()
-    mask = df_source["Référence annonce"].astype(str) == str(ref_value)
-    return df_source[mask].copy()
-
-
-def format_currency(val):
-    """Affiche 25 000 au lieu de 25000.0 etc."""
-    if pd.isna(val) or val == "":
-        return "-"
-    try:
-        n = float(str(val).replace(" ", "").replace(",", "."))
-    except:
-        return str(val)
-    n_rounded = round(n)  # entier sans décimales
-    return f"{n_rounded:,}".replace(",", " ")
-
-
-def is_recent(date_val, days=30):
-    """
-    Badge 'Nouveau' si Date publication < 30 jours.
-    On suppose que date_val est un datetime-like ou une string parsable.
-    """
-    if pd.isna(date_val) or str(date_val).strip() == "":
-        return False
-    try:
-        dt = pd.to_datetime(date_val, dayfirst=True, errors="coerce")
-    except:
-        dt = pd.NaT
-    if pd.isna(dt):
-        return False
-    now = pd.Timestamp.now(tz="Europe/Paris").normalize()
-    delta = now - dt.normalize()
-    return delta.days <= days
-
-
-def render_right_panel(selected_ref: str, df_full: pd.DataFrame):
-    """
-    Affiche le panneau droit : bannière référence, bouton Google Maps, tableau des lots.
-    Règles :
-    - on affiche la référence annonce
-    - bouton "Voir sur Google Maps" (colonne 'Lien Google Maps')
-    - puis un tableau reprenant les infos clés des lots
-    """
-
-    lots_df = get_lots_for_ref(selected_ref, df_full)
-    if lots_df.empty:
-        st.markdown(
-            "<div class='ref-banner'>Sélectionne un point sur la carte</div>",
-            unsafe_allow_html=True,
-        )
+    if not selected_ref:
+        st.markdown('<div class="right-panel-box">', unsafe_allow_html=True)
+        st.markdown('<div class="panel-banner">Aucune sélection</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-body"><p>Sélectionnez une annonce sur la carte.</p></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         return
 
-    # On prend la première ligne pour les infos d'en-tête
-    head = lots_df.iloc[0].to_dict()
+    lots_for_ref = df_full[
+        df_full[col_ref].astype(str).map(normalize_ref_str)
+        ==
+        normalize_ref_str(selected_ref)
+    ].copy()
 
-    ref_clean_header = clean_ref(head.get("Référence annonce", ""))
-    gmaps_url = head.get("Lien Google Maps", "")
+    table_df = build_lots_table(lots_for_ref)
+    gmaps_link = get_first_gmaps_link(lots_for_ref, col_gmaps)
 
-    adresse_full = head.get("Adresse complète", "") or head.get("Adresse", "")
-    ville = head.get("Ville", "")
+    ref_title = normalize_ref_str(selected_ref)
 
-    date_pub = head.get("Date publication", "")
-
-    badge_html = ""
-    if is_recent(date_pub):
-        badge_html = "<span class='badge-nouveau'>Nouveau</span>"
-
+    st.markdown('<div class="right-panel-box">', unsafe_allow_html=True)
     st.markdown(
-        f"""
-        <div class="ref-banner">
-            Réf. {ref_clean_header} {badge_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
+        f'<div class="panel-banner">Référence : {ref_title}</div>',
+        unsafe_allow_html=True
     )
+    st.markdown('<div class="panel-body">', unsafe_allow_html=True)
 
-    if gmaps_url and str(gmaps_url).strip() not in ["-", "/", ""]:
+    if gmaps_link:
         st.markdown(
-            f"<a class='gmaps-btn' href='{gmaps_url}' target='_blank' rel='noopener noreferrer'>Voir sur Google Maps</a>",
-            unsafe_allow_html=True,
+            f'<div class="gmaps-btn"><a href="{gmaps_link}" target="_blank"><button>Cliquer ici</button></a></div>',
+            unsafe_allow_html=True
         )
 
-    # Adresse
-    if adresse_full or ville:
-        st.markdown(
-            f"<div style='font-size:13px; line-height:1.4; margin-bottom:12px;'><strong>{adresse_full}</strong><br/>{ville}</div>",
-            unsafe_allow_html=True,
-        )
+    st.markdown('<div class="panel-title">Lots de l’annonce</div>', unsafe_allow_html=True)
+    st.dataframe(table_df, use_container_width=True, height=500)
 
-    # Prépare le tableau des lots pour affichage
-    cols_for_table = [
-        "Surface totale (m²)",
-        "Loyer mensuel (€)",
-        "Charges mensuelles (€)",
-        "Taxe foncière annuelle (€)",
-        "Commentaires",
-    ]
-    safe_cols = [c for c in cols_for_table if c in lots_df.columns]
-
-    table_html = "<table class='lot-table'><thead><tr>"
-    for col in safe_cols:
-        table_html += f"<th>{col}</th>"
-    table_html += "</tr></thead><tbody>"
-
-    for _, r in lots_df.iterrows():
-        table_html += "<tr>"
-        for col in safe_cols:
-            val = r[col] if col in r else ""
-            if "€" in col:
-                val = format_currency(val) + " €" if val not in ["", "-", "/"] else "-"
-            elif "m²" in col:
-                if pd.isna(val) or str(val).strip() in ["", "-", "/"]:
-                    val = "-"
-                else:
-                    try:
-                        n = float(str(val).replace(" ", "").replace(",", "."))
-                        n_rounded = round(n)
-                        val = f"{n_rounded} m²"
-                    except:
-                        val = str(val)
-            else:
-                if pd.isna(val) or str(val).strip() in ["", "-", "/"]:
-                    val = "-"
-                else:
-                    val = str(val)
-            table_html += f"<td>{val}</td>"
-        table_html += "</tr>"
-    table_html += "</tbody></table>"
-
-    st.markdown(table_html, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # .panel-body
+    st.markdown('</div>', unsafe_allow_html=True)  # .right-panel-box
 
 
 # -------------------------------------------------
-# MISE EN PAGE 3 COLONNES FIXES (GAUCHE / MAP / DROITE)
+# MAIN
 # -------------------------------------------------
 
-# On sort du layout Streamlit standard en HTML brut
-st.markdown("<div class='main-container'>", unsafe_allow_html=True)
+def main():
+    # ------------------------------
+    # Chargement et préparation data
+    # ------------------------------
+    df = load_excel()
+    if df is None or df.empty:
+        st.warning("Excel vide ou introuvable.")
+        st.stop()
 
-# --------- PANNEAU GAUCHE (FILTRES) ---------
-with st.container():
-    st.markdown("<div class='left-panel'>", unsafe_allow_html=True)
+    # détecter les colonnes du fichier Excel
+    col_lat     = find_col(df, "Latitude")
+    col_lon     = find_col(df, "Longitude")
+    col_actif   = find_col(df, "Actif")
+    col_typo    = find_col(df, "Typologie", "Typologie d'actif")
+    col_empl    = find_col(df, "Emplacement")
+    col_extr    = find_col(df, "Extraction")
+    col_loyer   = find_col(df, "Loyer annuel", "Loyer annuel (€)", "Loyer annuel (euros)")
+    col_surface = find_col(df, "Surface", "Surface GLA", "GLA", "Surface totale")
+    col_region  = find_col(df, "Région")
+    col_dept    = find_col(df, "Département")
+    col_ref     = find_col(df, "Référence annonce", "Reference")
+    col_gmaps   = find_col(df, "Lien Google Maps", "Google Maps")
 
-    st.markdown("### Filtres", unsafe_allow_html=True)
+    # sécurité
+    if not col_lat or not col_lon or not col_ref:
+        st.error("Colonnes Latitude / Longitude / Référence annonce introuvables.")
+        st.stop()
 
-    # helpers numériques
-    def coerce_num(series):
-        out = pd.to_numeric(series.astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce")
-        return out
+    # booléen actif
+    df["_actif"] = df[col_actif] if col_actif else "oui"
+    df["_actif"] = df["_actif"].apply(normalize_bool)
 
-    surface_series = coerce_num(df_active["Surface totale (m²)"]) if "Surface totale (m²)" in df_active.columns else pd.Series(dtype=float)
-    loyer_series = coerce_num(df_active["Loyer mensuel (€)"]) if "Loyer mensuel (€)" in df_active.columns else pd.Series(dtype=float)
+    # coords GPS
+    df["_lat"] = clean_latlon_series(df[col_lat])
+    df["_lon"] = clean_latlon_series(df[col_lon])
 
-    if not surface_series.dropna().empty:
-        s_min = int(surface_series.min())
-        s_max = int(surface_series.max())
-    else:
-        s_min, s_max = 0, 1000
+    # typologie / emplacement / extraction normalisés pour les filtres
+    df["_typologie_n"] = df[col_typo].astype(str).map(norm_txt) if col_typo else ""
+    df["_empl_n"]      = df[col_empl].astype(str).map(norm_txt) if col_empl else ""
+    df["_extr_n"]      = df[col_extr].astype(str).map(norm_txt) if col_extr else ""
 
-    if not loyer_series.dropna().empty:
-        l_min = int(loyer_series.min())
-        l_max = int(loyer_series.max())
-    else:
-        l_min, l_max = 0, 50000
+    # ne garder que les lignes actives avec coords
+    df = df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()].copy()
+    if df.empty:
+        st.warning("Aucune ligne active avec coordonnées valides.")
+        st.stop()
 
-    # Sliders Surface / Loyer
-    surf_range = st.slider(
-        "Surface (m²)",
-        min_value=s_min,
-        max_value=s_max,
-        value=(s_min, s_max),
-        step=1,
+    # plages globales pour sliders
+    surf_global = clean_numeric_series(df[col_surface]).dropna() if col_surface else pd.Series([], dtype=float)
+    loyer_global = clean_numeric_series(df[col_loyer]).dropna() if col_loyer else pd.Series([], dtype=float)
+
+    smin, smax = (int(surf_global.min()), int(surf_global.max())) if not surf_global.empty else (None, None)
+    lmin, lmax = (int(loyer_global.min()), int(loyer_global.max())) if not loyer_global.empty else (None, None)
+
+    # ------------------------------
+    # BARRE LATERALE GAUCHE (filtres)
+    # ------------------------------
+    with st.sidebar:
+        st.markdown("### Filtres")
+
+        lots_working = df.copy()
+
+        # --- Région / Département ---
+        if col_region and col_dept:
+            with st.expander("Région / Département", expanded=True):
+                regions = sorted(
+                    [
+                        r
+                        for r in lots_working[col_region]
+                        .dropna().astype(str).unique()
+                        if r not in ["-", "/"]
+                    ]
+                )
+
+                selected_regions = []
+                selected_deps = []
+
+                for reg in regions:
+                    # checkbox région
+                    if st.checkbox(reg, key=f"reg_{reg}"):
+                        selected_regions.append(reg)
+
+                        # liste des départements de cette région
+                        deps = sorted(
+                            [
+                                d
+                                for d in lots_working[
+                                    lots_working[col_region].astype(str) == reg
+                                ][col_dept]
+                                .dropna().astype(str).unique()
+                                if d not in ["-", "/"]
+                            ]
+                        )
+
+                        # afficher chaque département indenté
+                        for dep in deps:
+                            col_pad, col_box = st.columns([1, 10])
+                            with col_pad:
+                                st.write("")  # juste l'indent visuel
+                            with col_box:
+                                if st.checkbox(dep, key=f"dep_{reg}_{dep}"):
+                                    selected_deps.append(dep)
+
+                # filtrage
+                if selected_regions:
+                    lots_working = lots_working[
+                        lots_working[col_region].astype(str).isin(selected_regions)
+                    ]
+                if selected_deps:
+                    lots_working = lots_working[
+                        lots_working[col_dept].astype(str).isin(selected_deps)
+                    ]
+
+        # --- Typologie d'actif ---
+        if col_typo:
+            st.markdown(
+                "<div class='group-title'>Typologie d'actif</div>",
+                unsafe_allow_html=True,
+            )
+            typos_raw = sorted(
+                [
+                    t
+                    for t in lots_working[col_typo]
+                    .dropna().astype(str).unique()
+                    if t not in ["-", "/", ""]
+                ]
+            )
+
+            chosen_norm = []
+            for t in typos_raw:
+                if st.checkbox(t, key=f"typo_{t}"):
+                    chosen_norm.append(norm_txt(t))
+
+            if chosen_norm:
+                lots_working = lots_working[
+                    lots_working["_typologie_n"].isin(chosen_norm)
+                ]
+
+        # --- Extraction ---
+        if col_extr:
+            st.markdown(
+                "<div class='group-title'>Extraction</div>",
+                unsafe_allow_html=True,
+            )
+            extr_opts = ["oui", "non", "faisable"]
+            sel_extr = []
+
+            for e in extr_opts:
+                if st.checkbox(e, key=f"extr_{e}"):
+                    sel_extr.append(norm_txt(e))
+
+            if sel_extr:
+                lots_working = lots_working[
+                    lots_working["_extr_n"].isin(sel_extr)
+                ]
+
+        # --- Emplacement ---
+        if col_empl:
+            st.markdown(
+                "<div class='group-title'>Emplacement</div>",
+                unsafe_allow_html=True,
+            )
+            vals = [
+                e
+                for e in lots_working[col_empl]
+                .dropna().astype(str).unique()
+                if e not in ["-", "/", ""]
+            ]
+            base = ["Centre-ville", "Périphérie"]
+            ordered = [e for e in base if e in vals] + [e for e in vals if e not in base]
+
+            sel_empl = []
+            for e in ordered:
+                if st.checkbox(e, key=f"empl_{e}"):
+                    sel_empl.append(norm_txt(e))
+
+            if sel_empl:
+                lots_working = lots_working[
+                    lots_working["_empl_n"].isin(sel_empl)
+                ]
+
+        # --- Sliders SURFACE ---
+        if smin is not None and smax is not None:
+            if "surf_range" not in st.session_state:
+                st.session_state["surf_range"] = (smin, smax)
+
+            st.session_state["surf_range"] = st.slider(
+                "Surface (m²)",
+                min_value=smin,
+                max_value=smax,
+                value=st.session_state["surf_range"],
+                step=1,
+                key="surf_slider",
+            )
+
+        # --- Sliders LOYER ---
+        if lmin is not None and lmax is not None:
+            if "loyer_range" not in st.session_state:
+                st.session_state["loyer_range"] = (lmin, lmax)
+
+            st.session_state["loyer_range"] = st.slider(
+                "Loyer annuel (€)",
+                min_value=lmin,
+                max_value=lmax,
+                value=st.session_state["loyer_range"],
+                step=1000,
+                key="loyer_slider",
+            )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Réinitialiser les filtres"):
+                reset_filters_defaults()
+        with c2:
+            st.button("Je suis intéressé")
+
+    # ------------------------------
+    # On a maintenant lots_working = lignes filtrées
+    # On agrège par référence annonce -> 1 pin = 1 annonce
+    # ------------------------------
+
+    if not col_ref:
+        st.error("Colonne 'Référence annonce' introuvable dans le fichier Excel.")
+        st.stop()
+
+    def ref_agg(group: pd.DataFrame) -> pd.Series:
+        """
+        Pour chaque référence :
+         - coords moyennes
+         - surface min/max
+         - loyer min/max
+         - libellé ref sans .0
+        """
+        out_d = {
+            "_lat": group["_lat"].mean(),
+            "_lon": group["_lon"].mean(),
+        }
+
+        # plage de surfaces
+        if col_surface:
+            s = clean_numeric_series(group[col_surface]).dropna()
+            out_d["surf_min"] = float(s.min()) if not s.empty else None
+            out_d["surf_max"] = float(s.max()) if not s.empty else None
+        else:
+            out_d["surf_min"] = None
+            out_d["surf_max"] = None
+
+        # plage de loyers
+        if col_loyer:
+            l = clean_numeric_series(group[col_loyer]).dropna()
+            out_d["loyer_min"] = float(l.min()) if not l.empty else None
+            out_d["loyer_max"] = float(l.max()) if not l.empty else None
+        else:
+            out_d["loyer_min"] = None
+            out_d["loyer_max"] = None
+
+        # label ref propre
+        ref_val = str(group.iloc[0][col_ref]).strip()
+        if re.match(r"^\d+\.0+$", ref_val):
+            ref_val = ref_val.split(".")[0]
+        out_d["ref_label"] = ref_val
+
+        return pd.Series(out_d)
+
+    refs = (
+        lots_working.groupby(col_ref, as_index=False)
+        .apply(ref_agg)
+        .reset_index(drop=True)
     )
 
-    loyer_range = st.slider(
-        "Loyer mensuel (€)",
-        min_value=l_min,
-        max_value=l_max,
-        value=(l_min, l_max),
-        step=100,
-    )
+    # Filtre sur sliders (multi-lots = on garde si la plage chevauche)
+    # surface
+    if smin is not None and smax is not None and "surf_range" in st.session_state:
+        rmin, rmax = st.session_state["surf_range"]
+        refs = refs[
+            refs.apply(
+                lambda r: overlaps(
+                    r.get("surf_min"), r.get("surf_max"), rmin, rmax
+                ),
+                axis=1,
+            )
+        ]
 
-    # Bouton réinitialiser filtres
-    if st.button("Réinitialiser les filtres", key="reset_filters", help="Remettre tous les filtres aux valeurs par défaut", use_container_width=True):
-        st.experimental_rerun()
+    # loyer
+    if lmin is not None and lmax is not None and "loyer_range" in st.session_state:
+        rmin, rmax = st.session_state["loyer_range"]
+        refs = refs[
+            refs.apply(
+                lambda r: overlaps(
+                    r.get("loyer_min"), r.get("loyer_max"), rmin, rmax
+                ),
+                axis=1,
+            )
+        ]
 
-    # Boutons cuivre
-    st.markdown("<button class='cuivre-btn'>Partager toutes les annonces</button>", unsafe_allow_html=True)
-    st.markdown("<button class='cuivre-btn'>Partager mes favoris</button>", unsafe_allow_html=True)
-    st.markdown("<button class='cuivre-btn'>Je suis intéressé</button>", unsafe_allow_html=True)
+    # si plus rien après filtres -> on affiche quand même la structure page
+    if refs.empty:
+        if "selected_ref" not in st.session_state:
+            st.session_state["selected_ref"] = None
 
-    st.markdown("</div>", unsafe_allow_html=True)
+        left_col, right_col = st.columns([1, 0.28], gap="small")
+        with left_col:
+            st.write("Aucun résultat pour ces filtres.")
+        with right_col:
+            render_right_panel(
+                st.session_state["selected_ref"], df, col_ref, col_gmaps
+            )
+        return
 
-# --------- PANNEAU CARTE (CENTRAL) ---------
-with st.container():
-    st.markdown("<div class='map-panel'><div class='map-container-inner'>", unsafe_allow_html=True)
+    # anti-overlap sur les coord groupées
+    refs["_lat_r"] = refs["_lat"].round(6)
+    refs["_lon_r"] = refs["_lon"].round(6)
 
-    # duplique df actif avant filtres
-    df_filtered = df_active.copy()
+    rows_for_plot = []
+    for (_, _), grp in refs.groupby(["_lat_r", "_lon_r"], sort=False):
+        coords = anti_overlap_positions(
+            len(grp),
+            float(grp.iloc[0]["_lat"]),
+            float(grp.iloc[0]["_lon"]),
+        )
+        for (lat, lon), (_, r) in zip(coords, grp.iterrows()):
+            rr = r.copy()
+            rr["_lat_plot"] = lat
+            rr["_lon_plot"] = lon
+            rows_for_plot.append(rr)
 
-    # filtre surface
-    if "Surface totale (m²)" in df_filtered.columns:
-        vals_surface = coerce_num(df_filtered["Surface totale (m²)"])
-        df_filtered = df_filtered[(vals_surface >= surf_range[0]) & (vals_surface <= surf_range[1]) | vals_surface.isna()]
+    plot_df = pd.DataFrame(rows_for_plot)
 
-    # filtre loyer
-    if "Loyer mensuel (€)" in df_filtered.columns:
-        vals_loyer = coerce_num(df_filtered["Loyer mensuel (€)"])
-        df_filtered = df_filtered[(vals_loyer >= loyer_range[0]) & (vals_loyer <= loyer_range[1]) | vals_loyer.isna()]
+    # ------------------------------
+    # STATE : ref sélectionnée pour le panneau droit permanent
+    # ------------------------------
+    if "selected_ref" not in st.session_state:
+        st.session_state["selected_ref"] = None
 
-    # IMPORTANT : 1 pin = 1 annonce => on regroupe par "Référence annonce" et on prend la première ligne
-    df_markers = df_filtered.sort_values("Référence annonce").groupby("Référence annonce", as_index=False).first()
+    # ------------------------------
+    # AFFICHAGE PRINCIPAL EN 2 COLONNES
+    # ------------------------------
+    left_col, right_col = st.columns([1, 0.28], gap="small")
 
-    # carte folium
-    folium_map = build_folium_map(df_markers)
+    # colonne carte
+    with left_col:
+        FR_LAT, FR_LON, FR_ZOOM = 46.603354, 1.888334, 6  # centre France
+        m = folium.Map(
+            location=[FR_LAT, FR_LON],
+            zoom_start=FR_ZOOM,
+            tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            attr="© OpenStreetMap contributors",
+        )
 
-    # on récupère l'info du clic pin via le popup (= last_object_clicked_popup)
-    map_data = st_folium(
-        folium_map,
-        width=None,
-        height=600,
-        returned_objects=["last_object_clicked_popup"],
-    )
+        css_marker = (
+            f"background:{LOGO_BLUE};"
+            "color:#fff;"
+            "border:2px solid #fff;"
+            "width:28px; height:28px; line-height:28px;"
+            "border-radius:50%; text-align:center;"
+            "font-size:11px; font-weight:600;"
+        )
 
-    clicked_ref = None
-    if map_data and "last_object_clicked_popup" in map_data and map_data["last_object_clicked_popup"]:
-        clicked_ref = map_data["last_object_clicked_popup"]
+        layer = folium.FeatureGroup(name="Annonces").add_to(m)
 
-    if clicked_ref:
-        st.session_state["selected_ref"] = clicked_ref
+        # nouveau registre des clics : coords arrondies -> ref annonce
+        click_registry: Dict[Tuple[float,float], str] = {}
 
-    st.markdown("</div></div>", unsafe_allow_html=True)
+        for _, r in plot_df.iterrows():
+            lat = float(r["_lat_plot"])
+            lon = float(r["_lon_plot"])
 
-# --------- PANNEAU DROIT (DETAILS) ---------
-with st.container():
-    st.markdown("<div class='right-panel'>", unsafe_allow_html=True)
+            raw_label = str(r.get("ref_label", "")).strip()
+            if re.match(r"^\d+\.0+$", raw_label):
+                raw_label = raw_label.split(".")[0]
 
-    render_right_panel(st.session_state["selected_ref"], df_active)
+            icon = folium.DivIcon(html=f'<div style="{css_marker}">{raw_label}</div>')
 
-    st.markdown("</div>", unsafe_allow_html=True)
+            # on enregistre la ref avec les coords arrondies
+            key = (round(lat, 6), round(lon, 6))
+            click_registry[key] = raw_label
 
-# --------- FIN DU WRAPPER GLOBAL ---------
-st.markdown("</div>", unsafe_allow_html=True)
+            # IMPORTANT :
+            # - ni popup ni tooltip -> plus d'affichage au survol ni au clic sur la carte
+            folium.Marker(
+                location=[lat, lon],
+                icon=icon,
+            ).add_to(layer)
+
+        out = st_folium(m, height=800, width=None, returned_objects=[])
+
+        # GESTION DU CLIC SUR LA CARTE -> mise à jour selected_ref
+        clicked_ref = None
+        if isinstance(out, dict):
+            loc_info = out.get("last_object_clicked")
+            if isinstance(loc_info, dict):
+                if "lat" in loc_info and "lng" in loc_info:
+                    # clic sur un point de la carte (pin OU fond)
+                    lat_clicked = round(float(loc_info["lat"]), 6)
+                    lon_clicked = round(float(loc_info["lng"]), 6)
+                    key = (lat_clicked, lon_clicked)
+                    # si la coord correspond à un pin, on récupère sa ref
+                    # sinon "", ce qui veut dire "aucune sélection"
+                    clicked_ref = click_registry.get(key, "")
+
+        if clicked_ref is not None:
+            st.session_state["selected_ref"] = clicked_ref
+
+    # colonne panneau droit
+    with right_col:
+        render_right_panel(
+            st.session_state["selected_ref"], df, col_ref, col_gmaps
+        )
+
+
+def run():
+    main()
+
+if __name__ == "__main__":
+    run()
