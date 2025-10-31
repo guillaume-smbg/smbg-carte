@@ -212,6 +212,7 @@ if not data_df.empty:
                     line-height: 20px; /* Centrage vertical du texte */
                     border: 1px solid #005A8D;
                     font-weight: bold;
+                    pointer-events: none; /* 🟢 SOLUTION : Permet aux clics de passer à travers l'icône */
                 ">{clean_ref}</div>
             """
         )
@@ -236,7 +237,7 @@ if not data_df.empty:
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # 🟢 NOUVELLE VALEUR : Seuil très tolérant pour les clics dézoomés
+        # Seuil très tolérant pour les clics dézoomés
         DISTANCE_THRESHOLD = 0.05 
 
         if current_coords != st.session_state['last_clicked_coords']:
