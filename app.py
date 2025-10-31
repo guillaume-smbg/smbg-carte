@@ -18,28 +18,23 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (Nettoyage Maximal et Cache Réactivé) ---
+# --- Fonction de Chargement des Données (Cache Réactivé) ---
 @st.cache_data
 def load_data(file_path):
     try:
-        # Lecture du fichier en forçant la colonne REF_COL en chaîne de caractères
         df = pd.read_excel(file_path, dtype={REF_COL: str})
         
-        # Nettoyage des noms de colonnes
         df.columns = df.columns.str.strip() 
         
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
              return pd.DataFrame(), f"Colonnes essentielles manquantes. Colonnes trouvées : {list(df.columns)}"
             
-        # Conversion des coordonnées
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
         
         # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
         df[REF_COL] = df[REF_COL].astype(str).str.strip()
-        # Supprime tout '.0' ou partie décimale
         df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0] if isinstance(x, str) else str(x).split('.')[0])
-        # Force le format 5 chiffres avec des zéros en tête (ex: "1" -> "00001")
         df[REF_COL] = df[REF_COL].str.zfill(5) 
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
@@ -101,7 +96,6 @@ with col_map:
             lon = row['Longitude']
             reference = row.get(REF_COL, 'N/A')
             
-            # LOGIQUE POUR L'AFFICHAGE DU PIN : Supprimer les zéros en tête
             display_ref = reference
             if reference != 'N/A' and reference.isdigit():
                 try:
@@ -165,10 +159,13 @@ with col_right:
     st.header("🔍 Détails du Lot")
     st.markdown("---")
     
+    # LIGNE DE DIAGNOSTIC FORCÉ : Veuillez me reporter ce texte
+    st.text(f"DEBUG REF: {st.session_state.get('selected_ref', 'NOT SET')}") 
+    st.markdown("---")
+    
     selected_ref = st.session_state['selected_ref']
     
     if selected_ref:
-        # Recherche du lot sélectionné
         selected_ref_clean = selected_ref.strip()
         
         # Filtre sécurisé sur la colonne de référence nettoyée
@@ -186,7 +183,7 @@ with col_right:
 
             st.subheader(f"Réf. : {display_title_ref}")
             
-            # --- Adresse ---
+            # --- Adresse et autres détails (comme dans les versions précédentes) ---
             adresse = selected_data.get('Adresse', 'N/A')
             code_postal = selected_data.get('Code Postal', '')
             ville = selected_data.get('Ville', '')
@@ -197,7 +194,6 @@ with col_right:
             else:
                 st.write("Adresse non renseignée.")
             
-            # --- Lien Google Maps (Bouton d'Action) ---
             lien_maps = selected_data.get('Lien Google Maps', None)
             if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
                 st.markdown(
@@ -212,7 +208,6 @@ with col_right:
             
             st.markdown("---")
             
-            # --- Informations Détaillées (I à AH) ---
             st.markdown("##### Informations Détaillées")
             
             colonnes_a_afficher = [
@@ -257,23 +252,13 @@ with col_right:
             st.markdown("---")
             
         else:
-            # --- ÉCHEC : Affichage du Diagnostic Critique ---
-            st.error("❌ Échec de l'affichage des détails (Erreur de correspondance de la Référence).")
-            st.text(f"Référence cherchée (selected_ref) : '{selected_ref}' (Long: {len(selected_ref)})")
-            
-            # Afficher les 5 premières références du DF pour la comparaison visuelle
-            references_in_df = data_df[REF_COL].head(5).tolist()
-            st.text(f"5 premières Références du DF : {references_in_df}")
-            
-            # Afficher la référence nettoyée que l'on a essayé d'utiliser pour le filtre
-            st.text(f"Référence nettoyée : '{selected_ref_clean}' (Long: {len(selected_ref_clean)})")
-
-            st.warning("Veuillez m'indiquer exactement ce que ce message rouge affiche pour la **Référence cherchée** et sa **Long.**")
+            # Affichage du diagnostic d'échec de la recherche
+            st.error("❌ ÉCHEC : La référence a été trouvée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
 
     else:
-        # Affichage d'une erreur si le clic était trop loin
+        # Affichage d'une erreur si le clic était trop loin ou info par défaut
         if st.session_state.get('no_ref_found'):
-            st.warning("Veuillez cliquer **exactement** sur un des marqueurs bleus.")
+            st.warning("Veuillez cliquer **exactement** sur un des marqueurs bleus. Le clic a été enregistré, mais il était trop éloigné du point connu.")
             del st.session_state['no_ref_found']
         else:
             st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
