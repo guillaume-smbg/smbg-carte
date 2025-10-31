@@ -50,28 +50,20 @@ CUSTOM_CSS = """
     z-index: 1000 !important; 
 }
 
-/* ---------------------------------------------------- */
-/* NOUVEAU: Ajustement de la largeur des colonnes du tableau principal */
-/* Cela cible le st.dataframe sous la carte. La largeur des colonnes est gérée par 
-   Streamlit, mais nous pouvons essayer de limiter la largeur totale du conteneur.
-   Cependant, st.dataframe dans Streamlit est très difficile à styliser directement en CSS
-   avec une largeur fixe sans affecter le reste. Nous allons limiter la largeur du conteneur
-   de la table HTML s'il n'est pas utilisé ailleurs. 
-   
-   La limitation de 275px sera appliquée principalement aux éléments individuels dans 
-   le panneau de détails, comme demandé précédemment.
-*/
-.details-panel div[style*="margin-bottom: 8px;"] {
-    display: flex;
-    justify-content: space-between; /* Aligner les noms et valeurs */
-    width: 100%; /* Utiliser toute la largeur du panneau (300px - padding) */
+/* ---------------------------------------------------------------------- */
+/* NOUVEAU: Limitation de la largeur maximale du tableau sous la carte (275px) */
+/* La classe ciblée est le conteneur de l'élément st.dataframe */
+/* Nous utilisons un sélecteur plus générique et le restreignons au corps principal */
+/* Cela nécessite de l'injecter dans un conteneur dédié (voir Section 5) */
+
+div.stDataFrame {
+    max-width: 275px !important;
 }
 
-/* Optionnel: Limiter la largeur du tableau sous la carte (si c'est bien votre intention) */
-/* .stDataFrame div[data-testid="stHorizontalBlock"] { 
-    max-width: 275px; 
-} */
-
+/* Optionnel : S'assurer que les titres ne poussent pas la largeur */
+section.main {
+    overflow-x: hidden; 
+}
 
 </style>
 """
@@ -235,7 +227,7 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# Ce panneau affiche les détails en paires Nom: Valeur, pas en tableau.
+# Le style du panneau a été nettoyé et le bouton Maps conservé.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -280,7 +272,7 @@ if show_details:
 
         html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
         
-        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES ---
+        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
         # Colonnes à exclure 
@@ -310,10 +302,9 @@ if show_details:
                 # Utilisation de la fonction de formatage
                 formatted_value = format_value(value, unit=unit)
                 
-                # Affichage des paires Nom : Valeur (La largeur est gérée par le CSS en haut)
-                # Utilisation de deux spans pour que le CSS 'justify-content: space-between' fonctionne
+                # Affichage des paires Nom : Valeur
                 html_content += f'''
-                <div style="margin-bottom: 8px;">
+                <div style="margin-bottom: 8px; display: flex; justify-content: space-between;">
                     <span style="font-weight: bold; color: #555; font-size: 14px; max-width: 50%; overflow-wrap: break-word;">{col_name} :</span> 
                     <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span>
                 </div>
@@ -365,106 +356,56 @@ st.markdown(html_content, unsafe_allow_html=True)
 st.markdown("---")
 st.header("📋 Annonce du Lot Sélectionné")
 
-if show_details:
-    # Filtre sur la référence sélectionnée
-    selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy()
-    
-    if not selected_row_df.empty:
-        # Suppression des colonnes temporaires pour l'affichage
-        if 'distance_sq' in selected_row_df.columns:
-            display_df = selected_row_df.drop(columns=['distance_sq'])
-        else:
-            display_df = selected_row_df
-            
-        # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
-        all_cols = display_df.columns.tolist()
-        
-        try:
-            # 1. Trouver l'index de 'Adresse'
-            adresse_index = all_cols.index('Adresse')
-            
-            # 2. Trouver l'index de 'Commentaires'
-            commentaires_index = all_cols.index('Commentaires')
-            
-            # 3. Conserver les colonnes de 'Adresse' à 'Commentaires' inclus
-            cols_to_keep = all_cols[adresse_index : commentaires_index + 1]
-            display_df = display_df[cols_to_keep]
-        
-        except ValueError as e:
-            if 'Adresse' in str(e):
-                st.warning("La colonne 'Adresse' est introuvable. Affichage de toutes les colonnes disponibles.")
-            elif 'Commentaires' in str(e):
-                 # Si 'Commentaires' n'existe pas, on commence à 'Adresse' et va jusqu'à la fin
-                 try:
-                     adresse_index = all_cols.index('Adresse')
-                     cols_to_keep = all_cols[adresse_index:]
-                     display_df = display_df[cols_to_keep]
-                     st.warning("La colonne 'Commentaires' est introuvable. Affichage des colonnes à partir de 'Adresse' jusqu'à la fin.")
-                 except ValueError:
-                    st.warning("Erreur de filtrage des colonnes. Affichage de toutes les colonnes disponibles.")
+# 🚨 Ajout d'un conteneur pour appliquer la largeur maximale de 275px au st.dataframe
+# L'injection CSS ci-dessus cible div.stDataFrame.
+dataframe_container = st.container()
 
-        # Transposition du DataFrame
-        transposed_df = display_df.T.reset_index()
-        transposed_df.columns = ['Champ', 'Valeur']
+with dataframe_container:
+    if show_details:
+        # Filtre sur la référence sélectionnée
+        selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy()
         
-        # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
-        
-        money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
-        
-        def format_monetary_value(row):
-            """Applique le formatage en utilisant un ESPACE comme séparateur de milliers."""
-            champ = row['Champ']
-            value = row['Valeur']
+        if not selected_row_df.empty:
+            # Suppression des colonnes temporaires pour l'affichage
+            if 'distance_sq' in selected_row_df.columns:
+                display_df = selected_row_df.drop(columns=['distance_sq'])
+            else:
+                display_df = selected_row_df
+                
+            # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
+            all_cols = display_df.columns.tolist()
             
-            # Vérifie si la valeur est un nombre
-            is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value))
+            try:
+                # 1. Trouver l'index de 'Adresse'
+                adresse_index = all_cols.index('Adresse')
+                
+                # 2. Trouver l'index de 'Commentaires'
+                commentaires_index = all_cols.index('Commentaires')
+                
+                # 3. Conserver les colonnes de 'Adresse' à 'Commentaires' inclus
+                cols_to_keep = all_cols[adresse_index : commentaires_index + 1]
+                display_df = display_df[cols_to_keep]
             
-            # Colonne monétaire
-            is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords)
-            
-            if is_money_col and is_numeric:
-                try:
-                    float_value = float(value)
-                    
-                    # 1. Formatage standard US sans décimales (ex: 85,723)
-                    formatted_value = f"{float_value:,.0f}" 
-                    
-                    # 2. Remplacer la virgule de milliers par un espace
-                    formatted_value = formatted_value.replace(",", " ")
-                    
-                    return f"€{formatted_value}"
-                    
-                except (ValueError, TypeError):
-                    return value 
-            
-            # Colonne surface
-            is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
-            if is_surface_col and is_numeric:
-                 try:
-                    float_value = float(value)
-                    formatted_value = f"{float_value:,.0f}" # 12,345
-                    formatted_value = formatted_value.replace(",", " ") # 12 345
-                    
-                    return f"{formatted_value} m²"
-                 except (ValueError, TypeError):
-                    return value
-                    
-            # Coordonnées (à ne plus afficher dans ce tableau, mais la logique est là si on les réintroduit)
-            if champ in ['Latitude', 'Longitude'] and is_numeric:
-                 try:
-                    return f"{float(value):.4f}"
-                 except (ValueError, TypeError):
-                    return value
+            except ValueError as e:
+                if 'Adresse' in str(e):
+                    st.warning("La colonne 'Adresse' est introuvable. Affichage de toutes les colonnes disponibles.")
+                elif 'Commentaires' in str(e):
+                     # Si 'Commentaires' n'existe pas, on commence à 'Adresse' et va jusqu'à la fin
+                     try:
+                         adresse_index = all_cols.index('Adresse')
+                         cols_to_keep = all_cols[adresse_index:]
+                         display_df = display_df[cols_to_keep]
+                         st.warning("La colonne 'Commentaires' est introuvable. Affichage des colonnes à partir de 'Adresse' jusqu'à la fin.")
+                     except ValueError:
+                        st.warning("Erreur de filtrage des colonnes. Affichage de toutes les colonnes disponibles.")
 
-            return value
-        
-        # Appliquer la fonction de formatage à la colonne 'Valeur'
-        transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1)
-        
-        # Affichage du tableau formaté
-        st.dataframe(transposed_df, hide_index=True, use_container_width=True)
-        
-    else:
-        st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
-else:
-    st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
+            # Transposition du DataFrame
+            transposed_df = display_df.T.reset_index()
+            transposed_df.columns = ['Champ', 'Valeur']
+            
+            # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
+            
+            money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
+            
+            def format_monetary_value(row):
+                """Applique le formatage en utilisant un ESPACE comme
