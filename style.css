@@ -8,8 +8,8 @@
 
 /* Police et couleur globale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
-    /* Utilisation d'une police moderne pour une meilleure lisibilité */
-    font-family: 'Inter', sans-serif !important; 
+    /* Utilisation de Georgia/serif pour un aspect plus classique et aligné sur le logo */
+    font-family: 'Georgia', serif !important; 
     color: #333;
     font-size: 14px;
     line-height: 1.6;
