@@ -81,11 +81,10 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Chemin du fichier (nom du CSV généré par la plateforme à partir de la feuille "Tableau recherche")
-# CECI EST LE CHEMIN EXACT À UTILISER DANS CET ENVIRONNEMENT
-DATA_SNIPPET_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
-DATA_EXCEL_NAME = "Liste des lots Version 2.xlsx" # Nom du fichier Excel original
-DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée
+# --- CHANGEMENT CLÉ ICI : Utilisation du chemin du dépôt GitHub ---
+# Le chemin dans le dépôt est "data/Liste_des_lots.xlsx"
+DATA_FILE_PATH = "data/Liste_des_lots.xlsx" 
+DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée pour les données
 
 
 # -------------------------------------------------
@@ -93,27 +92,28 @@ DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée
 # -------------------------------------------------
 
 @st.cache_data
-def load_data(file_path: str) -> pd.DataFrame:
+def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """
-    Charge le DataFrame depuis le fichier de données en utilisant le chemin du snippet CSV.
-    Utilisation de l'encodage UTF-8 pour gérer les caractères accentués.
+    Charge le DataFrame depuis le fichier Excel spécifié en utilisant 
+    la fonction pd.read_excel.
     """
     try:
-        # Lecture du fichier CSV snippet avec encodage UTF-8 pour garantir les accents
-        df = pd.read_csv(file_path, encoding='utf-8')
+        # Tente de lire directement le fichier Excel à partir du chemin local
+        # Le premier paramètre est le chemin d'accès au fichier (ex: data/Liste_des_lots.xlsx)
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
         
         # Vérification minimale des colonnes critiques
         required_cols = [COL_LAT, COL_LON, COL_REF]
         for col in required_cols:
             if col not in df.columns:
-                st.error(f"La colonne requise '{col}' est manquante dans le fichier de données. Veuillez vérifier le contenu de la feuille '{DATA_SHEET_NAME}'.")
+                st.error(f"La colonne requise '{col}' est manquante dans le fichier de données. Veuillez vérifier le contenu de la feuille '{sheet_name}'.")
                 return pd.DataFrame()
 
     except FileNotFoundError:
-        st.error(f"Fichier de données non trouvé. Veuillez vous assurer que le fichier Excel '{DATA_EXCEL_NAME}' contenant la feuille '{DATA_SHEET_NAME}' a été correctement chargé.")
+        st.error(f"Fichier de données Excel non trouvé. Veuillez vous assurer que le fichier est présent au chemin '{file_path}'.")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
+        st.error(f"Erreur lors de la lecture du fichier Excel. Détails: {e}")
         return pd.DataFrame()
 
 
@@ -434,7 +434,8 @@ def main():
         st.session_state["selected_ref"] = "NO_SELECTION"
 
     # Chargement des données
-    df = load_data(DATA_SNIPPET_PATH)
+    # --- CHANGEMENT CLÉ ICI : Appel de la fonction de chargement ---
+    df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME)
     if df.empty:
         return
 
