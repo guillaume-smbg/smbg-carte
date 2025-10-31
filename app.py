@@ -272,13 +272,20 @@ if show_details:
         # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
-        # Colonnes à exclure 
+        # Colonnes à exclure (AJOUT DES NOUVELLES EXCLUSIONS)
         cols_to_exclude = [
             REF_COL, 
             'Latitude', 'Longitude', 
             'Lien Google Maps' ,
             'Adresse', 'Code Postal', 'Ville',
-            'distance_sq' 
+            'distance_sq',
+            # --- Exclusion des colonnes signalées pour éviter le débordement ---
+            'Photos annonce', 
+            'Actif',
+            'Valeur BP', 
+            'Contact',
+            'Page Web'
+            # ------------------------------------------------------------------
         ]
         
         # Toutes les colonnes à partir de l'indice 6 (colonne G)
@@ -306,7 +313,7 @@ if show_details:
                     <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span>
                 </div>
                 '''
-        
+
     else:
         html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
         
@@ -433,7 +440,7 @@ with dataframe_container:
                      except (ValueError, TypeError):
                         return value
                         
-                # Coordonnées (à ne plus afficher dans ce tableau, mais la logique est là si on les réintroduit)
+                # Coordonnées
                 if champ in ['Latitude', 'Longitude'] and is_numeric:
                      try:
                         return f"{float(value):.4f}"
