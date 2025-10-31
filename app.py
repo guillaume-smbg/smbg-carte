@@ -62,14 +62,16 @@ GLOBAL_CSS = f"""
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none; /* Firefox */
+    z-index: 1000; /* Assurer qu'il est au-dessus de tout */
 }}
 .left-panel::-webkit-scrollbar {{
     display: none; /* Chrome, Safari, Opera */
 }}
 /* Rendre le fond du corps des filtres transparent pour laisser voir la couleur du panneau */
-.left-panel .st-emotion-cache-1r7r3z {{{{
+.left-panel .st-emotion-cache-1r7r3z, 
+.left-panel .st-emotion-cache-1c7v0s {{
     background-color: transparent;
-}}}}
+}}
 
 /* Couleur des labels dans le panneau de gauche */
 .left-panel label {{
@@ -92,9 +94,14 @@ GLOBAL_CSS = f"""
 
 
 /* Widgets (slider, multiselect) */
+/* Slider track */
 .left-panel .stSlider > div:first-child {{
     background-color: #333333;
     border-radius: 8px;
+}}
+/* Slider progress bar */
+.left-panel .stSlider .st-emotion-cache-1r6p3m5 {{ /* Cette classe peut changer dans Streamlit, à surveiller */
+    background-color: {COPPER};
 }}
 
 /* Boutons de réinitialisation */
@@ -159,13 +166,17 @@ GLOBAL_CSS = f"""
     border: 2px solid {COPPER} !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
     cursor: pointer;
+    transition: all 0.2s ease-in-out; /* Ajout d'une transition pour le scale */
 }}
 /* Style pour le marqueur cliqué/sélectionné */
 .map-wrapper .folium-div-icon.selected-marker {{
     background-color: {COPPER} !important;
     border: 2px solid {LOGO_BLUE} !important;
     transform: scale(1.2);
-    transition: transform 0.2s;
+    width: 32px !important;
+    height: 32px !important;
+    line-height: 32px !important;
+    font-size: 13px !important;
 }}
 
 
@@ -240,6 +251,9 @@ GLOBAL_CSS = f"""
     font-weight: bold;
     color: {LOGO_BLUE};
     margin-bottom: 10px;
+}}
+h3 span {{
+    font-size: inherit; /* Assure que la ref a la bonne taille */
 }}
 
 /* Style pour l'alerte d'absence de sélection */
@@ -327,24 +341,27 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """Nettoie et prépare le DataFrame."""
 
-    # Conversion des colonnes numériques
+    # 1. Conversion des colonnes numériques
     for col in [COL_SURFACE_GLA, COL_LOYER_M2, COL_LAT, COL_LON]:
         if col in df.columns:
-            # Nettoyer les chaînes: Remplacer ',' par '.' pour la conversion, puis supprimer les non-numériques
-            df[col] = df[col].astype(str).str.replace(',', '.').str.extract('(\d+\.?\d*)', expand=False)
+            # Nettoyer les chaînes: Remplacer ',' par '.' pour la conversion, supprimer les espaces
+            df[col] = df[col].astype(str).str.replace(',', '.', regex=False).str.replace(r'[^\d\.]', '', regex=True)
             # Convertir en float. Les valeurs manquantes ou non convertibles deviennent NaN
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # Filtrer les lignes sans coordonnées valides
-    df = df.dropna(subset=[COL_LAT, COL_LON])
-
-    # S'assurer que COL_REF est une chaîne
+    # 2. Gestion de la référence
     if COL_REF in df.columns:
-        df[COL_REF] = df[COL_REF].astype(str).str.strip()
+        df[COL_REF] = df[COL_REF].astype(str).str.strip().fillna('')
         # Créer une étiquette pour le marqueur (par ex. enlever les zéros non significatifs)
-        df['ref_label'] = df[COL_REF].apply(lambda x: re.sub(r'^0+', '', str(x)))
+        df['ref_label'] = df[COL_REF].apply(lambda x: re.sub(r'^0+', '', str(x)) if str(x).isdigit() else str(x))
 
-    # Récupérer uniquement les colonnes nécessaires (pour optimiser)
+    # 3. Filtrer les lignes sans coordonnées valides
+    # On garantit que LAT/LON sont des nombres valides
+    df = df.dropna(subset=[COL_LAT, COL_LON])
+    df = df[(df[COL_LAT] >= -90) & (df[COL_LAT] <= 90) & (df[COL_LON] >= -180) & (df[COL_LON] <= 180)]
+
+
+    # 4. Récupérer uniquement les colonnes nécessaires (pour optimiser)
     cols_to_keep = list(set([
         COL_LAT, COL_LON, COL_REF, 'ref_label', COL_ADDR_FULL, COL_CITY,
         COL_GMAPS, COL_DATE_PUB, COL_REGION, COL_DEPT, COL_TYPOLOGIE,
@@ -364,45 +381,45 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
 
     # Filtre Région
     if filters.get(COL_REGION) and COL_REGION in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered[COL_REGION].isin(filters[COL_REGION])]
+        df_filtered = df_filtered[df_filtered[COL_REGION].astype(str).isin(filters[COL_REGION])]
 
     # Filtre Département
     if filters.get(COL_DEPT) and COL_DEPT in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered[COL_DEPT].isin(filters[COL_DEPT])]
+        df_filtered = df_filtered[df_filtered[COL_DEPT].astype(str).isin(filters[COL_DEPT])]
 
     # Filtre Typologie
     if filters.get(COL_TYPOLOGIE) and COL_TYPOLOGIE in df_filtered.columns:
-        df_filtered = df_filtered[df_filtered[COL_TYPOLOGIE].isin(filters[COL_TYPOLOGIE])]
+        df_filtered = df_filtered[df_filtered[COL_TYPOLOGIE].astype(str).isin(filters[COL_TYPOLOGIE])]
 
     # Filtre Surface GLA (Range Slider)
-    if COL_SURFACE_GLA in df.columns and filters.get('surface_range'):
+    if COL_SURFACE_GLA in df.columns and filters.get('surface_range') and not df_filtered.empty:
+        # On utilise le range (valeur sélectionnée) et on filtre
         min_val, max_val = filters['surface_range']
-        # Assurez-vous que la colonne est numérique pour les comparaisons
         df_filtered = df_filtered[
-            (df_filtered[COL_SURFACE_GLA] >= min_val) &
-            (df_filtered[COL_SURFACE_GLA] <= max_val)
+            (df_filtered[COL_SURFACE_GLA].ge(min_val)) &
+            (df_filtered[COL_SURFACE_GLA].le(max_val))
         ]
 
     # Filtre Loyer €/m² (Range Slider)
-    if COL_LOYER_M2 in df.columns and filters.get('loyer_range'):
+    if COL_LOYER_M2 in df.columns and filters.get('loyer_range') and not df_filtered.empty:
+        # On utilise le range (valeur sélectionnée) et on filtre
         min_val, max_val = filters['loyer_range']
         df_filtered = df_filtered[
-            (df_filtered[COL_LOYER_M2] >= min_val) &
-            (df_filtered[COL_LOYER_M2] <= max_val)
+            (df_filtered[COL_LOYER_M2].ge(min_val)) &
+            (df_filtered[COL_LOYER_M2].le(max_val))
         ]
 
     # Filtres Checkbox (Extraction/Restauration/Actif)
     checkbox_cols = {COL_EXTRACTION: COL_EXTRACTION, COL_RESTAURATION: COL_RESTAURATION, COL_ACTIF: COL_ACTIF}
 
     for col_key, col_name in checkbox_cols.items():
-        if col_name in df.columns and filters.get(col_key):
+        if col_name in df.columns and filters.get(col_key) and filters[col_key]:
              # Les valeurs du filtre (filters[col_key]) sont les options sélectionnées (ex: ['Oui'])
-             selected_options = [str(x).strip().lower() for x in filters[col_key] if x is not None]
+             selected_options = [str(x).strip() for x in filters[col_key]]
 
-             # On filtre la colonne `col_name` si sa valeur (convertie en str et minuscule) est dans `selected_options`
-             # OU si la valeur est manquante (pd.isna) et que le filtre est activé (ce qui est le cas s'il y a des options sélectionnées)
+             # On filtre la colonne `col_name` si sa valeur (convertie en str et strippée) est dans `selected_options`
              df_filtered = df_filtered[
-                 df_filtered[col_name].astype(str).str.strip().str.lower().isin(selected_options)
+                 df_filtered[col_name].astype(str).str.strip().isin(selected_options)
              ]
 
     return df_filtered
@@ -413,17 +430,18 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
 
 def format_value(value: Optional[any], unit: str = "", default: str = "-") -> str:
     """Formate une valeur pour l'affichage."""
-    if pd.isna(value) or value is None or str(value).strip() in ['', 'None', '/']:
+    if pd.isna(value) or value is None or str(value).strip() in ['', 'None', '/', 'nan']:
         return default
     if isinstance(value, (int, float)):
-        # Formatage avec séparateur de milliers et gestion des décimales
+        # Formatage avec séparateur de milliers
         if unit in ["€", "€/m²", "€/m² an"]:
-            # Pour l'argent, afficher deux décimales si l'unité est présente
-            formatted = f"{value:,.2f}".replace(",", " ").replace(".", ",")
+            # Pour l'argent, formater avec deux décimales, séparateur de milliers espace, décimale virgule
+            return f"{value:,.2f} {unit}".replace(",", "X").replace(".", ",").replace("X", " ")
         else:
              # Pour les autres nombres, utiliser un entier si possible
-            formatted = f"{int(value):,}".replace(",", " ")
-        return formatted + f" {unit}".strip()
+            if value == int(value):
+                 return f"{int(value):,} {unit}".replace(",", " ")
+            return f"{value:,.2f} {unit}".replace(",", "X").replace(".", ",").replace("X", " ")
     return str(value)
 
 def render_detail_row(label: str, value: Optional[any], unit: str = ""):
@@ -446,8 +464,8 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
         return
 
     # S'assurer que la colonne de référence est la bonne
-    # Utiliser .head(1) au cas où il y aurait des doublons de référence (et prendre le premier)
     try:
+        # Chercher la ligne correspondant à la référence sélectionnée
         row = df[df[col_ref].astype(str).str.strip() == selected_ref].iloc[0]
     except IndexError:
         st.error(f"Détails introuvables pour la référence : {selected_ref}")
@@ -464,7 +482,9 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
 
     # Boutons d'action
     gmaps_url = format_value(row.get(col_gmaps), default="#")
-    st.link_button("Voir sur Google Maps", gmaps_url, type="primary")
+    # Vérifier si l'URL est valide avant de l'afficher comme lien
+    if gmaps_url != "#":
+        st.link_button("Voir sur Google Maps", gmaps_url, type="primary")
 
     st.markdown("---")
 
@@ -494,7 +514,7 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
     # Affichage dynamique des détails
     for label, col_name, unit in columns_to_display:
         if col_name in row.index:
-            # Pour les champs Oui/Non/Inconnu, on affiche la valeur telle quelle (après format_value)
+            # On passe la valeur brute à format_value
             render_detail_row(label, row.get(col_name), unit)
 
 
@@ -505,7 +525,6 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
              st.markdown("---")
              st.markdown('<h4>Commentaires</h4>', unsafe_allow_html=True)
              st.markdown(f'<p style="font-style: italic;">{comment}</p>', unsafe_allow_html=True)
-
 
 
 # -------------------------------------------------
@@ -534,8 +553,10 @@ def main():
         return
 
     # Vérification des colonnes essentielles
-    if COL_LAT not in df.columns or COL_LON not in df.columns or COL_REF not in df.columns:
-        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans la feuille '{sheet_name}'. Colonnes trouvées: {df.columns.tolist()}")
+    required_cols = [COL_LAT, COL_LON, COL_REF]
+    if not all(col in df.columns for col in required_cols):
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        st.error(f"Les colonnes obligatoires ({', '.join(missing_cols)}) sont manquantes dans la feuille '{sheet_name}'. Colonnes trouvées: {df.columns.tolist()}")
         return
 
     # ======== PANNEAU GAUCHE (filtres) ========
@@ -566,80 +587,99 @@ def main():
         selected_restau = []
         selected_actif = []
 
+        # Fonction utilitaire pour obtenir les options triées
+        def get_sorted_options(col_name, sort_type='alpha'):
+            if col_name in df.columns:
+                options = df[col_name].astype(str).str.strip().unique()
+                # Filtrer les valeurs considérées comme manquantes ou non informatives
+                options = [o for o in options if str(o).lower() not in ['', 'nan', 'none', '/']]
+                if sort_type == 'alpha':
+                    return sorted(options)
+                elif sort_type == 'numeric':
+                    # Trier les départements correctement (ex: 1, 2, ..., 9, 10, 2A, 2B...)
+                    return sorted(options, key=lambda x: (len(x), x))
+            return []
+
 
         # 1. Filtre Région
         if COL_REGION in df.columns:
-            all_regions = sorted(df[COL_REGION].astype(str).dropna().unique().tolist())
+            all_regions = get_sorted_options(COL_REGION)
             selected_regions = st.multiselect(
                 "Région(s)",
-                options=[r for r in all_regions if str(r).strip() != 'nan'],
+                options=all_regions,
                 default=[],
                 key=f"region_filter_{st.session_state['reset_filters']}"
             )
 
-        # 2. Filtre Département (doit être dynamique basé sur la Région sélectionnée)
-        if COL_DEPT in df.columns:
-            df_for_dept = df
-            if selected_regions:
-                 df_for_dept = df[df[COL_REGION].astype(str).isin(selected_regions)]
+        # Filtres temporaires pour restreindre les options suivantes
+        temp_filters_for_options = {COL_REGION: selected_regions}
+        df_for_options = filter_dataframe(df, temp_filters_for_options)
 
-            all_depts = sorted(df_for_dept[COL_DEPT].astype(str).dropna().unique().tolist())
+
+        # 2. Filtre Département (basé sur la Région sélectionnée)
+        if COL_DEPT in df.columns:
+            # Si des régions sont sélectionnées, les options du département sont filtrées
+            df_dept_source = df_for_options if selected_regions else df
+            all_depts = get_sorted_options(COL_DEPT, sort_type='numeric')
+            
+            # Si des régions sont sélectionnées, on filtre la liste des départements possibles
+            if selected_regions and not df_dept_source.empty:
+                current_depts = df_dept_source[COL_DEPT].astype(str).str.strip().unique()
+                all_depts = [d for d in all_depts if d in current_depts]
+                
             selected_depts = st.multiselect(
                 "Département(s)",
-                options=[d for d in all_depts if str(d).strip() != 'nan'],
+                options=all_depts,
                 default=[],
                 key=f"dept_filter_{st.session_state['reset_filters']}"
             )
+            # Ajout du département aux filtres temporaires
+            temp_filters_for_options[COL_DEPT] = selected_depts
+            df_for_options = filter_dataframe(df, temp_filters_for_options)
+
 
         # 3. Filtre Typologie
         if COL_TYPOLOGIE in df.columns:
-            all_typos = sorted(df[COL_TYPOLOGIE].astype(str).dropna().unique().tolist())
+            all_typos = get_sorted_options(COL_TYPOLOGIE)
             selected_typos = st.multiselect(
                 "Typologie",
-                options=[t for t in all_typos if str(t).strip() != 'nan'],
+                options=all_typos,
                 default=[],
                 key=f"typo_filter_{st.session_state['reset_filters']}"
             )
+            # Ajout de la typologie aux filtres temporaires
+            temp_filters_for_options[COL_TYPOLOGIE] = selected_typos
+            df_for_options = filter_dataframe(df, temp_filters_for_options)
+
 
         st.markdown('---')
         st.markdown('<h3>Critères Numériques</h3>', unsafe_allow_html=True)
 
-        # Collecte des filtres appliqués jusqu'à présent (pour mettre à jour les bornes des sliders)
-        temp_filters = {
-            COL_REGION: selected_regions,
-            COL_DEPT: selected_depts,
-            COL_TYPOLOGIE: selected_typos,
-        }
-        df_temp_filtered = filter_dataframe(df, temp_filters)
-
-
         # 4. Filtre Surface GLA
         if COL_SURFACE_GLA in df.columns and not df[COL_SURFACE_GLA].dropna().empty:
-            surface_min_all = int(df[COL_SURFACE_GLA].min())
-            surface_max_all = int(df[COL_SURFACE_GLA].max())
+            surface_min_global = int(df[COL_SURFACE_GLA].min())
+            surface_max_global = int(df[COL_SURFACE_GLA].max())
 
-            if not df_temp_filtered.empty:
-                valid_surfaces = df_temp_filtered[COL_SURFACE_GLA].dropna()
-                if not valid_surfaces.empty:
-                    current_surface_min = int(valid_surfaces.min())
-                    current_surface_max = int(valid_surfaces.max())
-                else:
-                    current_surface_min = surface_min_all
-                    current_surface_max = surface_max_all
+            # Déterminer la plage actuelle basée sur les filtres appliqués (pour la valeur par défaut du slider)
+            valid_surfaces = df_for_options[COL_SURFACE_GLA].dropna()
+            if not valid_surfaces.empty:
+                current_surface_min = int(valid_surfaces.min())
+                current_surface_max = int(valid_surfaces.max())
             else:
-                current_surface_min = surface_min_all
-                current_surface_max = surface_max_all
+                # Si aucun résultat après les filtres précédents, utiliser le global max/min
+                current_surface_min = surface_min_global
+                current_surface_max = surface_max_global
 
-            # S'assurer que les bornes de la valeur du slider sont valides
+            # S'assurer que le min < max
             if current_surface_min > current_surface_max:
-                 current_surface_min = surface_min_all
-                 current_surface_max = surface_max_all
+                 current_surface_min = surface_min_global
+                 current_surface_max = surface_max_global
 
             selected_surface_range = st.slider(
                 "Surface GLA (m²)",
-                min_value=surface_min_all,
-                max_value=surface_max_all,
-                value=(current_surface_min, current_surface_max),
+                min_value=surface_min_global, # Min global
+                max_value=surface_max_global, # Max global
+                value=(current_surface_min, current_surface_max), # Valeur actuelle
                 step=50,
                 key=f"surface_filter_{st.session_state['reset_filters']}"
             )
@@ -649,30 +689,26 @@ def main():
 
         # 5. Filtre Loyer €/m²
         if COL_LOYER_M2 in df.columns and not df[COL_LOYER_M2].dropna().empty:
-            loyer_min_all = int(df[COL_LOYER_M2].min())
-            loyer_max_all = int(df[COL_LOYER_M2].max())
+            loyer_min_global = int(df[COL_LOYER_M2].min())
+            loyer_max_global = int(df[COL_LOYER_M2].max())
 
-            if not df_temp_filtered.empty:
-                valid_loyers = df_temp_filtered[COL_LOYER_M2].dropna()
-                if not valid_loyers.empty:
-                    current_loyer_min = int(valid_loyers.min())
-                    current_loyer_max = int(valid_loyers.max())
-                else:
-                    current_loyer_min = loyer_min_all
-                    current_loyer_max = loyer_max_all
+            # Déterminer la plage actuelle basée sur les filtres appliqués
+            valid_loyers = df_for_options[COL_LOYER_M2].dropna()
+            if not valid_loyers.empty:
+                current_loyer_min = int(valid_loyers.min())
+                current_loyer_max = int(valid_loyers.max())
             else:
-                current_loyer_min = loyer_min_all
-                current_loyer_max = loyer_max_all
+                current_loyer_min = loyer_min_global
+                current_loyer_max = loyer_max_global
 
-            # S'assurer que les bornes de la valeur du slider sont valides
             if current_loyer_min > current_loyer_max:
-                current_loyer_min = loyer_min_all
-                current_loyer_max = loyer_max_all
+                current_loyer_min = loyer_min_global
+                current_loyer_max = loyer_max_global
 
             selected_loyer_range = st.slider(
                 "Loyer (€/m² an)",
-                min_value=loyer_min_all,
-                max_value=loyer_max_all,
+                min_value=loyer_min_global,
+                max_value=loyer_max_global,
                 value=(current_loyer_min, current_loyer_max),
                 step=10,
                 key=f"loyer_filter_{st.session_state['reset_filters']}"
@@ -687,28 +723,28 @@ def main():
         # 6. Filtres Checkbox
         # Extraction
         if COL_EXTRACTION in df.columns:
-            extraction_opts = sorted(df[COL_EXTRACTION].astype(str).str.strip().dropna().unique().tolist())
+            extraction_opts = get_sorted_options(COL_EXTRACTION)
             selected_extraction = st.multiselect(
                 "Extraction (Cheminée)",
-                options=[o for o in extraction_opts if o.lower() != 'nan'],
+                options=extraction_opts,
                 default=[],
                 key=f"extraction_filter_{st.session_state['reset_filters']}"
             )
         # Restauration
         if COL_RESTAURATION in df.columns:
-            restau_opts = sorted(df[COL_RESTAURATION].astype(str).str.strip().dropna().unique().tolist())
+            restau_opts = get_sorted_options(COL_RESTAURATION)
             selected_restau = st.multiselect(
                 "Restauration",
-                options=[o for o in restau_opts if o.lower() != 'nan'],
+                options=restau_opts,
                 default=[],
                 key=f"restau_filter_{st.session_state['reset_filters']}"
             )
         # Actif
         if COL_ACTIF in df.columns:
-            actif_opts = sorted(df[COL_ACTIF].astype(str).str.strip().dropna().unique().tolist())
+            actif_opts = get_sorted_options(COL_ACTIF)
             selected_actif = st.multiselect(
                 "Statut d'Actif",
-                options=[o for o in actif_opts if o.lower() != 'nan'],
+                options=actif_opts,
                 default=[],
                 key=f"actif_filter_{st.session_state['reset_filters']}"
             )
@@ -771,80 +807,93 @@ def main():
         # Initialisation de la référence cliquée
         clicked_ref = None
 
+        # Coordonnées par défaut de la France (si aucun résultat ou erreur de coordonnées)
+        default_location = [46.603354, 1.888334]
+        default_zoom = 5
+
         if num_results == 0:
              st.markdown('<div class="no-results-message">Aucun résultat ne correspond aux filtres appliqués. Veuillez ajuster vos critères.</div>', unsafe_allow_html=True)
-             # Afficher une carte centrée sur la France (avec 0 résultat)
-             m = folium.Map(location=[46.603354, 1.888334], zoom_start=5, control_scale=True)
-             out = st_folium(m, height=800, width=None, key="folium_empty_map")
+             m = folium.Map(location=default_location, zoom_start=default_zoom, control_scale=True)
+             st_folium(m, height=800, width=None, key="folium_empty_map")
 
         else:
-            # Calculer le centre de la carte et le niveau de zoom
-            avg_lat = df_filtered[COL_LAT].mean()
-            avg_lon = df_filtered[COL_LON].mean()
+            # Vérifier si toutes les coordonnées dans le df filtré sont valides
+            valid_coords = df_filtered.dropna(subset=[COL_LAT, COL_LON])
+            
+            if valid_coords.empty:
+                st.markdown('<div class="no-results-message">Les résultats filtrés n\'ont pas de coordonnées valides. Affichage centré sur la France.</div>', unsafe_allow_html=True)
+                m = folium.Map(location=default_location, zoom_start=default_zoom, control_scale=True)
+                st_folium(m, height=800, width=None, key="folium_coords_error_map")
+            else:
+                # Calculer le centre de la carte et le niveau de zoom
+                avg_lat = valid_coords[COL_LAT].mean()
+                avg_lon = valid_coords[COL_LON].mean()
+                
+                # S'assurer que le centre est dans des limites raisonnables
+                if not (-90 <= avg_lat <= 90 and -180 <= avg_lon <= 180):
+                    avg_lat, avg_lon = default_location
+                    
+                # Déterminer un zoom pertinent (basé sur la dispersion des points)
+                max_lat = valid_coords[COL_LAT].max()
+                min_lat = valid_coords[COL_LAT].min()
+                max_lon = valid_coords[COL_LON].max()
+                min_lon = valid_coords[COL_LON].min()
+                
+                # Calculer la "boîte englobante" pour le zoom (simple estimation)
+                lat_diff = max_lat - min_lat
+                lon_diff = max_lon - min_lon
+                
+                # Zoom initial plus proche si un seul point (éviter le zoom 10 par défaut si 1 seul point en fait)
+                zoom_start = 10
+                if lat_diff > 0.1 or lon_diff > 0.1:
+                    # Ajustement du zoom si les points sont dispersés (similaire à Leaflet fitBounds)
+                    if lat_diff > 10 or lon_diff > 10: zoom_start = 6
+                    elif lat_diff > 5 or lon_diff > 5: zoom_start = 7
+                    elif lat_diff > 1 or lon_diff > 1: zoom_start = 8
+                    
+                m = folium.Map(location=[avg_lat, avg_lon], zoom_start=zoom_start, control_scale=True)
 
-            # Créer la carte Folium centrée sur les résultats filtrés
-            m = folium.Map(location=[avg_lat, avg_lon], zoom_start=10, control_scale=True)
+                layer = folium.FeatureGroup(name="Annonces Filtrées")
+                m.add_child(layer)
 
-            # Créer un FeatureGroup pour les marqueurs
-            layer = folium.FeatureGroup(name="Annonces Filtrées")
-            m.add_child(layer)
+                # Registre pour associer la position cliquée à la référence de l'annonce
+                click_registry: Dict[Tuple[float, float], str] = {}
 
-            # Registre pour associer la position cliquée à la référence de l'annonce
-            click_registry: Dict[Tuple[float, float], str] = {}
+                # Ajouter un marqueur pour chaque ligne
+                for _, r in valid_coords.iterrows():
+                    raw_ref = str(r[COL_REF]).strip()
+                    ref_label = str(r["ref_label"]).strip()
 
-            # Ajouter un marqueur pour chaque ligne
-            for _, r in df_filtered.iterrows():
-                raw_ref = str(r[COL_REF]).strip()
-                ref_label = str(r["ref_label"]).strip()
+                    # Définition du style par défaut et sélectionné
+                    marker_style = ""
+                    if raw_ref == st.session_state.get('selected_ref'):
+                         marker_style = "selected-marker" # Utilise la classe CSS dédiée
 
-                # CSS du marqueur standard
-                css_marker = (
-                    "background-color: #05263d !important; color: white !important; "
-                    "border-radius: 50% !important; width: 28px !important; "
-                    "height: 28px !important; line-height: 28px !important; "
-                    "text-align: center !important; font-size: 11px !important; "
-                    "font-weight: bold !important; border: 2px solid #b87333 !important; "
-                    "box-shadow: 0 1px 3px rgba(0,0,0,0.5); cursor: pointer;"
-                )
+                    lat = float(r[COL_LAT])
+                    lon = float(r[COL_LON])
 
-                # Si le marqueur est sélectionné, appliquer le style "selected-marker"
-                if raw_ref == st.session_state.get('selected_ref'):
-                    css_marker = (
-                        "background-color: #b87333 !important; color: #05263d !important; "
-                        "border-radius: 50% !important; width: 32px !important; "
-                        "height: 32px !important; line-height: 32px !important; "
-                        "text-align: center !important; font-size: 13px !important; "
-                        "font-weight: bold !important; border: 2px solid #05263d !important; "
-                        "box-shadow: 0 2px 5px rgba(0,0,0,0.7); cursor: pointer; "
-                        "transform: scale(1.1);"
+                    icon = folium.DivIcon(html=f'<div class="folium-div-icon {marker_style}">{ref_label}</div>')
+
+                    layer.add_child(
+                        folium.Marker(
+                            location=[lat, lon],
+                            icon=icon,
+                        )
                     )
 
-                lat = float(r[COL_LAT])
-                lon = float(r[COL_LON])
+                    # Clé pour le registre (arrondie à 6 décimales pour correspondre à la sortie folium)
+                    click_registry[(round(lat, 6), round(lon, 6))] = raw_ref
 
-                icon = folium.DivIcon(html=f'<div class="folium-div-icon" style="{css_marker}">{ref_label}</div>')
+                out = st_folium(m, height=800, width=None, key="folium_filtered_map")
 
-                layer.add_child(
-                    folium.Marker(
-                        location=[lat, lon],
-                        icon=icon,
-                    )
-                )
-
-                # Clé pour le registre (arrondie)
-                # La référence complète (raw_ref) est stockée pour la recherche
-                click_registry[(round(lat, 6), round(lon, 6))] = raw_ref
-
-            out = st_folium(m, height=800, width=None, key="folium_filtered_map")
-
-            if isinstance(out, dict):
-                loc_info = out.get("last_object_clicked")
-                if isinstance(loc_info, dict) and "lat" in loc_info and "lng" in loc_info:
-                    # Arrondir à 6 décimales pour correspondre aux clés du registre
-                    lat_clicked = round(float(loc_info["lat"]), 6)
-                    lon_clicked = round(float(loc_info["lng"]), 6)
-                    # Récupérer la référence d'annonce associée à ces coordonnées
-                    clicked_ref = click_registry.get((lat_clicked, lon_clicked))
+                if isinstance(out, dict):
+                    loc_info = out.get("last_object_clicked")
+                    if isinstance(loc_info, dict) and "lat" in loc_info and "lng" in loc_info:
+                        # Arrondir à 6 décimales pour correspondre aux clés du registre
+                        lat_clicked = round(float(loc_info["lat"]), 6)
+                        lon_clicked = round(float(loc_info["lng"]), 6)
+                        # Récupérer la référence d'annonce associée à ces coordonnées
+                        clicked_ref = click_registry.get((lat_clicked, lon_clicked))
 
         if clicked_ref:
             st.session_state["selected_ref"] = clicked_ref
