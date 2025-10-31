@@ -17,7 +17,7 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- CSS / HTML pour le volet flottant avec transition ---
+# --- CSS / HTML pour le volet flottant et les ajustements de largeur ---
 CUSTOM_CSS = """
 <style>
 /* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */
@@ -28,7 +28,7 @@ CUSTOM_CSS = """
     width: 300px; 
     height: 100vh;
     background-color: white; 
-    z-index: 1000; /* Z-INDEX ÉLEVÉ POUR S'ASSURER QU'IL EST AU DESSUS DE TOUT */
+    z-index: 1000; 
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
@@ -49,6 +49,30 @@ CUSTOM_CSS = """
 .css-hxt7xp { 
     z-index: 1000 !important; 
 }
+
+/* ---------------------------------------------------- */
+/* NOUVEAU: Ajustement de la largeur des colonnes du tableau principal */
+/* Cela cible le st.dataframe sous la carte. La largeur des colonnes est gérée par 
+   Streamlit, mais nous pouvons essayer de limiter la largeur totale du conteneur.
+   Cependant, st.dataframe dans Streamlit est très difficile à styliser directement en CSS
+   avec une largeur fixe sans affecter le reste. Nous allons limiter la largeur du conteneur
+   de la table HTML s'il n'est pas utilisé ailleurs. 
+   
+   La limitation de 275px sera appliquée principalement aux éléments individuels dans 
+   le panneau de détails, comme demandé précédemment.
+*/
+.details-panel div[style*="margin-bottom: 8px;"] {
+    display: flex;
+    justify-content: space-between; /* Aligner les noms et valeurs */
+    width: 100%; /* Utiliser toute la largeur du panneau (300px - padding) */
+}
+
+/* Optionnel: Limiter la largeur du tableau sous la carte (si c'est bien votre intention) */
+/* .stDataFrame div[data-testid="stHorizontalBlock"] { 
+    max-width: 275px; 
+} */
+
+
 </style>
 """
 # On injecte le CSS dès le début
@@ -77,18 +101,13 @@ def format_value(value, unit=""):
         
         # --- FORMATAGE FRANÇAIS (espace milliers, virgule décimale) ---
         if num_value != round(num_value, 2):
-            # Format avec décimales (Ex: 12,345.67 avec f-string standard)
             val_str = f"{num_value:,.2f}"
             
-            # 1. Remplacer la virgule de milliers par un espace
             val_str = val_str.replace(',', ' ') 
-            # 2. Remplacer le point décimal par une virgule
             val_str = val_str.replace('.', ',')
         else:
-            # Format sans décimales (Ex: 12,345 avec f-string standard)
             val_str = f"{num_value:,.0f}"
             
-            # Remplacer la virgule de milliers par un espace
             val_str = val_str.replace(',', ' ') 
             
         # Ajoute l'unité si elle n'est pas déjà présente
@@ -216,7 +235,7 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# Le code du panneau de droite est laissé tel quel.
+# Ce panneau affiche les détails en paires Nom: Valeur, pas en tableau.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -261,7 +280,7 @@ if show_details:
 
         html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
         
-        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
+        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
         # Colonnes à exclure 
@@ -291,22 +310,37 @@ if show_details:
                 # Utilisation de la fonction de formatage
                 formatted_value = format_value(value, unit=unit)
                 
-                # Affichage des paires Nom : Valeur
+                # Affichage des paires Nom : Valeur (La largeur est gérée par le CSS en haut)
+                # Utilisation de deux spans pour que le CSS 'justify-content: space-between' fonctionne
                 html_content += f'''
                 <div style="margin-bottom: 8px;">
-                    <span style="font-weight: bold; color: #555; font-size: 14px;">{col_name} :</span> 
-                    <span style="font-size: 14px;">{formatted_value}</span>
+                    <span style="font-weight: bold; color: #555; font-size: 14px; max-width: 50%; overflow-wrap: break-word;">{col_name} :</span> 
+                    <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span>
                 </div>
                 '''
 
-        # --- Lien Google Maps (en bas du volet) ---
+        # --- Lien Google Maps (TRANSFORMÉ EN BOUTON CLICABLE) ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
              html_content += f'''
              <hr style="border: 1px solid #eee; margin: 20px 0;">
              <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
-                <button style="background-color: #4CAF50; color: white; border: none; padding: 10px 0px; text-align: center; text-decoration: none; display: block; font-size: 14px; margin-top: 10px; cursor: pointer; border-radius: 4px; width: 100%;">
-                    Voir sur Google Maps
+                <button style="
+                    background-color: #4CAF50; 
+                    color: white; 
+                    border: none; 
+                    padding: 10px 0px; 
+                    text-align: center; 
+                    text-decoration: none; 
+                    display: block; 
+                    font-size: 14px; 
+                    margin-top: 10px; 
+                    cursor: pointer; 
+                    border-radius: 4px; 
+                    width: 100%;
+                    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+                ">
+                    🌍 Voir sur Google Maps
                 </button>
             </a>
              '''
@@ -324,9 +358,6 @@ else:
 
 
 # Fermeture de la div flottante (FIN du panneau)
-html_content += '</div>' 
-
-# Injection du panneau de détails flottant
 st.markdown(html_content, unsafe_allow_html=True)
 
 
@@ -345,7 +376,7 @@ if show_details:
         else:
             display_df = selected_row_df
             
-        # --- NOUVELLE LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
+        # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
         all_cols = display_df.columns.tolist()
         
         try:
