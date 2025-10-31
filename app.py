@@ -272,20 +272,20 @@ if show_details:
         # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
-        # Colonnes à exclure (AJOUT DES NOUVELLES EXCLUSIONS)
+        # Colonnes à exclure 
         cols_to_exclude = [
             REF_COL, 
             'Latitude', 'Longitude', 
             'Lien Google Maps' ,
             'Adresse', 'Code Postal', 'Ville',
             'distance_sq',
-            # --- Exclusion des colonnes signalées pour éviter le débordement ---
+            # --- Exclusion des colonnes signalées pour éviter le débordement/double affichage ---
             'Photos annonce', 
             'Actif',
             'Valeur BP', 
             'Contact',
             'Page Web'
-            # ------------------------------------------------------------------
+            # ------------------------------------------------------------------------------------
         ]
         
         # Toutes les colonnes à partir de l'indice 6 (colonne G)
@@ -396,6 +396,10 @@ with dataframe_container:
             # Transposition du DataFrame
             transposed_df = display_df.T.reset_index()
             transposed_df.columns = ['Champ', 'Valeur']
+            
+            # --- CODE AJOUTÉ : SUPPRIMER LA LIGNE 'Lien Google Maps' ---
+            transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps']
+            # ---------------------------------------------------------
             
             # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
             
