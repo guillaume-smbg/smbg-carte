@@ -14,17 +14,17 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
-# --- Chemin d'accès du fichier ---
+# --- Chemin d'accès du fichier (CONFIRMÉ ET FIXÉ) ---
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (Formatage pour la Recherche) ---
+# --- Fonction de Chargement des Données (Correction de Type Robuste) ---
 @st.cache_data
 def load_data(file_path):
     try:
-        # NOTE : J'ajoute le paramètre sheet_name pour plus de robustesse.
-        df = pd.read_excel(file_path, sheet_name='Tableau recherche')
-        
+        # Lire sans spécifier la feuille pour couvrir les cas où la feuille par défaut est utilisée
+        df = pd.read_excel(file_path)
+
         df.columns = df.columns.str.strip() 
         
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
@@ -41,7 +41,7 @@ def load_data(file_path):
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
     except Exception as e:
-        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}', le format Excel et le nom de la feuille (utilisé 'Tableau recherche') : {e}")
+        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -86,11 +86,11 @@ with col_map:
             reference = row.get(REF_COL, 'N/A')
             
             # LOGIQUE CORRIGÉE POUR L'AFFICHAGE DU PIN :
-            if reference != 'N/A':
+            if reference != 'N/A' and reference.isdigit():
                 # Convertit la chaîne '00025' en '25'
                 display_ref = str(int(reference)) 
             else:
-                display_ref = 'N/A'
+                display_ref = reference
             # --- FIN LOGIQUE CORRIGÉE ---
             
             html = f"""
@@ -133,7 +133,6 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
                 if closest_row['distance'] < 0.0001: 
-                    # On utilise la référence au format '00025' pour la recherche
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
                  
@@ -150,13 +149,19 @@ with col_right:
     
     if selected_ref:
         # Recherche du lot sélectionné
-        selected_data_series = data_df[data_df[REF_COL] == selected_ref]
+        
+        # FIX ULTIME : Utilisation de isin() pour une recherche plus robuste.
+        selected_data_series = data_df[data_df[REF_COL].isin([selected_ref])]
         
         if len(selected_data_series) > 0:
             selected_data = selected_data_series.iloc[0].copy()
             
             # Affichage de la référence SANS les zéros pour les titres
-            display_title_ref = str(int(selected_ref))
+            try:
+                display_title_ref = str(int(selected_ref))
+            except ValueError:
+                display_title_ref = selected_ref
+
             st.subheader(f"Réf. : {display_title_ref}")
             
             # --- Colonne G: Adresse ---
@@ -214,7 +219,7 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 valeur_str = str(valeur).strip()
-                if valeur_str not in ('N/A', 'nan', ''):
+                if valeur_str not in ('N/A', 'nan', '', '€'): # Ajout de '€' pour masquer les valeurs vides avec unité
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
                         st.text(valeur)
