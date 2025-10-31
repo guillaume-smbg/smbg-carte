@@ -17,23 +17,31 @@ if 'last_clicked_coords' not in st.session_state:
 # --- Chemin d'accès du fichier ---
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 
-# --- Fonction de Chargement des Données (CORRIGÉE) ---
+# --- Fonction de Chargement des Données ---
 @st.cache_data
 def load_data(file_path):
     try:
-        df = pd.read_excel(file_path)
-        
-        # NETTOYAGE CRITIQUE : Supprimer les espaces (souvent invisibles) des noms de colonnes
+        # Tente de lire le fichier .xlsx (ou .csv si le nom est trompeur)
+        # La lecture des fichiers est basée sur le chemin relatif dans le dépôt GitHub.
+        if file_path.endswith('.xlsx'):
+            df = pd.read_excel(file_path)
+        else:
+            # Si le fichier est un CSV (comme le suggèrent les snippets), utiliser read_csv
+            df = pd.read_csv(file_path)
+
+        # NETTOYAGE CRITIQUE : Supprimer les espaces avant/après les noms de colonnes
         df.columns = df.columns.str.strip() 
         
-        # S'assurer que les colonnes clés existent après le nettoyage
-        if 'Référence annonce' not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
-             st.error("Colonnes essentielles (Latitude, Longitude ou Référence annonce) introuvables. Vérifiez les en-têtes exacts.")
+        # Le nom exact de la colonne de référence (assurez-vous que cela corresponde)
+        REF_COL = 'Référence annonce' 
+        
+        if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
+             st.error(f"Colonnes essentielles (Latitude, Longitude ou {REF_COL}) introuvables. Vérifiez les en-têtes exacts après nettoyage.")
              return pd.DataFrame()
             
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
-        df['Référence annonce'] = df['Référence annonce'].astype(str)
+        df[REF_COL] = df[REF_COL].astype(str)
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
@@ -69,7 +77,7 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs circulaires personnalisés ---
+        # --- Création des marqueurs ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
@@ -119,7 +127,6 @@ with col_map:
                 if closest_row['distance'] < 0.0001: 
                     new_ref = closest_row['Référence annonce']
                     st.session_state['selected_ref'] = new_ref
-                    # Pas de rerun nécessaire ici, le panneau se met à jour automatiquement
                  
     else:
         st.info("Le DataFrame est vide ou les coordonnées sont manquantes.")
@@ -133,13 +140,12 @@ with col_right:
     selected_ref = st.session_state['selected_ref']
     
     if selected_ref:
-        # Tente de récupérer les données du lot sélectionné
-        # Utiliser .copy() pour éviter SettingWithCopyWarning si des transformations sont faites plus tard
+        # Le nom exact de la colonne de référence est utilisé
         selected_data = data_df[data_df['Référence annonce'] == selected_ref].iloc[0].copy()
         
         st.subheader(f"Réf. : {selected_ref}")
         
-        # --- LISTE DES INFORMATIONS À AFFICHER ---
+        # --- AFFICHAGE DES INFORMATIONS (basé sur la liste fournie) ---
         
         st.markdown("##### 📍 Localisation")
         st.write(f"**Adresse :** {selected_data.get('Adresse', 'N/A')}")
@@ -162,7 +168,7 @@ with col_right:
         st.caption("Commentaires:")
         st.text(selected_data.get('Commentaires', 'Aucun commentaire disponible.'))
         
-        # Affichage de l'image (Cloudflare)
+        # Affichage de l'image
         photo_url = selected_data.get('Photos annonce', '')
         if photo_url and pd.notna(photo_url) and photo_url != 'nan':
              st.image(photo_url, caption="Photo de l'annonce", use_column_width=True)
@@ -170,7 +176,6 @@ with col_right:
         # Bouton pour désélectionner
         if st.button("Masquer les détails", key="deselect_right"):
              st.session_state['selected_ref'] = None
-             # Rerun pour effacer le contenu de cette colonne
              st.experimental_rerun() 
              
     else:
