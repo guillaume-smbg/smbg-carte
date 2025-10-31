@@ -231,12 +231,13 @@ if not data_df.empty:
         clicked_coords = map_output["last_clicked"]
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
+        # Calcul de la distance au carré
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # 🟢 MODIFICATION ICI : Augmentation du seuil de distance
-        DISTANCE_THRESHOLD = 0.005 # 0.005 est beaucoup plus tolérant que 0.0005.
+        # 🟢 NOUVELLE VALEUR : Seuil très tolérant pour les clics dézoomés
+        DISTANCE_THRESHOLD = 0.05 
 
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
