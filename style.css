@@ -11,8 +11,14 @@
 }
 
 /* -------------------------------------------------
-   RÉINITIALISATION & POLICE
+   RÉINITIALISATION & IMMERSION PLEIN ÉCRAN (Réponse au problème de scroll)
    ------------------------------------------------- */
+
+/* 1. Supprimer le défilement général de la page (si la hauteur du corps dépasse 100vh) */
+/* Ce style s'applique au corps de l'application Streamlit */
+body {
+    overflow: hidden; /* Empêche le défilement de la page entière */
+}
 
 /* Police plus audacieuse pour une meilleure lisibilité générale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
@@ -23,7 +29,7 @@
 }
 
 /* -------------------------------------------------
-   PANNEAU GAUCHE (FILTRES)
+   PANNEAU GAUCHE (FILTRES) - Fixe et scrollable en interne
    ------------------------------------------------- */
 
 .left-panel {
@@ -33,13 +39,14 @@
     border-radius: 12px;
     min-width: var(--left-panel-width);
     max-width: var(--left-panel-width);
-    height: 100vh;
+    /* Hauteur fixée à la fenêtre pour permettre le scroll interne uniquement */
+    height: calc(100vh - 32px); /* 100% de la hauteur moins la marge/padding extérieur */
     position: fixed;
-    top: 0;
-    left: 0;
-    overflow-y: auto;
+    top: 16px; /* Ajusté pour laisser une petite marge en haut et en bas */
+    left: 16px;
+    overflow-y: auto; /* Permet le défilement uniquement à l'intérieur du panneau */
     overflow-x: hidden;
-    scrollbar-width: none;
+    scrollbar-width: thin;
     z-index: 1000;
 }
 
@@ -125,29 +132,38 @@
 }
 
 /* -------------------------------------------------
-   CORPS PRINCIPAL & CARTE
+   CORPS PRINCIPAL & CARTE - La carte prend tout l'espace
    ------------------------------------------------- */
 
 .main-content-wrapper {
-    margin-left: var(--left-panel-width);
+    /* Décale l'ensemble du contenu vers la droite du panneau de filtres */
+    margin-left: calc(var(--left-panel-width) + 32px); 
     padding: 16px;
+    /* La carte doit s'étendre, l'affichage sera géré par la hauteur de la fenêtre */
     display: flex;
     gap: 16px;
+    width: auto;
+    height: 100vh; /* Permet à la carte de prendre la hauteur restante */
 }
 
 .map-wrapper {
     flex-grow: 1;
-    min-height: 800px;
+    /* Fixe la hauteur pour prendre le reste de l'espace dans le wrapper */
+    height: calc(100vh - 32px); 
+    min-height: 400px; 
 }
 
 /* CARTE FOLIUM (Marker) */
 .map-wrapper .streamlit-folium {
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    /* S'assurer que le cadre de la carte prend bien l'espace */
+    height: 100%; 
 }
 
 /* Style des marqueurs personnalisés (les numéros de référence sur la carte) */
 .map-wrapper .folium-div-icon {
+    /* Réaffirmation du style pour s'assurer que les numéros sont visibles et stylisés */
     background-color: var(--logo-blue) !important;
     color: white !important;
     border-radius: 50% !important;
@@ -175,21 +191,24 @@
 }
 
 /* -------------------------------------------------
-   PANNEAU DROIT (DÉTAILS)
+   PANNEAU DROIT (DÉTAILS) - Flottant (Position Absolue/Fixe)
    ------------------------------------------------- */
 
 .right-panel {
     min-width: var(--right-panel-width);
     max-width: var(--right-panel-width);
-    background-color: var(--light-gray); /* Utilisation de la variable */
+    background-color: var(--light-gray); 
     padding: 16px;
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    position: sticky;
+    /* Positionnement fixe pour qu'il ne fasse pas partie du flux principal */
+    position: fixed; 
     top: 16px;
+    right: 16px;
     max-height: calc(100vh - 32px);
     overflow-y: auto;
     scrollbar-width: thin;
+    z-index: 1000;
 }
 
 /* Titre de la section détails */
@@ -205,9 +224,9 @@
 
 /* Style pour la référence (Ex: 00001) - Amélioration de la hiérarchie visuelle */
 .ref-number {
-    font-size: 18px; /* Plus grand */
-    font-weight: 800; /* Plus audacieux */
-    color: var(--copper); /* Couleur d'accentuation */
+    font-size: 18px; 
+    font-weight: 800; 
+    color: var(--copper); 
     display: block;
     text-align: center;
     margin-bottom: 15px;
@@ -246,7 +265,7 @@
     line-height: 1.2;
 }
 .city-line {
-    font-size: 18px; /* L'information la plus importante est la ville, elle est plus grande */
+    font-size: 18px; 
     font-weight: bold;
     color: var(--logo-blue);
     margin-bottom: 15px;
@@ -273,7 +292,7 @@ h3 span {
 }
 
 /* -------------------------------------------------
-   MESSAGES D'ALERTE (Améliorations suite aux commentaires)
+   MESSAGES D'ALERTE 
    ------------------------------------------------- */
 
 /* Alerte d'absence de sélection (pour panneau de droite) */
