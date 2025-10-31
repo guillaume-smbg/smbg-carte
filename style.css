@@ -1,0 +1,206 @@
+/* -------------------------------------------------
+// STYLE.CSS - Feuille de style globale
+// ------------------------------------------------- */
+
+/* Variables pour les couleurs définies dans app.py */
+:root {
+    --logo-blue: #05263d;
+    --copper: #b87333;
+    --white: #ffffff;
+    --gray-light: #f4f4f4;
+    --gray-dark: #333333;
+}
+
+/* Police et couleur globale */
+.stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
+    font-family: 'Inter', sans-serif; /* Utilisation de la police recommandée */
+    color: var(--gray-dark);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* Titre principal de l'application */
+h1.css-1r6rwwk { /* sélecteur Streamlit pour le titre h1 */
+    color: var(--logo-blue);
+    font-size: 28px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--copper);
+    margin-bottom: 20px;
+    font-weight: 700;
+}
+
+h3 {
+    color: var(--white);
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+/* Réinitialisation de l'arrière-plan du corps Streamlit */
+.stApp {
+    background-color: var(--gray-light);
+}
+
+/* Ajustement de la largeur des conteneurs pour le mode "wide" */
+div.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+/* -------------------------------------------------
+// 1. PANNEAU GAUCHE (Filtres)
+// ------------------------------------------------- */
+.left-panel {
+    background-color: var(--logo-blue);
+    color: var(--white) !important;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    height: 100%; /* Important pour la hauteur dans la colonne */
+}
+
+/* Style des labels des filtres dans le panneau gauche */
+.left-panel label {
+    color: var(--white) !important;
+    font-weight: 600;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+/* Sélecteurs Streamlit pour les selectbox/dropdowns */
+.stSelectbox div[data-baseweb="select"], 
+.stSelectbox div[data-baseweb="input"] {
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.9);
+    color: var(--gray-dark);
+    padding: 4px 8px;
+}
+
+/* Bouton de réinitialisation */
+.left-panel .stButton button {
+    background-color: var(--copper);
+    color: var(--white);
+    font-weight: bold;
+    border-radius: 8px;
+    border: none;
+    margin-top: 20px;
+    transition: background-color 0.2s;
+    width: 100%;
+}
+
+.left-panel .stButton button:hover {
+    background-color: #a0652d; /* Nuance plus foncée */
+}
+
+
+/* -------------------------------------------------
+// 2. PANNEAU DROIT (Détails du Lot)
+// ------------------------------------------------- */
+.right-panel {
+    background-color: var(--white);
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    height: 100%;
+}
+
+.right-panel h3 {
+    color: var(--logo-blue); /* Le titre dans le panneau droit est bleu */
+    border-bottom: 1px solid var(--gray-light);
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.detail-address {
+    font-style: italic;
+    color: var(--gray-dark);
+    margin-bottom: 20px;
+}
+
+.detail-line {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px dotted var(--gray-light);
+}
+
+.detail-label {
+    font-weight: 600;
+    color: var(--logo-blue);
+    flex: 1;
+    min-width: 120px;
+    padding-right: 10px;
+}
+
+.detail-value {
+    text-align: right;
+    font-weight: 400;
+    color: var(--gray-dark);
+    flex: 2;
+}
+
+.no-selection-msg {
+    text-align: center;
+    color: var(--gray-dark);
+    padding-top: 50px;
+    font-style: italic;
+}
+
+/* Style spécifique pour le bloc commentaires */
+.detail-comments {
+    border: 1px solid var(--gray-light);
+    background-color: var(--gray-light);
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Style du bouton Google Maps (st.link_button) */
+.right-panel .stButton button {
+    background-color: var(--copper);
+    color: var(--white);
+    font-weight: bold;
+    border-radius: 8px;
+    border: none;
+    transition: background-color 0.2s;
+    width: 100%;
+}
+.right-panel .stButton button:hover {
+    background-color: #a0652d;
+}
+
+
+/* -------------------------------------------------
+// 3. CARTE FOLIUM (au centre)
+// ------------------------------------------------- */
+
+.map-wrapper {
+    border-radius: 12px;
+    overflow: hidden; /* Assure que la carte respecte les coins arrondis */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Style du marqueur personnalisé sur la carte */
+.custom-marker {
+    background-color: var(--logo-blue);
+    color: var(--white);
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 11px;
+    text-align: center;
+    border: 2px solid var(--copper);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    line-height: 1; /* Pour centrer le texte verticalement */
+}
+
+.custom-marker:hover {
+    background-color: var(--copper);
+    border-color: var(--logo-blue);
+}
