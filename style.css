@@ -8,8 +8,8 @@
 
 /* Police et couleur globale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
-    /* Utilisation de Georgia/serif pour un aspect plus classique et aligné sur le logo */
-    font-family: 'Georgia', serif !important; 
+    /* Utilisation de Futura, conformément à votre charte graphique */
+    font-family: 'Futura', 'Trebuchet MS', 'Arial', sans-serif !important; 
     color: #333;
     font-size: 14px;
     line-height: 1.6;
@@ -28,6 +28,7 @@ h3 {
     border-bottom: 1px solid var(--copper);
     padding-bottom: 5px;
     margin-bottom: 15px;
+    font-weight: 600; /* Futura est souvent épaisse */
 }
 
 /* Correction du padding par défaut de Streamlit pour que le layout "wide" soit propre */
