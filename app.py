@@ -14,7 +14,7 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
-# --- Chemin d'accès du fichier (CONFIRMÉ ET FIXÉ) ---
+# --- Chemin d'accès du fichier ---
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
@@ -37,7 +37,7 @@ def load_data(file_path):
         
         # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
         df[REF_COL] = df[REF_COL].astype(str).str.strip()
-        # Supprime tout '.0' ou partie décimale (ex: "1.0" -> "1")
+        # Supprime tout '.0' ou partie décimale
         df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0] if isinstance(x, str) else str(x).split('.')[0])
         # Force le format 5 chiffres avec des zéros en tête (ex: "1" -> "00001")
         df[REF_COL] = df[REF_COL].str.zfill(5) 
@@ -169,11 +169,13 @@ with col_right:
     
     if selected_ref:
         # Recherche du lot sélectionné
-        # FIX ULTIME : Nettoyer la colonne du DF au moment du filtre, juste au cas où.
-        # Ceci est la ligne la plus critique pour la correspondance :
-        selected_data_series = data_df[data_df[REF_COL].str.strip().isin([selected_ref.strip()])]
+        selected_ref_clean = selected_ref.strip()
+        
+        # Filtre sécurisé sur la colonne de référence nettoyée
+        selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
         
         if len(selected_data_series) > 0:
+            # --- SUCCÈS : Affichage des données ---
             selected_data = selected_data_series.iloc[0].copy()
             
             # Affichage de la référence SANS les zéros pour les titres
@@ -213,7 +215,6 @@ with col_right:
             # --- Informations Détaillées (I à AH) ---
             st.markdown("##### Informations Détaillées")
             
-            # Liste des colonnes à afficher (avec leurs unités)
             colonnes_a_afficher = [
                 ('Emplacement', selected_data.get('Emplacement', 'N/A')),
                 ('Typologie', selected_data.get('Typologie', 'N/A')),
@@ -246,7 +247,6 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 valeur_str = str(valeur).strip()
-                # N'affiche pas les champs si la valeur est vide, 'nan', 'N/A' ou juste l'unité
                 if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None'): 
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
@@ -257,7 +257,18 @@ with col_right:
             st.markdown("---")
             
         else:
-            st.error(f"❌ La référence **'{selected_ref}'** a été capturée mais n'a pas été trouvée dans le DataFrame (Erreur de correspondance de chaîne).")
+            # --- ÉCHEC : Affichage du Diagnostic Critique ---
+            st.error("❌ Échec de l'affichage des détails (Erreur de correspondance de la Référence).")
+            st.text(f"Référence cherchée (selected_ref) : '{selected_ref}' (Long: {len(selected_ref)})")
+            
+            # Afficher les 5 premières références du DF pour la comparaison visuelle
+            references_in_df = data_df[REF_COL].head(5).tolist()
+            st.text(f"5 premières Références du DF : {references_in_df}")
+            
+            # Afficher la référence nettoyée que l'on a essayé d'utiliser pour le filtre
+            st.text(f"Référence nettoyée : '{selected_ref_clean}' (Long: {len(selected_ref_clean)})")
+
+            st.warning("Veuillez m'indiquer exactement ce que ce message rouge affiche pour la **Référence cherchée** et sa **Long.**")
 
     else:
         # Affichage d'une erreur si le clic était trop loin
