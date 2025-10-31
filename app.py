@@ -4,6 +4,10 @@ import folium
 from streamlit_folium import st_folium 
 import numpy as np 
 
+# --- COULEURS SMBG ---
+COLOR_SMBG_BLUE = "#05263D" 
+# --------------------
+
 # --- 0. Configuration et Initialisation --- 
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
 
@@ -70,7 +74,8 @@ div.stLinkButton > a > button {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True) 
 # --- FIN CSS / HTML --- 
 
-# --- Fonction utilitaire de formatage (utilisée uniquement par le panneau de droite) --- 
+# --- Fonctions utilitaires de formatage --- 
+
 def format_value(value, unit=""): 
     """ 
     Formate la valeur en utilisant un ESPACE comme séparateur de milliers 
@@ -111,6 +116,51 @@ def format_value(value, unit=""):
         
     return val_str 
 
+def format_monetary_value(row): 
+    """Applique le formatage en utilisant un ESPACE comme séparateur de milliers pour les dataframes.""" 
+    money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix'] 
+    
+    champ = row['Champ'] 
+    value = row['Valeur'] 
+    
+    # Vérifie si la valeur est un nombre 
+    is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
+    val_str = str(value).strip()
+    
+    if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
+        return "Non renseigné" 
+
+    # Colonne monétaire 
+    is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
+    
+    if is_money_col and is_numeric: 
+        try: 
+            float_value = float(value) 
+            formatted_value = f"{float_value:,.0f}" 
+            formatted_value = formatted_value.replace(",", " ") 
+            return f"€{formatted_value}" 
+        except (ValueError, TypeError): 
+            pass 
+    
+    # Colonne surface 
+    is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
+    if is_surface_col and is_numeric: 
+        try: 
+            float_value = float(value) 
+            formatted_value = f"{float_value:,.0f}" 
+            formatted_value = formatted_value.replace(",", " ") 
+            return f"{formatted_value} m²" 
+        except (ValueError, TypeError): 
+            pass 
+            
+    # Coordonnées 
+    if champ in ['Latitude', 'Longitude'] and is_numeric: 
+        try: 
+            return f"{float(value):.4f}" 
+        except (ValueError, TypeError): 
+            pass 
+
+    return val_str # Retourne la chaîne originale si aucun formatage n'est appliqué
 
 # --- Fonction de Chargement des Données (Cache Réactivé) --- 
 @st.cache_data 
@@ -152,7 +202,8 @@ panel_class = "details-panel-open" if show_details else "details-panel-closed"
 
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 with st.sidebar: 
-    st.header(⚙️ Contrôles") 
+    # LIGNE CORRIGÉE : st.header doit prendre une chaîne de caractères
+    st.header("⚙️ Contrôles") 
     st.markdown("---") 
     
     st.info(f"Lots chargés: **{len(data_df)}**") 
@@ -188,10 +239,10 @@ if not data_df.empty:
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
-            # 🎨 NOUVEAU BLEU SMBG 
-            color="#05263D", 
+            # 🎨 COULEUR SMBG 
+            color=COLOR_SMBG_BLUE, 
             fill=True, 
-            fill_color="#05263D", 
+            fill_color=COLOR_SMBG_BLUE, 
             fill_opacity=0.8, 
         ).add_to(m) 
 
@@ -248,7 +299,7 @@ if show_details:
         html_content += f""" 
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3> 
             <hr style="border: 1px solid #ccc; margin: 5px 0;"> 
-            <h4 style="color: #05263D;">Réf. : {display_title_ref}</h4> 
+            <h4 style="color: {COLOR_SMBG_BLUE};">Réf. : {display_title_ref}</h4> 
         """ 
         
         # --- Affichage de l'adresse --- 
@@ -323,8 +374,8 @@ if show_details:
         
 else: 
     # Message par défaut quand aucun lot n'est sélectionné 
-    html_content += """ 
-    <p style="font-weight: bold; margin-top: 10px; color: #05263D;"> 
+    html_content += f""" 
+    <p style="font-weight: bold; margin-top: 10px; color: {COLOR_SMBG_BLUE};"> 
         Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici. 
     </p> 
     """ 
@@ -404,58 +455,6 @@ with dataframe_container:
             # --- SUPPRIMER LA LIGNE 'Lien Google Maps' --- 
             transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps'] 
             # --------------------------------------------- 
-            
-            # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) --- 
-            
-            money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix'] 
-            
-            def format_monetary_value(row): 
-                """Applique le formatage en utilisant un ESPACE comme séparateur de milliers.""" 
-                
-                champ = row['Champ'] 
-                value = row['Valeur'] 
-                
-                # Vérifie si la valeur est un nombre 
-                is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
-                
-                # Colonne monétaire 
-                is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
-                
-                if is_money_col and is_numeric: 
-                    try: 
-                        float_value = float(value) 
-                        
-                        # 1. Formatage standard US sans décimales (ex: 85,723) 
-                        formatted_value = f"{float_value:,.0f}" 
-                        
-                        # 2. Remplacer la virgule de milliers par un espace 
-                        formatted_value = formatted_value.replace(",", " ") 
-                        
-                        return f"€{formatted_value}" 
-                        
-                    except (ValueError, TypeError): 
-                        return value 
-                
-                # Colonne surface 
-                is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
-                if is_surface_col and is_numeric: 
-                    try: 
-                        float_value = float(value) 
-                        formatted_value = f"{float_value:,.0f}" # 12,345 
-                        formatted_value = formatted_value.replace(",", " ") # 12 345 
-                        
-                        return f"{formatted_value} m²" 
-                    except (ValueError, TypeError): 
-                        return value 
-                        
-                # Coordonnées 
-                if champ in ['Latitude', 'Longitude'] and is_numeric: 
-                    try: 
-                        return f"{float(value):.4f}" 
-                    except (ValueError, TypeError): 
-                        return value 
-
-                return value 
             
             # Appliquer la fonction de formatage à la colonne 'Valeur' 
             transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1) 
