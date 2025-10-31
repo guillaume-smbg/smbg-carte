@@ -184,6 +184,11 @@ if not data_df.empty:
         lat = row['Latitude']
         lon = row['Longitude']
         
+        ref_annonce = row[REF_COL] # Récupération de la référence
+        
+        # AJOUT de l'infobulle avec la référence
+        tooltip_text = f"Réf. : {ref_annonce}" 
+        
         folium.CircleMarker(
             location=[lat, lon],
             radius=10,
@@ -191,6 +196,7 @@ if not data_df.empty:
             fill=True,
             fill_color="#0072B2",
             fill_opacity=0.8,
+            tooltip=tooltip_text # Ajout de l'infobulle
         ).add_to(m)
 
     # Affichage et capture des événements de clic
@@ -397,9 +403,9 @@ with dataframe_container:
             transposed_df = display_df.T.reset_index()
             transposed_df.columns = ['Champ', 'Valeur']
             
-            # --- CODE AJOUTÉ : SUPPRIMER LA LIGNE 'Lien Google Maps' ---
+            # --- SUPPRIMER LA LIGNE 'Lien Google Maps' ---
             transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps']
-            # ---------------------------------------------------------
+            # ---------------------------------------------
             
             # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
             
