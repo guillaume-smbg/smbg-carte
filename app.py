@@ -45,16 +45,15 @@ def load_data(file_path):
 # --- Chargement des données ---
 data_df, error_message = load_data(EXCEL_FILE_PATH)
 
-# --- 1. Définition de la Mise en Page (2 Colonnes : Contrôles + Carte) ---
+# --- 1. Définition de la Mise en Page (3 Colonnes) ---
 SIDEBAR_WIDTH = 2
-MAP_WIDTH = 8
-col_left, col_map = st.columns([SIDEBAR_WIDTH, MAP_WIDTH]) 
+DETAILS_PANEL_WIDTH = 2
+col_left, col_map, col_right = st.columns([SIDEBAR_WIDTH, 6, DETAILS_PANEL_WIDTH]) 
 
 
-# --- 2. Panneau de Contrôle Gauche (Filtres/Diagnostic) ---
+# --- 2. Panneau de Contrôle Gauche ---
 with col_left:
     st.header("⚙️ Contrôles")
-    st.info("Espace à gauche pour les filtres.")
     st.markdown("---")
     st.write(f"Lots chargés: **{len(data_df)}**")
     
@@ -63,9 +62,8 @@ with col_left:
     if error_message:
         st.error(error_message)
     elif not data_df.empty:
-        st.caption("5 premières lignes lues par Pandas :")
-        st.dataframe(data_df.head(), use_container_width=True)
-        st.info("Le chargement des données est vérifié et semble correct.")
+        st.caption("5 premières références :")
+        st.dataframe(data_df[[REF_COL]].head(), use_container_width=True)
     
     st.markdown("---")
     
@@ -90,11 +88,8 @@ with col_map:
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            reference = row.get(REF_COL, 'N/A')
             
             # Création d'un CircleMarker simple pour assurer la transmission du clic
-            # REMARQUE : 'tooltip' et 'popup' sont omis pour garantir que l'événement de clic
-            # atteint la couche de la carte écoutée par st_folium.
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=10,
@@ -127,110 +122,88 @@ with col_map:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Vérifiez si le fichier s'est chargé correctement.")
 
 
-# --- 4. Panneau de Détails (Plein Écran sous la Carte) ---
-st.markdown("---") 
+# --- 4. Panneau de Détails Droit (Volet rétractable) ---
+with col_right:
+    st.header("🔍 Détails du Lot")
+    st.markdown("---") 
 
-selected_ref = st.session_state['selected_ref']
-st.header("🔍 Détails du Lot Sélectionné")
+    selected_ref = st.session_state['selected_ref']
 
-# Ligne de diagnostic masquée, car elle ne devrait plus être nécessaire
-# st.text(f"DEBUG REF: {selected_ref if selected_ref else 'NOT SET'}") 
-st.markdown("---") 
-
-if selected_ref and selected_ref != 'None':
-    selected_ref_clean = selected_ref.strip()
-    
-    # Filtre sécurisé sur la colonne de référence nettoyée
-    selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
-    
-    if len(selected_data_series) > 0:
-        # --- SUCCÈS : Affichage des données ---
-        selected_data = selected_data_series.iloc[0].copy()
+    if selected_ref and selected_ref != 'None':
+        selected_ref_clean = selected_ref.strip()
         
-        try:
-            display_title_ref = str(int(selected_ref))
-        except ValueError:
-            display_title_ref = selected_ref
+        # Filtre sécurisé sur la colonne de référence nettoyée
+        selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
+        
+        if len(selected_data_series) > 0:
+            # --- SUCCÈS : Affichage des données ---
+            selected_data = selected_data_series.iloc[0].copy()
+            
+            try:
+                display_title_ref = str(int(selected_ref))
+            except ValueError:
+                display_title_ref = selected_ref
 
-        st.subheader(f"Référence : {display_title_ref}")
-        
-        # --- Adresse & Lien Google Maps ---
-        
-        lien_maps = selected_data.get('Lien Google Maps', None)
-        if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
-            st.markdown(
-                f'<a href="{lien_maps}" target="_blank">'
-                f'<button style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; width: 100%;">'
-                f'Voir sur Google Maps'
-                f'</button></a>',
-                unsafe_allow_html=True
-            )
+            st.subheader(f"Réf. : {display_title_ref}")
+            
+            # Affichage en utilisant des st.metric ou st.write pour les champs
+            
+            colonnes_a_afficher = [
+                ('Emplacement', selected_data.get('Emplacement', 'N/A')),
+                ('Typologie', selected_data.get('Typologie', 'N/A')),
+                ('Surface GLA', f"{selected_data.get('Surface GLA', 'N/A')} m²"),
+                ('Surface utile', f"{selected_data.get('Surface utile', 'N/A')} m²"),
+                ('Loyer annuel', f"{selected_data.get('Loyer annuel', 'N/A')} €"),
+                ('Charges anuelles', f"{selected_data.get('Charges anuelles', 'N/A')} €"),
+                ('Taxe foncière', f"{selected_data.get('Taxe foncière', 'N/A')} €"),
+                ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
+            ]
+            
+            # Utilisation d'un conteneur rétractable
+            with st.expander("Informations clés", expanded=True):
+                for nom, valeur in colonnes_a_afficher:
+                    valeur_str = str(valeur).strip()
+                    if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None', 'None €', 'None m²'):
+                        st.write(f"**{nom} :** {valeur}")
+
+            # Affichage de l'adresse et du lien Google Maps
+            adresse = selected_data.get('Adresse', 'N/A')
+            code_postal = selected_data.get('Code Postal', '')
+            ville = selected_data.get('Ville', '')
+            
+            st.caption("📍 Adresse")
+            if str(adresse).strip() not in ('N/A', 'nan', ''):
+                st.write(f"{adresse} \n{code_postal} - {ville}")
+            else:
+                st.write("Adresse non renseignée.")
+            
+            # Lien Google Maps
+            lien_maps = selected_data.get('Lien Google Maps', None)
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
+                st.markdown(
+                    f'<a href="{lien_maps}" target="_blank">'
+                    f'<button style="background-color: #0072B2; color: white; border: none; padding: 10px 0px; text-align: center; text-decoration: none; display: inline-block; font-size: 14px; margin-top: 10px; cursor: pointer; border-radius: 4px; width: 100%;">'
+                    f'Voir sur Google Maps'
+                    f'</button></a>',
+                    unsafe_allow_html=True
+                )
+
+            # --- Détails supplémentaires dans un autre expander ---
+            with st.expander("Détails supplémentaires"):
+                commentaires = selected_data.get('Commentaires', 'N/A')
+                if str(commentaires).strip() not in ('N/A', 'nan', ''):
+                    st.caption("Commentaires:")
+                    st.text(commentaires)
+                else:
+                    st.caption("Pas de commentaires.")
+                
+                st.markdown("---")
+                st.write(f"**Latitude :** {selected_data.get('Latitude', 'N/A')}")
+                st.write(f"**Longitude :** {selected_data.get('Longitude', 'N/A')}")
+
+
         else:
-            st.caption("Lien Google Maps indisponible.")
-
-        adresse = selected_data.get('Adresse', 'N/A')
-        code_postal = selected_data.get('Code Postal', '')
-        ville = selected_data.get('Ville', '')
-        
-        st.markdown("##### 📍 Adresse")
-        if str(adresse).strip() not in ('N/A', 'nan', ''):
-            st.write(f"**{adresse}** \n{code_postal} - {ville}")
-        else:
-            st.write("Adresse non renseignée.")
-        
-        st.markdown("---")
-        st.markdown("##### Informations Détaillées (Filtrées)")
-        
-        colonnes_a_afficher = [
-            ('Emplacement', selected_data.get('Emplacement', 'N/A')),
-            ('Typologie', selected_data.get('Typologie', 'N/A')),
-            ('Type', selected_data.get('Type', 'N/A')),
-            ('Cession / Droit au bail', selected_data.get('Cession / Droit au bail', 'N/A')),
-            ('Nombre de lots', selected_data.get('Nombre de lots', 'N/A')),
-            ('Surface GLA', f"{selected_data.get('Surface GLA', 'N/A')} m²"),
-            ('Répartition surface GLA', selected_data.get('Répartition surface GLA', 'N/A')),
-            ('Surface utile', f"{selected_data.get('Surface utile', 'N/A')} m²"),
-            ('Répartition surface utile', selected_data.get('Répartition surface utile', 'N/A')),
-            ('Loyer annuel', f"{selected_data.get('Loyer annuel', 'N/A')} €"),
-            ('Loyer Mensuel', f"{selected_data.get('Loyer Mensuel', 'N/A')} €"),
-            ('Loyer €/m²', f"{selected_data.get('Loyer €/m²', 'N/A')} €/m²"),
-            ('Loyer variable', selected_data.get('Loyer variable', 'N/A')),
-            ('Charges anuelles', f"{selected_data.get('Charges anuelles', 'N/A')} €"),
-            ('Charges Mensuelles', f"{selected_data.get('Charges Mensuelles', 'N/A')} €"),
-            ('Charges €/m²', f"{selected_data.get('Charges €/m²', 'N/A')} €/m²"),
-            ('Dépôt de garantie', selected_data.get('Dépôt de garantie', 'N/A')),
-            ('GAPD', selected_data.get('GAPD', 'N/A')),
-            ('Taxe foncière', f"{selected_data.get('Taxe foncière', 'N/A')} €"),
-            ('Marketing', selected_data.get('Marketing', 'N/A')),
-            ('Gestion', selected_data.get('Gestion', 'N/A')),
-            ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
-            ('Extraction', selected_data.get('Extraction', 'N/A')),
-            ('Restauration', selected_data.get('Restauration', 'N/A')),
-            ('Environnement Commercial', selected_data.get('Environnement Commercial', 'N/A')),
-            ('Commentaires', selected_data.get('Commentaires', 'N/A')),
-            ('Actif', selected_data.get('Actif', 'N/A')),
-            ('Valeur BP', selected_data.get('Valeur BP', 'N/A')),
-            ('Contact', selected_data.get('Contact', 'N/A')),
-        ]
-        
-        cols_info = st.columns(3)
-        col_index = 0
-        
-        for nom, valeur in colonnes_a_afficher:
-            valeur_str = str(valeur).strip()
-            if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None', 'None €', 'None m²'):
-                with cols_info[col_index % 3]:
-                    if nom == 'Commentaires':
-                        st.caption("Commentaires:")
-                        st.text(valeur)
-                    else:
-                        st.metric(label=nom, value=valeur)
-                col_index += 1
-        
-        st.markdown("---")
+            st.error("❌ Erreur : La référence capturée n'a pas été trouvée dans le DataFrame.")
             
     else:
-        st.error("❌ ÉCHEC : La référence a été capturée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
-        
-else:
-    st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ci-dessous.")
+        st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails ici.")
