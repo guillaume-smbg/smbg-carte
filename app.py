@@ -46,21 +46,28 @@ data_df, error_message = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Définition de la Mise en Page (Colonnes conditionnelles) ---
 
-# Vérifie si le panneau de détails doit être affiché
+# Nettoyage de la référence pour la vérification
 selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None
-show_details = selected_ref_clean and selected_ref_clean != 'None' and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
+if selected_ref_clean == 'None':
+    selected_ref_clean = None
+    st.session_state['selected_ref'] = None # Nettoyage si la chaîne 'None' est passée
+
+# Vérifie si le panneau de détails doit être affiché
+show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
+
+# Définition de la mise en page basée sur l'affichage des détails
+COL_CONTROLS_WIDTH = 1
+COL_DETAILS_WIDTH = 2
 
 if show_details:
     # 3 colonnes: Contrôles (1), Carte (5), Détails (2)
-    # La carte est plus étroite mais les détails sont visibles
-    col_left, col_map, col_right = st.columns([1, 5, 2])
+    col_left, col_map, col_right = st.columns([COL_CONTROLS_WIDTH, 5, COL_DETAILS_WIDTH])
 else:
     # 2 colonnes: Contrôles (1), Carte (7)
-    # La carte prend la place du panneau de détails (7/8 de l'espace restant)
-    col_left, col_map = st.columns([1, 7])
+    col_left, col_map = st.columns([COL_CONTROLS_WIDTH, 7])
     col_right = None # col_right est désactivé
 
-# --- 2. Panneau de Contrôle Gauche ---
+# --- 2. Panneau de Contrôle Gauche (Nettoyé) ---
 with col_left:
     st.header("⚙️ Contrôles")
     st.markdown("---")
@@ -69,9 +76,10 @@ with col_left:
     
     # Bouton pour masquer les détails (Visible uniquement si les détails sont affichés)
     if show_details:
+        # st.rerun() est utilisé ici, car st.experimental_rerun() est obsolète
         if st.button("Masquer les détails", key="hide_left", use_container_width=True):
             st.session_state['selected_ref'] = None
-            st.experimental_rerun()
+            st.rerun() # Correction appliquée ici !
     
     st.markdown("---")
     
@@ -125,11 +133,12 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
                 new_ref = closest_row[REF_COL]
-                st.session_state['selected_ref'] = new_ref
                 
-                # Force le rafraîchissement si une nouvelle référence est sélectionnée
-                # pour passer de 2 à 3 colonnes immédiatement.
-                st.experimental_rerun()
+                # On ne rafraîchit que si la référence change et qu'il faut afficher les détails
+                if new_ref != st.session_state['selected_ref']:
+                    st.session_state['selected_ref'] = new_ref
+                    # st.rerun() est utilisé ici, car st.experimental_rerun() est obsolète
+                    st.rerun() # Correction appliquée ici !
                  
     else:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
@@ -141,7 +150,7 @@ if col_right: # Exécuté uniquement si show_details est True
         st.header("🔍 Détails du Lot")
         st.markdown("---") 
 
-        # Puisque show_details est True, selected_ref est valide.
+        # selected_ref_clean est déjà vérifié et nettoyé
         selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
         
         if len(selected_data_series) > 0:
@@ -211,8 +220,7 @@ if col_right: # Exécuté uniquement si show_details est True
         else:
             st.error("❌ Erreur : La référence capturée n'a pas été trouvée.")
             
-else:
-    # Message dans l'espace Map si aucun détail n'est affiché
+# Message dans l'espace Map si aucun détail n'est affiché
+if not show_details and not data_df.empty:
     with col_map:
-        if not show_details and not data_df.empty:
-            st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
+        st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
