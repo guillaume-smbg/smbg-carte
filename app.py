@@ -47,6 +47,12 @@ CUSTOM_CSS = """
     transform: translateX(0);
 }
 
+/* 🟢 AJOUT CRITIQUE: Force tous les marqueurs Leaflet à laisser passer les événements de clic. */
+/* Cela devrait résoudre le problème du curseur "main cliquable" et de l'interception. */
+.leaflet-marker-icon {
+    pointer-events: none !important; 
+}
+
 /* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
 .css-hxt7xp { 
     z-index: 1000 !important; 
@@ -212,7 +218,7 @@ if not data_df.empty:
                     line-height: 20px; /* Centrage vertical du texte */
                     border: 1px solid #005A8D;
                     font-weight: bold;
-                    pointer-events: none; /* 🟢 SOLUTION : Permet aux clics de passer à travers l'icône */
+                    /* pointer-events: none; Retiré, remplacé par CSS global */
                 ">{clean_ref}</div>
             """
         )
