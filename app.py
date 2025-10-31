@@ -17,38 +17,82 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- CSS / HTML pour le volet flottant avec transition ---
-CUSTOM_CSS = """
+# 🚨🚨🚨 REMPLACER CES CHAÎNES PAR VOS VRAIES CHAÎNES BASE64 🚨🚨🚨
+# Elles doivent contenir l'intégralité du contenu Base64 de vos fichiers .ttf
+BASE64_BOOK = "[VOTRE_CHAINE_BASE64_POUR_FuturaT-Book.ttf_ICI]" 
+BASE64_BOLD = "[VOTRE_CHAINE_BASE64_POUR_FuturaT-Bold.ttf_ICI]" 
+
+# --- CSS / HTML pour le volet flottant et l'injection de la police ---
+CUSTOM_CSS = f"""
 <style>
-/* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */
-.details-panel {
+/* ---------------------------------------------------- */
+/* 1. Déclaration des polices via Base64 (Futura)      */
+/* ---------------------------------------------------- */
+
+@font-face {{
+    font-family: 'Futura-Body';
+    src: url(data:font/ttf;charset=utf-8;base64,{BASE64_BOOK}) format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}}
+
+@font-face {{
+    font-family: 'Futura-Heading';
+    src: url(data:font/ttf;charset=utf-8;base64,{BASE64_BOLD}) format('truetype');
+    font-weight: bold;
+    font-style: normal;
+}}
+
+
+/* ---------------------------------------------------- */
+/* 2. Application de la police Futura                   */
+/* ---------------------------------------------------- */
+
+/* Force la police pour le corps et la plupart des éléments Streamlit (utilisant Futura-Body) */
+html, body, [class*="css-"] {{
+    font-family: 'Futura-Body', sans-serif !important;
+}}
+
+/* Applique Futura-Heading aux titres Streamlit */
+h1, h2, h3, h4, h5, h6 {{
+    font-family: 'Futura-Heading', sans-serif !important;
+}}
+
+/* Force la police pour les dataframes/tables */
+.stDataFrame, .stTable {{
+    font-family: 'Futura-Body', sans-serif !important;
+}}
+
+/* ---------------------------------------------------- */
+/* 3. Style du Panneau Flottant (Conservé)              */
+/* ---------------------------------------------------- */
+
+.details-panel {{
     position: fixed;
     top: 0;
     right: 0; 
     width: 300px; 
     height: 100vh;
     background-color: white; 
-    z-index: 1000; /* Z-INDEX ÉLEVÉ POUR S'ASSURER QU'IL EST AU DESSUS DE TOUT */
+    z-index: 1000; 
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
     transition: transform 0.4s ease-in-out; 
-}
+}}
 
-/* 2. Classe pour l'état FERMÉ (caché) */
-.details-panel-closed {
+.details-panel-closed {{
     transform: translateX(100%);
-}
+}}
 
-/* 3. Classe pour l'état OUVERT (visible) */
-.details-panel-open {
+.details-panel-open {{
     transform: translateX(0);
-}
+}}
 
-/* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
-.css-hxt7xp { 
+.css-hxt7xp {{ 
     z-index: 1000 !important; 
-}
+}}
+
 </style>
 """
 # On injecte le CSS dès le début
@@ -77,18 +121,13 @@ def format_value(value, unit=""):
         
         # --- FORMATAGE FRANÇAIS (espace milliers, virgule décimale) ---
         if num_value != round(num_value, 2):
-            # Format avec décimales (Ex: 12,345.67 avec f-string standard)
             val_str = f"{num_value:,.2f}"
             
-            # 1. Remplacer la virgule de milliers par un espace
             val_str = val_str.replace(',', ' ') 
-            # 2. Remplacer le point décimal par une virgule
             val_str = val_str.replace('.', ',')
         else:
-            # Format sans décimales (Ex: 12,345 avec f-string standard)
             val_str = f"{num_value:,.0f}"
             
-            # Remplacer la virgule de milliers par un espace
             val_str = val_str.replace(',', ' ') 
             
         # Ajoute l'unité si elle n'est pas déjà présente
@@ -345,7 +384,7 @@ if show_details:
         else:
             display_df = selected_row_df
             
-        # --- NOUVELLE LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
+        # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
         all_cols = display_df.columns.tolist()
         
         try:
