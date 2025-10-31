@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 import folium
-from folium.features import DivIcon # Pour le marqueur personnalisé
+from folium.features import DivIcon
 from streamlit_folium import st_folium
 import numpy as np
 
@@ -24,6 +24,7 @@ def load_data(file_path):
         df = pd.read_excel(file_path)
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
+        # S'assurer que la colonne de référence est bien une chaîne de caractères
         df['Référence annonce'] = df['Référence annonce'].astype(str)
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
@@ -36,14 +37,19 @@ data_df = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Gestion de la Mise en Page Dynamique (Colonnes) ---
 
+# Définition des largeurs en fonction de la sélection
+# Largeur de la barre latérale gauche (275px simulés)
+SIDEBAR_WIDTH = 2
+# Largeur du panneau de détails droit (275px simulés)
+DETAILS_PANEL_WIDTH = 2
+
 if st.session_state['selected_ref']:
-    # Sélection active : Afficher la colonne droite (ex: 2/12)
-    # Ratios (approx. 275px Gauche | Carte Réduite | 275px Droite)
-    col_left, col_map, col_right = st.columns([2, 8, 2])
+    # Sélection active : Créer les trois colonnes
+    col_left, col_map, col_right = st.columns([SIDEBAR_WIDTH, 10 - DETAILS_PANEL_WIDTH, DETAILS_PANEL_WIDTH])
 else:
-    # Pas de sélection : La carte prend l'espace restant (10/12)
-    col_left, col_map = st.columns([2, 10]) 
-    col_right = None # Pas de panneau à droite
+    # Pas de sélection : Seulement deux colonnes, la carte prend l'espace restant
+    col_left, col_map = st.columns([SIDEBAR_WIDTH, 10]) 
+    col_right = None 
 
 
 # --- 2. Panneau de Contrôle Gauche (Statique 275px) ---
@@ -53,15 +59,19 @@ with col_left:
     st.markdown("---")
     st.write(f"Lots affichés: **{len(data_df)}**")
 
-    # Bouton pour effacer la sélection
+    # Bouton pour effacer la sélection (si elle existe)
     if st.session_state['selected_ref']:
-        if st.button("Masquer les détails"):
+        # Utilisez une clé unique pour le bouton
+        if st.button("Masquer les détails", key="hide_left"):
             st.session_state['selected_ref'] = None
             st.experimental_rerun()
 
 
 # --- 3. Zone de la Carte ---
 with col_map:
+    # Ajuster la hauteur de la carte à une valeur élevée pour simuler le "non scrollable"
+    MAP_HEIGHT = 800 
+    
     st.header("Carte des Lots Immobiliers")
     
     if not data_df.empty:
@@ -69,7 +79,6 @@ with col_map:
         centre_lon = data_df['Longitude'].mean()
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
-        map_height = 800 # Hauteur fixe pour éviter le défilement de la page
 
         # --- Création des marqueurs circulaires personnalisés ---
         for index, row in data_df.iterrows():
@@ -78,7 +87,8 @@ with col_map:
             reference = str(row.get('Référence annonce', 'N/A'))
             
             # Préparer la référence à afficher (ex: prendre les 4 derniers caractères)
-            display_ref = reference[-4:] if len(reference) > 4 else reference
+            # Utilisation de .get() pour gérer les colonnes qui pourraient être absentes ou NaN
+            display_ref = reference[-4:] if len(reference) > 4 and reference != 'nan' else reference
             
             # HTML pour le cercle avec le numéro à l'intérieur
             html = f"""
@@ -100,18 +110,16 @@ with col_map:
             
             icon = DivIcon(html=html)
             
-            # Ajouter un marqueur SANS popup et SANS tooltip
+            # ATTENTION : Suppression de 'popup=popup' et 'tooltip=reference' pour éviter tout affichage de pop-up ou tooltip au survol/clic
             folium.Marker(
                 location=[lat, lon],
                 icon=icon,
-                # Le "tooltip" est utilisé ici pour stocker la référence complète, 
-                # même s'il n'est pas affiché dans ce cas.
-                tooltip=reference 
             ).add_to(m)
 
         # Affichage et capture des événements de clic
         # Nous utilisons 'last_clicked' pour obtenir les coordonnées du clic sur la carte.
-        map_output = st_folium(m, height=map_height, width="100%", returned_objects=['last_clicked'])
+        # Il est important d'utiliser une clé unique pour la carte si vous avez d'autres widgets Folium.
+        map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
         # --- Logique de détection de clic ---
         if map_output and map_output.get("last_clicked"):
@@ -119,17 +127,24 @@ with col_map:
             clicked_lat = clicked_coords['lat']
             clicked_lon = clicked_coords['lng']
             
-            # Recherche du lot le plus proche du clic
-            # Calcul de la distance euclidienne (approximatif mais efficace pour le clic)
-            data_df['distance'] = np.sqrt((data_df['Latitude'] - clicked_lat)**2 + (data_df['Longitude'] - clicked_lon)**2)
-            closest_row = data_df.loc[data_df['distance'].idxmin()]
-            
-            # Seuil de tolérance (vérifie que le clic est proche d'un marqueur)
-            if closest_row['distance'] < 0.0001: 
-                 # Si un nouveau lot est cliqué, met à jour l'état et relance l'application
-                 if st.session_state['selected_ref'] != closest_row['Référence annonce']:
-                     st.session_state['selected_ref'] = closest_row['Référence annonce']
-                     # st.experimental_rerun() # Optionnel, mais assure la mise à jour immédiate du panneau de droite
+            # Vérifier si les coordonnées ont changé (pour éviter une boucle de rafraîchissement)
+            current_coords = (clicked_lat, clicked_lon)
+            if current_coords != st.session_state['last_clicked_coords']:
+                st.session_state['last_clicked_coords'] = current_coords
+                
+                # Recherche du lot le plus proche du clic
+                data_df['distance'] = np.sqrt((data_df['Latitude'] - clicked_lat)**2 + (data_df['Longitude'] - clicked_lon)**2)
+                closest_row = data_df.loc[data_df['distance'].idxmin()]
+                
+                # Seuil de tolérance (vérifie que le clic est proche d'un marqueur)
+                if closest_row['distance'] < 0.0001: 
+                    new_ref = closest_row['Référence annonce']
+                    
+                    # Mise à jour de la référence sélectionnée et relance l'application
+                    if st.session_state['selected_ref'] != new_ref:
+                        st.session_state['selected_ref'] = new_ref
+                        # Relancer l'application pour dessiner la troisième colonne
+                        st.experimental_rerun() 
                  
     else:
         st.info("Le DataFrame est vide ou les coordonnées sont manquantes.")
@@ -164,7 +179,7 @@ if col_right:
             if photo_url and pd.notna(photo_url):
                  st.image(photo_url, caption="Photo de l'annonce", use_column_width=True)
             
-            # Bouton pour fermer le panneau (au cas où celui de gauche n'est pas vu)
-            if st.button("Masquer", key="close_right"):
+            # Bouton pour fermer le panneau 
+            if st.button("Masquer les détails", key="close_right"):
                  st.session_state['selected_ref'] = None
                  st.experimental_rerun()
