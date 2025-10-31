@@ -3,13 +3,6 @@ import streamlit as st
 import folium 
 from streamlit_folium import st_folium 
 import numpy as np 
-# --- NOUVEAU: Import pour les pins numérotés ---
-# from folium.features import DivIcon # <-- COMMENTÉ/SUPPRIMÉ
-
-# --- COULEURS SMBG ---
-COLOR_SMBG_BLUE = "#05263D" 
-COLOR_SMBG_COPPER = "#C67B42"
-# --------------------
 
 # --- 0. Configuration et Initialisation --- 
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -62,42 +55,14 @@ section.main {
     overflow-x: auto; 
 } 
 
-/* Style du bouton Google Maps ré-implémenté en HTML (Couleur Cuivre) */ 
-.maps-button { 
-    width: 100%; 
-    padding: 10px; 
-    margin-bottom: 15px; 
-    background-color: #C67B42; /* COLOR_SMBG_COPPER en dur pour la chaîne */
-    color: white; 
+/* Style général pour les boutons link_button dans la section 5 */ 
+div.stLinkButton > a > button { 
+    /* 🎨 NOUVEAU BLEU SMBG */
+    background-color: #05263D !important; 
+    color: white !important; 
     border: none; 
-    border-radius: 5px; 
-    cursor: pointer; 
-    font-weight: bold; 
-    text-align: center; 
-    display: block;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.2); 
 } 
-
-/* Styles spécifiques au tableau dans le panneau de détails */
-.details-panel table {
-    width: 100%; 
-    border-collapse: collapse; 
-    font-size: 13px;
-}
-.details-panel tr {
-    border-bottom: 1px solid #eee;
-}
-.details-panel td {
-    padding: 5px 0;
-    max-width: 50%; 
-    overflow-wrap: break-word;
-}
-.details-panel td:first-child {
-    font-weight: bold; 
-    color: #05263D; /* COLOR_SMBG_BLUE en dur */
-}
-.details-panel td:last-child {
-    text-align: right;
-}
 
 </style> 
 """ 
@@ -105,8 +70,7 @@ section.main {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True) 
 # --- FIN CSS / HTML --- 
 
-# --- Fonctions utilitaires de formatage --- 
-
+# --- Fonction utilitaire de formatage (utilisée uniquement par le panneau de droite) --- 
 def format_value(value, unit=""): 
     """ 
     Formate la valeur en utilisant un ESPACE comme séparateur de milliers 
@@ -114,76 +78,39 @@ def format_value(value, unit=""):
     """ 
     val_str = str(value).strip() 
     
+    # 1. Gestion des valeurs vides ou non pertinentes 
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
         
+    # 2. Gestion des valeurs textuelles (sans chiffres) 
     if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str): 
         return val_str 
     
+    # 3. Gestion des valeurs numériques 
     try: 
         num_value = float(value) 
         
-        # Formatage avec espace milliers / virgule décimale 
+        # --- FORMATAGE FRANÇAIS (espace milliers, virgule décimale) --- 
         if num_value != round(num_value, 2): 
             val_str = f"{num_value:,.2f}" 
+            
             val_str = val_str.replace(',', ' ') 
             val_str = val_str.replace('.', ',') 
         else: 
             val_str = f"{num_value:,.0f}" 
+            
             val_str = val_str.replace(',', ' ') 
             
+        # Ajoute l'unité si elle n'est pas déjà présente 
         if unit and not val_str.lower().endswith(unit.lower().strip()): 
             return f"{val_str} {unit}" 
             
     except (ValueError, TypeError): 
+        # La valeur n'est pas un simple nombre 
         pass 
         
     return val_str 
 
-def format_table_value(value, champ): 
-    """Applique le formatage monétaire/surface/coordonnées pour le tableau.""" 
-    money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix'] 
-    
-    val_str = str(value).strip()
-    if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
-        return "Non renseigné" 
-        
-    # Vérification si la valeur est numérisable (car le dtype peut être object)
-    try:
-        float_value = float(value)
-        is_numeric = True
-    except (ValueError, TypeError):
-        is_numeric = False
-
-    is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
-    
-    if is_money_col and is_numeric: 
-        try: 
-            # Reconvertir en float
-            float_value = float(value) 
-            formatted_value = f"{float_value:,.0f}" 
-            formatted_value = formatted_value.replace(",", " ") 
-            return f"€{formatted_value}" 
-        except (ValueError, TypeError): 
-            pass 
-    
-    is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
-    if is_surface_col and is_numeric: 
-        try: 
-            float_value = float(value) 
-            formatted_value = f"{float_value:,.0f}" 
-            formatted_value = formatted_value.replace(",", " ") 
-            return f"{formatted_value} m²" 
-        except (ValueError, TypeError): 
-            pass 
-            
-    if champ in ['Latitude', 'Longitude'] and is_numeric: 
-        try: 
-            return f"{float(value):.4f}" 
-        except (ValueError, TypeError): 
-            pass 
-    
-    return format_value(value)
 
 # --- Fonction de Chargement des Données (Cache Réactivé) --- 
 @st.cache_data 
@@ -225,7 +152,7 @@ panel_class = "details-panel-open" if show_details else "details-panel-closed"
 
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 with st.sidebar: 
-    st.header("⚙️ Contrôles") 
+    st.header(⚙️ Contrôles") 
     st.markdown("---") 
     
     st.info(f"Lots chargés: **{len(data_df)}**") 
@@ -258,27 +185,15 @@ if not data_df.empty:
         lat = row['Latitude'] 
         lon = row['Longitude'] 
         
-        # UNIQUEMENT le CircleMarker (Cercle bleu SMBG)
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
-            color=COLOR_SMBG_BLUE, 
+            # 🎨 NOUVEAU BLEU SMBG 
+            color="#05263D", 
             fill=True, 
-            fill_color=COLOR_SMBG_BLUE, 
+            fill_color="#05263D", 
             fill_opacity=0.8, 
         ).add_to(m) 
-        
-        # Le DivIcon pour le numéro est maintenant COMMENTÉ/SUPPRIMÉ
-        # ref = row[REF_COL].lstrip('0') 
-        # icon_style = f"font-size: 10px; font-weight: bold; color: {COLOR_SMBG_COPPER}; text-align: center; line-height: 20px; width: 20px; height: 20px; pointer-events: none;"
-        # folium.Marker( 
-        #     location=[lat, lon], 
-        #     icon=DivIcon( 
-        #         icon_size=(20, 20), 
-        #         icon_anchor=(10, 10), 
-        #         html=f'<div style="{icon_style}">{ref}</div>', 
-        #     ) 
-        # ).add_to(m) 
 
     # Affichage et capture des événements de clic 
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
@@ -312,9 +227,8 @@ else:
     st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Aucune carte ne peut être affichée.") 
 
 
-# --- 4. Panneau de Détails Droit (Injection HTML Flottant) --- 
+# --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) --- 
 
-# On utilise une f-string ici, mais son contenu (le panneau HTML) est correctement formaté
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
@@ -330,26 +244,13 @@ if show_details:
         except ValueError: 
             display_title_ref = selected_ref_clean 
             
-        # --- Entête (Réf. : en Bleu SMBG) --- 
+        # --- Entête --- 
         html_content += f""" 
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3> 
             <hr style="border: 1px solid #ccc; margin: 5px 0;"> 
-            <h4 style="color: {COLOR_SMBG_BLUE};">Réf. : {display_title_ref}</h4> 
+            <h4 style="color: #05263D;">Réf. : {display_title_ref}</h4> 
         """ 
         
-        # --- Bouton Google Maps (Réimplémenté en HTML avec la couleur Cuivre) --- 
-        lien_maps = selected_data.get('Lien Google Maps', None) 
-        
-        if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''): 
-            # Le bouton Maps utilise la classe CSS définie plus haut
-            html_content += f"""
-                <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
-                    <button class="maps-button">
-                        🌍 Voir sur Google Maps
-                    </button>
-                </a>
-            """
-            
         # --- Affichage de l'adresse --- 
         adresse = selected_data.get('Adresse', 'N/A') 
         code_postal = selected_data.get('Code Postal', '') 
@@ -359,82 +260,210 @@ if show_details:
         adresse_str = str(adresse).strip() 
         code_ville_str = f"{code_postal} - {ville}".strip() 
         
-        html_content += f'<p style="margin: 0 0 15px 0; font-size: 14px;">' 
+        html_content += f'<p style="margin: 0; font-size: 14px;">' 
         if adresse_str not in ('N/A', 'nan', ''): 
-             html_content += f'{adresse_str}<br>'
+             html_content += f'{adresse_str}<br>' 
         
         if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'): 
              html_content += f'{code_ville_str}' 
         
-        html_content += '</p>'
-        
-        # ---------------------------------------------------------------------------------
-        # --- TABLEAU DÉTAILLÉ (Dans le volet) ---
-        # ---------------------------------------------------------------------------------
-        
-        html_content += '<h5 style="color: #303030; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
-        
-        # Préparation du DataFrame pour l'affichage (Filtrage et Transposition) 
-        temp_df = selected_data_series.copy()
-        
-        if 'distance_sq' in temp_df.columns: 
-            temp_df = temp_df.drop(columns=['distance_sq']) 
-            
-        all_cols = temp_df.columns.tolist() 
-        
-        # Filtrage pour ne garder que les colonnes pertinentes
-        cols_to_keep = []
-        try: 
-            adresse_index = all_cols.index('Adresse') 
-            commentaires_index = all_cols.index('Commentaires') 
-            cols_to_keep = all_cols[adresse_index : commentaires_index + 1] 
-        except ValueError: 
-            # Fallback (prend tout sauf la référence, lat/lon)
-            cols_to_keep = [c for c in all_cols if c not in [REF_COL, 'Latitude', 'Longitude']]
+        html_content += '</p>' 
 
-        if cols_to_keep:
-            display_df = temp_df[cols_to_keep]
-        else:
-            display_df = temp_df # Si rien n'est trouvé, affiche tout
 
-        # Transposition et nettoyage
-        transposed_df = display_df.T.reset_index() 
-        transposed_df.columns = ['Champ', 'Valeur'] 
-        transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps'] 
-        # On exclut les champs d'adresse déjà affichés en haut
-        transposed_df = transposed_df[~transposed_df['Champ'].isin(['Adresse', 'Code Postal', 'Ville'])] 
+        html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">' 
         
-        # Début de la table HTML (les styles sont dans CUSTOM_CSS)
-        html_content += "<table>"
+        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) --- 
+        html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>' 
         
-        # Ajout des lignes formatées
-        for index, row in transposed_df.iterrows():
-            champ = row['Champ']
-            valeur = row['Valeur']
-            formatted_value = format_table_value(valeur, champ)
-            
-            # Note: Les styles de TD sont dans CUSTOM_CSS
-            html_content += f"""
-            <tr>
-                <td>{champ}</td>
-                <td>{formatted_value}</td>
-            </tr>
-            """
-            
-        # Fin de la table HTML
-        html_content += "</table>"
+        # Colonnes à exclure 
+        cols_to_exclude = [ 
+            REF_COL, 
+            'Latitude', 'Longitude', 
+            'Lien Google Maps' , 
+            'Adresse', 'Code Postal', 'Ville', 
+            'distance_sq', 
+            # --- Exclusion des colonnes signalées pour éviter le débordement/double affichage --- 
+            'Photos annonce', 
+            'Actif', 
+            'Valeur BP', 
+            'Contact', 
+            'Page Web' 
+            # ------------------------------------------------------------------------------------ 
+        ] 
         
+        # Toutes les colonnes à partir de l'indice 6 (colonne G) 
+        all_cols = data_df.columns.tolist() 
+        detail_cols = all_cols[6:] 
+
+        for col_name in detail_cols: 
+            if col_name not in cols_to_exclude: 
+                value = selected_data.get(col_name, 'N/A') 
+                
+                # Détermination de l'unité basée sur le nom de la colonne 
+                unit = '' 
+
+                if any(k in col_name for k in ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel']) and '€' not in col_name: 
+                    unit = '€' 
+                elif any(k in col_name for k in ['Surface', 'GLA', 'utile']) and 'm²' not in col_name: 
+                    unit = 'm²' 
+                
+                # Utilisation de la fonction de formatage 
+                formatted_value = format_value(value, unit=unit) 
+                
+                # Affichage des paires Nom : Valeur 
+                html_content += f''' 
+                <div style="margin-bottom: 8px; display: flex; justify-content: space-between;"> 
+                    <span style="font-weight: bold; color: #555; font-size: 14px; max-width: 50%; overflow-wrap: break-word;">{col_name} :</span> 
+                    <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span> 
+                </div> 
+                ''' 
+
     else: 
         html_content += "<p>❌ Erreur: Référence non trouvée.</p>" 
         
 else: 
-    # Message par défaut 
-    html_content += f""" 
-    <p style="font-weight: bold; margin-top: 10px; color: {COLOR_SMBG_BLUE};"> 
+    # Message par défaut quand aucun lot n'est sélectionné 
+    html_content += """ 
+    <p style="font-weight: bold; margin-top: 10px; color: #05263D;"> 
         Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici. 
     </p> 
     """ 
 
 # Fermeture de la div flottante (FIN du panneau) 
 html_content += '</div>' 
-st.markdown(html_content, unsafe_allow_html=True)
+st.markdown(html_content, unsafe_allow_html=True) 
+
+
+# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte) --- 
+st.markdown("---") 
+st.header("📋 Annonce du Lot Sélectionné") 
+
+dataframe_container = st.container() 
+
+with dataframe_container: 
+    if show_details: 
+        # Filtre sur la référence sélectionnée 
+        selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy() 
+        
+        if not selected_row_df.empty: 
+            # Récupération du lien Google Maps 
+            lien_maps = selected_row_df.iloc[0].get('Lien Google Maps', None) 
+
+            # --- AFFICHAGE DU BOUTON GOOGLE MAPS (AU-DESSUS DU TABLEAU) --- 
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''): 
+                # Utilisation de colonnes pour centrer et encadrer le bouton 
+                col1, col2, col3 = st.columns([1, 6, 1]) 
+                with col2: 
+                    st.markdown("<hr style='margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True) 
+                    st.link_button( 
+                        label="🌍 Voir sur Google Maps", 
+                        url=lien_maps, 
+                        type="secondary", 
+                        use_container_width=True 
+                    ) 
+                    st.markdown("<hr style='margin-top: 10px; margin-bottom: 5px;'>", unsafe_allow_html=True) 
+            # --------------------------------------------------------------------------------- 
+
+            # Suppression des colonnes temporaires pour l'affichage 
+            if 'distance_sq' in selected_row_df.columns: 
+                display_df = selected_row_df.drop(columns=['distance_sq']) 
+            else: 
+                display_df = selected_row_df 
+                
+            # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus --- 
+            all_cols = display_df.columns.tolist() 
+            
+            try: 
+                # 1. Trouver l'index de 'Adresse' 
+                adresse_index = all_cols.index('Adresse') 
+                
+                # 2. Trouver l'index de 'Commentaires' 
+                commentaires_index = all_cols.index('Commentaires') 
+                
+                # 3. Conserver les colonnes de 'Adresse' à 'Commentaires' inclus 
+                cols_to_keep = all_cols[adresse_index : commentaires_index + 1] 
+                display_df = display_df[cols_to_keep] 
+            
+            except ValueError as e: 
+                if 'Adresse' in str(e): 
+                    st.warning("La colonne 'Adresse' est introuvable. Affichage de toutes les colonnes disponibles.") 
+                elif 'Commentaires' in str(e): 
+                    # Si 'Commentaires' n'existe pas, on commence à 'Adresse' et va jusqu'à la fin 
+                    try: 
+                        adresse_index = all_cols.index('Adresse') 
+                        cols_to_keep = all_cols[adresse_index:] 
+                        display_df = display_df[cols_to_keep] 
+                        st.warning("La colonne 'Commentaires' est introuvable. Affichage des colonnes à partir de 'Adresse' jusqu'à la fin.") 
+                    except ValueError: 
+                        st.warning("Erreur de filtrage des colonnes. Affichage de toutes les colonnes disponibles.") 
+
+            # Transposition du DataFrame 
+            transposed_df = display_df.T.reset_index() 
+            transposed_df.columns = ['Champ', 'Valeur'] 
+            
+            # --- SUPPRIMER LA LIGNE 'Lien Google Maps' --- 
+            transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps'] 
+            # --------------------------------------------- 
+            
+            # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) --- 
+            
+            money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix'] 
+            
+            def format_monetary_value(row): 
+                """Applique le formatage en utilisant un ESPACE comme séparateur de milliers.""" 
+                
+                champ = row['Champ'] 
+                value = row['Valeur'] 
+                
+                # Vérifie si la valeur est un nombre 
+                is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
+                
+                # Colonne monétaire 
+                is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
+                
+                if is_money_col and is_numeric: 
+                    try: 
+                        float_value = float(value) 
+                        
+                        # 1. Formatage standard US sans décimales (ex: 85,723) 
+                        formatted_value = f"{float_value:,.0f}" 
+                        
+                        # 2. Remplacer la virgule de milliers par un espace 
+                        formatted_value = formatted_value.replace(",", " ") 
+                        
+                        return f"€{formatted_value}" 
+                        
+                    except (ValueError, TypeError): 
+                        return value 
+                
+                # Colonne surface 
+                is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
+                if is_surface_col and is_numeric: 
+                    try: 
+                        float_value = float(value) 
+                        formatted_value = f"{float_value:,.0f}" # 12,345 
+                        formatted_value = formatted_value.replace(",", " ") # 12 345 
+                        
+                        return f"{formatted_value} m²" 
+                    except (ValueError, TypeError): 
+                        return value 
+                        
+                # Coordonnées 
+                if champ in ['Latitude', 'Longitude'] and is_numeric: 
+                    try: 
+                        return f"{float(value):.4f}" 
+                    except (ValueError, TypeError): 
+                        return value 
+
+                return value 
+            
+            # Appliquer la fonction de formatage à la colonne 'Valeur' 
+            transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1) 
+            
+            # Affichage du tableau formaté 
+            st.dataframe(transposed_df, hide_index=True, use_container_width=True) 
+            
+        else: 
+            st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.") 
+    else: 
+        st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
