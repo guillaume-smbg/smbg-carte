@@ -58,6 +58,27 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
+# --- Fonction utilitaire de formatage (NOUVELLE) ---
+def format_value(value, unit=""):
+    """Formate la valeur: supprime les unités si la valeur est un texte."""
+    val_str = str(value).strip()
+    
+    # Vérifie si la valeur ressemble à un NaN ou à une chaîne vide/non pertinente
+    if val_str in ('N/A', 'nan', '', 'None'):
+        return "Non renseigné"
+        
+    # Vérifie si la valeur est une chaîne contenant des lettres (ex: "Selon surface")
+    if any(c.isalpha() for c in val_str):
+        # Si c'est un texte, on retourne le texte seul
+        return val_str
+    
+    # Si c'est un nombre (ou une plage comme "36 à 265 m²" déjà formatée dans l'Excel)
+    # on n'ajoute l'unité que si elle n'est pas déjà présente pour éviter les doublons.
+    if unit and not val_str.lower().endswith(unit.lower().strip()):
+        return f"{val_str} {unit}"
+        
+    return val_str
+
 
 # --- Fonction de Chargement des Données (Cache Réactivé) ---
 @st.cache_data
@@ -92,10 +113,8 @@ if selected_ref_clean == 'None':
     selected_ref_clean = None
     st.session_state['selected_ref'] = None 
 
-# show_details reste la variable pivot
 show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
 
-# Détermine la classe CSS à utiliser pour le panneau
 panel_class = "details-panel-open" if show_details else "details-panel-closed"
 
 
@@ -152,14 +171,11 @@ if not data_df.empty:
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
         # Vérifie si le clic est éloigné des pins (logique approximative pour "clic sur la carte")
-        # NOTE : Cette logique n'est pas fiable à 100% car le clic retourne toujours les coordonnées.
-        # Nous allons nous fier à la distance par rapport au pin le plus proche.
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # Si la distance est grande (seuil à ajuster selon la densité des pins)
-        DISTANCE_THRESHOLD = 0.0005 # Seuil arbitraire (doit être affiné)
+        DISTANCE_THRESHOLD = 0.0005 
 
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
@@ -174,7 +190,7 @@ if not data_df.empty:
                 new_ref = closest_row[REF_COL]
                 if new_ref != st.session_state['selected_ref']:
                     st.session_state['selected_ref'] = new_ref
-                    st.rerun()
+                    st.rerun() 
              
 else:
     st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
@@ -182,13 +198,11 @@ else:
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant) ---
 
-# Le panneau est injecté à chaque fois, mais sa classe CSS est soit 'open' soit 'closed'
 html_content = f"""
 <div class="details-panel {panel_class}">
 """
 
 if show_details:
-    # Récupération des données sélectionnées
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
     
     if len(selected_data_series) > 0:
@@ -199,7 +213,6 @@ if show_details:
         except ValueError:
             display_title_ref = selected_ref_clean
             
-        # Construction du contenu HTML pour les détails
         
         html_content += f"""
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3>
@@ -210,30 +223,54 @@ if show_details:
         html_content += '<div style="background-color: #f7f7f7; padding: 10px; border-radius: 5px; margin-bottom: 10px;">'
         html_content += '<p style="font-weight: bold; margin: 5px 0;">Informations clés:</p>'
         
+        # --- Utilisation de la fonction format_value() ---
+        
+        # 1. Empêche la double unité "m² m²"
+        val_gla = format_value(selected_data.get('Surface GLA', 'N/A'), unit="m²")
+        
+        # 2. Empêche le doublon "Selon surface €"
+        val_loyer = format_value(selected_data.get('Loyer annuel', 'N/A'), unit="€")
+        
+        # 3. Traite les autres valeurs
+        val_emplacement = format_value(selected_data.get('Emplacement', 'N/A'))
+        val_typologie = format_value(selected_data.get('Typologie', 'N/A'))
+        
         colonnes_a_afficher = [
-            ('Emplacement', selected_data.get('Emplacement', 'N/A')),
-            ('Typologie', selected_data.get('Typologie', 'N/A')),
-            ('Surface GLA', f"{selected_data.get('Surface GLA', 'N/A')} m²"),
-            ('Loyer annuel', f"{selected_data.get('Loyer annuel', 'N/A')} €"),
+            ('Emplacement', val_emplacement),
+            ('Typologie', val_typologie),
+            ('Surface GLA', val_gla),
+            ('Loyer annuel', val_loyer),
         ]
         
         for nom, valeur in colonnes_a_afficher:
-            valeur_str = str(valeur).strip()
-            if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None', 'None €', 'None m²'):
-                 html_content += f'<div style="margin-bottom: 5px;"><span style="font-weight: bold; color: #555;">{nom} :</span> {valeur}</div>'
+             html_content += f'<div style="margin-bottom: 5px;"><span style="font-weight: bold; color: #555;">{nom} :</span> {valeur}</div>'
                  
         html_content += '</div>' 
         
+        # --- Correction de l'affichage de l'adresse ---
         adresse = selected_data.get('Adresse', 'N/A')
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
         
+        st.write(f"valeur adresse: {adresse}")
+        st.write(f"valeur code postal: {code_postal}")
+        st.write(f"valeur ville: {ville}")
+        
         html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 0px;">📍 Adresse</p>'
-        if str(adresse).strip() not in ('N/A', 'nan', ''):
-             html_content += f'<p style="margin: 0;">{adresse}<br>{code_postal} - {ville}</p>'
+        
+        # On affiche uniquement la ligne Code Postal - Ville s'ils sont renseignés
+        adresse_str = str(adresse).strip()
+        code_ville_str = f"{code_postal} - {ville}".strip()
+        
+        if adresse_str not in ('N/A', 'nan', ''):
+             html_content += f'<p style="margin: 0;">{adresse_str}<br>'
+             if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
+                 html_content += f'{code_ville_str}'
+             html_content += '</p>'
         else:
              html_content += f'<p style="margin: 0;">Adresse non renseignée.</p>'
              
+        # --- Lien Google Maps ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
              html_content += f'''
@@ -244,14 +281,15 @@ if show_details:
             </a>
              '''
         
-        # Ajout du bouton "Masquer" dans le panneau
-        # (Nous n'utiliserons pas ce bouton car le clic ailleurs sur la carte le fait déjà)
-        
     else:
         html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
 
-# Fermeture de la div flottante (que le contenu soit vide ou non)
+# Fermeture de la div flottante (ouvert ou fermé)
 html_content += '</div>' 
 
-# Injection du panneau de détails flottant (ouvert ou fermé)
+# Injection du panneau de détails flottant
 st.markdown(html_content, unsafe_allow_html=True)
+
+# Message dans le corps principal si aucun détail n'est affiché (pour la visibilité initiale)
+if not show_details and not data_df.empty:
+    st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
