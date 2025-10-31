@@ -82,9 +82,9 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Chemin du fichier de données
+# Chemin du fichier de données (CORRIGÉ SELON VOTRE DEMANDE)
 DATA_FILE_PATH = "data/Liste des lots.xlsx" 
-DATA_SHEET_NAME = "Tableau recherche"
+DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille Excel à lire
 
 
 # -------------------------------------------------
@@ -95,29 +95,23 @@ DATA_SHEET_NAME = "Tableau recherche"
 def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """
     Charge le DataFrame et effectue le nettoyage/formatage initial.
+    Le chemin est désormais défini par DATA_FILE_PATH.
     """
     try:
-        # NOTE: Le fichier fourni par l'utilisateur était un CSV. 
-        # On va tenter de le charger en CSV pour assurer la compatibilité,
-        # mais la colonne COL_LAT et COL_LON doit être correctement identifiée.
-        
-        # Le fichier "Liste des lots Version 2.xlsx - Tableau recherche.csv" est disponible
-        # On assume que les en-têtes sont à la première ligne.
-        df = pd.read_csv("Liste des lots Version 2.xlsx - Tableau recherche.csv", encoding="utf-8")
+        # UTILISATION DE pd.read_excel AVEC LE CHEMIN ET LE NOM DE FEUILLE CORRECTS
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
         
         required_cols = [COL_LAT, COL_LON, COL_REF]
         for col in required_cols:
             if col not in df.columns:
-                # Tentative de normaliser les noms de colonnes si le nom est proche
-                st.error(f"La colonne requise '{col}' est manquante.")
-                return pd.DataFrame() # Retourne un DataFrame vide en cas d'échec
+                st.error(f"La colonne requise '{col}' est manquante dans la feuille '{sheet_name}'. Veuillez vérifier le fichier Excel.")
+                return pd.DataFrame() 
 
     except FileNotFoundError:
-        # En cas d'échec, on essaie de charger l'original du code, mais on garde le CSV pour la robustesse
-        st.error(f"Fichier de données CSV non trouvé: Liste des lots Version 2.xlsx - Tableau recherche.csv.")
+        st.error(f"Fichier de données Excel non trouvé au chemin spécifié : '{file_path}'.")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
+        st.error(f"Erreur lors de la lecture du fichier Excel. Détails: {e}")
         return pd.DataFrame()
 
 
@@ -438,7 +432,8 @@ def main():
 
 
     # Chargement des données
-    df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME)
+    # Utilisation de la constante DATA_FILE_PATH (maintenant 'data/Liste des lots.xlsx')
+    df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME) 
     if df.empty:
         return
 
