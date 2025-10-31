@@ -18,7 +18,8 @@
         }
         /* Styles personnalisés pour les marqueurs Leaflet */
         .custom-marker {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            /* CORRECTION: Remplacement de rgba(0,0,0,0.3) par une couleur plus sûre pour éviter l'erreur de compilation Python */
+            box-shadow: 0 4px 8px #0000004d; /* #0000004d est l'équivalent de rgba(0,0,0,0.3) */
             cursor: pointer;
         }
     </style>
@@ -29,7 +30,6 @@
     <div id="app" class="flex h-screen overflow-hidden">
 
         <!-- 1. Panneau Gauche (Filtres/Navigation) - Largeur fixe 275px -->
-        <!-- NOTE: Utilisation de w-[275px] pour éviter la syntaxe Python `_` (taille 275 pixels) -->
         <div id="left-panel" class="w-[275px] flex-shrink-0 bg-blue-900 text-white shadow-2xl p-6 overflow-y-auto">
             <h1 class="text-3xl font-bold mb-6 text-yellow-500 border-b-4 border-yellow-600 pb-2">
                 Carte SMBG Immo
@@ -150,7 +150,10 @@
                 if (!response.ok) throw new Error(`Erreur de chargement: ${response.statusText} (${response.status})`);
                 
                 const csvText = await response.text();
-                const rows = csvText.trim().split('\n').filter(row => row.trim() !== ''); // Filtrer les lignes vides
+                // Suppression de l'éventuelle Byte Order Mark (BOM) au début du fichier
+                const sanitizedCsvText = csvText.startsWith('\ufeff') ? csvText.substring(1) : csvText;
+                
+                const rows = sanitizedCsvText.trim().split('\n').filter(row => row.trim() !== '');
                 
                 if (rows.length === 0) {
                     throw new Error("Le fichier CSV est vide.");
@@ -179,16 +182,16 @@
                     // Conversion de types pour Latitude et Longitude
                     if (row['Latitude'] && row['Longitude']) {
                         
-                        // ESSENTIEL: Remplacer TOUTES les virgules par des points pour la conversion en flottant
-                        let latStr = String(row.Latitude).replace(/,/g, '.');
-                        let lonStr = String(row.Longitude).replace(/,/g, '.');
+                        // 1. Nettoyage de la chaîne: retirer les espaces, remplacer la virgule par le point
+                        let latStr = String(row.Latitude).replace(/\s/g, '').replace(/,/g, '.');
+                        let lonStr = String(row.Longitude).replace(/\s/g, '').replace(/,/g, '.');
                         
                         row.Latitude = parseFloat(latStr);
                         row.Longitude = parseFloat(lonStr);
                         row['Référence annonce'] = row['Référence annonce'] || 'N/A';
                         
-                        // Si les coordonnées sont valides, on ajoute la ligne
-                        if (!isNaN(row.Latitude) && !isNaN(row.Longitude) && row.Latitude !== 0 && row.Longitude !== 0) {
+                        // 2. Vérification: Si les coordonnées sont valides et non nulles (pas au 0,0)
+                        if (!isNaN(row.Latitude) && !isNaN(row.Longitude) && (row.Latitude !== 0 || row.Longitude !== 0)) {
                             data.push(row);
                         }
                     }
@@ -205,7 +208,7 @@
                 applyFilterAndRenderMap();
                 
                 if (originalData.length === 0) {
-                    showMessageBox("Avertissement Données", "Aucune donnée de lot valide n'a pu être chargée. Vérifiez que les colonnes 'Latitude' et 'Longitude' existent et contiennent des nombres (avec '.' ou ',' comme séparateur décimal).");
+                    showMessageBox("Avertissement Données", "Aucune donnée de lot valide n'a pu être chargée. Vérifiez que les colonnes 'Latitude' et 'Longitude' existent et contiennent des nombres (avec '.' ou ',' comme séparateur décimal) et que la ligne d'en-tête est correcte.");
                 }
                 
             } catch (error) {
@@ -228,7 +231,6 @@
             const select = document.getElementById('typo-filter');
             const typos = [...new Set(data.map(d => d.Typologie).filter(t => t && t.trim() !== 'N/A' && t.trim() !== ''))].sort();
             
-            // Nettoyer les options existantes sauf 'all'
             select.querySelectorAll('option:not([value="all"])').forEach(opt => opt.remove());
 
             typos.forEach(typo => {
@@ -270,6 +272,8 @@
             dataMarkers = [];
 
             // 2. Créer et ajouter les nouveaux marqueurs
+            const bounds = data.length > 0 ? L.latLngBounds(data.map(d => [d.Latitude, d.Longitude])) : null;
+
             data.forEach(lot => {
                 // Utilisation d'un DivIcon personnalisé pour un meilleur contrôle du style
                 const refCourt = (lot['Référence annonce'] || '').replace(/^0+/, '');
@@ -301,8 +305,14 @@
                 dataMarkers.push(marker);
             });
             
-            // Si des données sont affichées, assure un centrage sur la France si le zoom est trop faible
-            if (data.length > 0 && map.getZoom() < 5) {
+            // 3. Adapter la vue aux marqueurs s'ils existent
+            if (bounds && data.length > 0) {
+                // Ne pas ajuster la vue si un filtre est actif et qu'un marqueur est sélectionné (pour garder le zoom sur la ville)
+                if (!selectedMarker) {
+                    map.fitBounds(bounds, { padding: [20, 20] });
+                }
+            } else if (data.length === 0) {
+                // Recentrer sur la France si aucune donnée ne correspond au filtre
                 map.setView([46.603354, 1.888334], 6);
             }
         }
@@ -313,8 +323,7 @@
             if (selectedMarker) {
                 const prevMarkerElement = document.getElementById(`marker-${selectedMarker.ref}`);
                 if (prevMarkerElement) {
-                    prevMarkerElement.classList.remove('selected-marker-active');
-                    prevMarkerElement.classList.remove('bg-yellow-500');
+                    prevMarkerElement.classList.remove('selected-marker-active', 'bg-yellow-500');
                     prevMarkerElement.classList.add('bg-blue-900');
                 }
             }
@@ -325,9 +334,8 @@
             // Appliquer la classe de sélection au nouveau marqueur
             const newMarkerElement = document.getElementById(`marker-${lotData['Référence annonce']}`);
             if (newMarkerElement) {
-                newMarkerElement.classList.add('selected-marker-active');
+                newMarkerElement.classList.add('selected-marker-active', 'bg-yellow-500');
                 newMarkerElement.classList.remove('bg-blue-900');
-                newMarkerElement.classList.add('bg-yellow-500');
             }
             
             // Ouvrir le panneau de détails
@@ -348,13 +356,12 @@
             
             if (!hasLink) {
                 mapBtn.textContent = "Lien Maps non disponible";
-                mapBtn.classList.remove('hover:bg-red-700');
-                mapBtn.classList.remove('bg-red-600');
                 mapBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-gray-400');
+                mapBtn.classList.remove('hover:bg-red-700', 'bg-red-600');
             } else {
                  mapBtn.textContent = "Voir sur Google Maps";
-                 mapBtn.classList.add('hover:bg-red-700', 'bg-red-600');
                  mapBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-gray-400');
+                 mapBtn.classList.add('hover:bg-red-700', 'bg-red-600');
             }
 
             // 2. Construction du contenu des détails
@@ -407,8 +414,7 @@
             if (selectedMarker) {
                 const prevMarkerElement = document.getElementById(`marker-${selectedMarker.ref}`);
                 if (prevMarkerElement) {
-                    prevMarkerElement.classList.remove('selected-marker-active');
-                    prevMarkerElement.classList.remove('bg-yellow-500');
+                    prevMarkerElement.classList.remove('selected-marker-active', 'bg-yellow-500');
                     prevMarkerElement.classList.add('bg-blue-900');
                 }
                 selectedMarker = null;
@@ -418,7 +424,7 @@
         // Fonction utilitaire pour formater les devises (Euro)
         function formatCurrency(value) {
             // Nettoyer et convertir: remplacer les virgules par des points
-            const strValue = String(value).trim().replace(/,/g, '.');
+            const strValue = String(value).trim().replace(/\s/g, '').replace(/,/g, '.');
             const num = parseFloat(strValue.replace(/[^0-9.]/g, ''));
             
             if (isNaN(num) || num === 0) return 'N/A';
@@ -435,7 +441,7 @@
         // Fonction utilitaire pour formater les nombres avec des espaces
         function formatNumber(value) {
              // Nettoyer et convertir: remplacer les virgules par des points
-            const strValue = String(value).trim().replace(/,/g, '.');
+            const strValue = String(value).trim().replace(/\s/g, '').replace(/,/g, '.');
             const num = parseFloat(strValue.replace(/[^0-9.]/g, ''));
 
              if (isNaN(num) || num === 0) return 'N/A';
@@ -456,19 +462,6 @@
 
         // Initialisation de l'application au chargement complet de la fenêtre
         window.onload = function() {
-            // Mise à jour de la boîte de message dans le DOM
-             const msgBox = document.getElementById('message-box');
-             if (!msgBox.querySelector('#message-title')) {
-                // S'assurer que le contenu de la boîte de message est là
-                msgBox.innerHTML = `
-                    <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
-                        <h3 id="message-title" class="text-xl font-bold mb-3 text-red-600"></h3>
-                        <p id="message-text" class="text-gray-700 mb-4"></p>
-                        <button onclick="document.getElementById('message-box').classList.add('hidden')" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">Fermer</button>
-                    </div>
-                `;
-             }
-
             initMap();
             loadData();
         };
