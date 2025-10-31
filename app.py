@@ -3,7 +3,6 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
-# Remarque : on n'importe plus streamlit.components.v1
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -18,7 +17,7 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- CSS / HTML pour le volet flottant avec transition (CRITICAL FIX: Z-index) ---
+# --- CSS / HTML pour le volet flottant avec transition ---
 CUSTOM_CSS = """
 <style>
 /* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */
@@ -77,11 +76,11 @@ def format_value(value, unit=""):
     try:
         num_value = float(value)
         
-        # Arrondit à 2 décimales si nécessaire
+        # Arrondit à 2 décimales si nécessaire et formatage français
         if num_value != round(num_value, 2):
             val_str = f"{num_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         else:
-            # Ajoute un séparateur de milliers simple (non standard mais améliore la lisibilité)
+            # Ajout d'un séparateur de milliers simple
             val_str = f"{num_value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
             
         # Ajoute l'unité si elle n'est pas déjà présente
@@ -205,7 +204,8 @@ if not data_df.empty:
                     st.rerun() 
              
 else:
-    st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
+    # Ce bloc ne devrait s'exécuter que si le DataFrame est vide après le chargement
+    st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Aucune carte ne peut être affichée.")
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
@@ -319,5 +319,20 @@ else:
 html_content += '</div>' 
 
 # Injection du panneau de détails flottant
-# Important : Cette injection doit se faire après l'injection de la carte pour des raisons de flux Streamlit
 st.markdown(html_content, unsafe_allow_html=True)
+
+
+# --- 5. Affichage du Tableau de Données (Sous la carte) ---
+st.markdown("---")
+st.header("📊 Tableau des Lots Immobiliers")
+
+if not data_df.empty:
+    # Suppression des colonnes temporaires et non pertinentes pour l'affichage du tableau
+    if 'distance_sq' in data_df.columns:
+        display_df = data_df.drop(columns=['distance_sq'])
+    else:
+        display_df = data_df.copy()
+        
+    st.dataframe(display_df, use_container_width=True)
+else:
+    st.warning("Aucune donnée disponible pour l'affichage du tableau.")
