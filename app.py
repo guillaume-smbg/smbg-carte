@@ -228,7 +228,8 @@ def main():
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
     # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
-    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="20px")
+    # CORRECTION : Remplacement de gap="20px" (non valide) par gap="medium"
+    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="medium")
 
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
