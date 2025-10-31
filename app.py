@@ -14,6 +14,7 @@ if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
 # --- Chemin d'accès du fichier ---
+# ASSUREZ-VOUS QUE CE CHEMIN EST CORRECT
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
@@ -32,6 +33,7 @@ CUSTOM_CSS = """
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
+    /* PROPRIÉTÉ CLÉ : Ajoute la transition au mouvement (transform) */
     transition: transform 0.4s ease-in-out; 
 }
 
@@ -54,7 +56,7 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
-# --- Fonction utilitaire de formatage (MISE À JOUR) ---
+# --- Fonction utilitaire de formatage ---
 def format_value(value, unit=""):
     """
     Formate la valeur: 
@@ -67,27 +69,24 @@ def format_value(value, unit=""):
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'):
         return "Non renseigné"
         
-    # 2. Gestion des valeurs textuelles
-    # On vérifie si la valeur est une chaîne contenant des lettres (ex: "Selon surface")
+    # 2. Gestion des valeurs textuelles (sans chiffres)
     if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str):
         return val_str
     
-    # 3. Gestion des valeurs numériques (y compris les chaînes contenant des nombres/plages)
+    # 3. Gestion des valeurs numériques
     try:
-        # Tente de convertir en float pour vérifier si c'est un nombre
         num_value = float(value)
         
-        # Arrondit à 2 décimales si nécessaire et ajoute des séparateurs de milliers (non fait ici pour simplicité HTML)
+        # Arrondit à 2 décimales si nécessaire
         if num_value != round(num_value, 2):
             val_str = f"{num_value:.2f}"
             
-        # Si c'est un nombre, on ajoute l'unité s'il n'y en a pas déjà
+        # Ajoute l'unité si elle n'est pas déjà présente
         if unit and not val_str.lower().endswith(unit.lower().strip()):
             return f"{val_str} {unit}"
             
     except (ValueError, TypeError):
         # La valeur n'est pas un simple nombre (ex: "300 €/m² = 73 500 €", "36 à 265 m²")
-        # On suppose qu'elle est déjà correctement formatée par l'Excel.
         pass
         
     return val_str
@@ -230,22 +229,7 @@ if show_details:
             <h4 style="color: #0072B2;">Réf. : {display_title_ref}</h4>
         """
         
-        # --- LOGIQUE D'AFFICHAGE DES COLONNES G à AH ---
-        
-        # Colonnes à exclure (ne pas afficher dans la liste détaillée)
-        cols_to_exclude = [
-            REF_COL, 
-            'Latitude', 'Longitude', 
-            'Lien Google Maps' 
-        ]
-        
-        # Toutes les colonnes à partir de l'indice 6 (colonne G)
-        all_cols = data_df.columns.tolist()
-        detail_cols = all_cols[6:] 
-
-        html_content += '<div style="margin-top: 15px;">'
-        
-        # Première boucle : Affichage de l'adresse séparément (Correction du formatage)
+        # --- Affichage de l'adresse ---
         adresse = selected_data.get('Adresse', 'N/A')
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
@@ -256,20 +240,32 @@ if show_details:
         
         html_content += f'<p style="margin: 0; font-size: 14px;">'
         if adresse_str not in ('N/A', 'nan', ''):
-             html_content += f'{adresse_str}<br>' # L'adresse est la première ligne
+             html_content += f'{adresse_str}<br>'
         
-        # On n'affiche le Code Postal - Ville qu'une seule fois
         if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
              html_content += f'{code_ville_str}'
         
-        html_content += '</p>' # Fermeture de la balise p de l'adresse (CORRIGÉ)
+        html_content += '</p>'
 
 
         html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
         
-        # Seconde boucle : Affichage de toutes les autres colonnes G à AH
+        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
+        # Colonnes à exclure (déjà traitées ou non pertinentes pour l'affichage général)
+        cols_to_exclude = [
+            REF_COL, 
+            'Latitude', 'Longitude', 
+            'Lien Google Maps' ,
+            'Adresse', 'Code Postal', 'Ville',
+            'distance_sq' # Exclure la colonne de calcul de distance temporaire
+        ]
+        
+        # Toutes les colonnes à partir de l'indice 6 (colonne G)
+        all_cols = data_df.columns.tolist()
+        detail_cols = all_cols[6:] 
+
         for col_name in detail_cols:
             if col_name not in cols_to_exclude:
                 value = selected_data.get(col_name, 'N/A')
@@ -292,8 +288,6 @@ if show_details:
                 </div>
                 '''
 
-        html_content += '</div>'
-        
         # --- Lien Google Maps (en bas du volet) ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
@@ -309,12 +303,12 @@ if show_details:
     else:
         html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
 
-# Fermeture de la div flottante (ouvert ou fermé)
+# Fermeture de la div flottante (FIN du panneau)
 html_content += '</div>' 
 
 # Injection du panneau de détails flottant
 st.markdown(html_content, unsafe_allow_html=True)
 
-# Message dans le corps principal si aucun détail n'est affiché (pour la visibilité initiale)
+# Message dans le corps principal si aucun détail n'est affiché
 if not show_details and not data_df.empty:
     st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
