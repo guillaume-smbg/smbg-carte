@@ -55,16 +55,11 @@ section.main {
     overflow-x: auto; 
 }
 
-/* Style de base du bouton pour Streamlit (pour la Section 5) */
-.stButton>button {
-    width: 100%;
-    margin-top: 15px;
-    background-color: #4CAF50; /* Couleur verte */
-    color: white;
+/* Style général pour les boutons link_button dans la section 5 */
+div.stLinkButton > a > button {
+    background-color: #0072B2 !important; /* Couleur bleue primaire pour le lien */
+    color: white !important;
     border: none;
-    border-radius: 4px;
-    padding: 10px 0;
-    font-weight: bold;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
 }
 
@@ -281,7 +276,7 @@ if show_details:
         cols_to_exclude = [
             REF_COL, 
             'Latitude', 'Longitude', 
-            'Lien Google Maps' , # Exclure ici car le bouton sera dans la Section 5
+            'Lien Google Maps' ,
             'Adresse', 'Code Postal', 'Ville',
             'distance_sq' 
         ]
@@ -311,8 +306,6 @@ if show_details:
                     <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span>
                 </div>
                 '''
-
-        # NOTE: Le code du bouton Google Maps a été déplacé dans la Section 5.
         
     else:
         html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
@@ -342,8 +335,23 @@ with dataframe_container:
         selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy()
         
         if not selected_row_df.empty:
-            # Récupération du lien Google Maps pour un usage ultérieur
+            # Récupération du lien Google Maps
             lien_maps = selected_row_df.iloc[0].get('Lien Google Maps', None)
+
+            # --- AFFICHAGE DU BOUTON GOOGLE MAPS (AU-DESSUS DU TABLEAU) ---
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
+                # Utilisation de colonnes pour centrer et encadrer le bouton
+                col1, col2, col3 = st.columns([1, 6, 1])
+                with col2:
+                    st.markdown("<hr style='margin-top: 5px; margin-bottom: 10px;'>", unsafe_allow_html=True)
+                    st.link_button(
+                        label="🌍 Voir sur Google Maps",
+                        url=lien_maps,
+                        type="secondary", 
+                        use_container_width=True
+                    )
+                    st.markdown("<hr style='margin-top: 10px; margin-bottom: 5px;'>", unsafe_allow_html=True) 
+            # ---------------------------------------------------------------------------------
 
             # Suppression des colonnes temporaires pour l'affichage
             if 'distance_sq' in selected_row_df.columns:
@@ -439,31 +447,6 @@ with dataframe_container:
             
             # Affichage du tableau formaté
             st.dataframe(transposed_df, hide_index=True, use_container_width=True)
-            
-            # --- AFFICHAGE DU BOUTON GOOGLE MAPS (NOUVEL EMPLACEMENT) ---
-            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
-                st.markdown(f"""
-                <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
-                    <button style="
-                        background-color: #4CAF50; 
-                        color: white; 
-                        border: none; 
-                        padding: 10px 0px; 
-                        text-align: center; 
-                        text-decoration: none; 
-                        display: block; 
-                        font-size: 14px; 
-                        margin-top: 15px; 
-                        cursor: pointer; 
-                        border-radius: 4px; 
-                        width: 100%;
-                        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-                    ">
-                        🌍 Voir sur Google Maps
-                    </button>
-                </a>
-                """, unsafe_allow_html=True)
-            # ------------------------------------------------------------------
             
         else:
             st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
