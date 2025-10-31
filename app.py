@@ -59,7 +59,7 @@ with col_left:
     st.write(f"Lots chargés: **{len(data_df)}**")
     
     # --- PANNEAU DE DIAGNOSTIC ---
-    st.header("⚠️ Diagnostic")
+    st.header("⚠️ Diagnostic Données")
     if error_message:
         st.error(error_message)
     elif not data_df.empty:
@@ -126,7 +126,16 @@ with col_map:
         # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- Logique de détection de clic ---
+        # --- DIAGNOSTIC DU CLIC EN TEMPS RÉEL (CRITIQUE) ---
+        st.markdown("---")
+        if map_output and map_output.get("last_clicked"):
+            st.info(f"✅ **Clic Détecté** : Coordonnées {map_output['last_clicked']['lat']:.4f}, {map_output['last_clicked']['lng']:.4f}")
+        else:
+            st.warning("❌ **Clic non détecté** ou la carte n'a pas renvoyé de coordonnées. (Le signal n'arrive pas.)")
+        st.markdown("---")
+        # ----------------------------------------
+        
+        # --- Logique de détection de clic (Mise à jour de la session state) ---
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
@@ -134,11 +143,10 @@ with col_map:
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # Recherche du lot le plus proche (SANS SEUIL DE DISTANCE)
+                # Recherche du lot le plus proche 
                 data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
-                # Le DataFrame n'est pas vide, donc le row le plus proche existe toujours
                 new_ref = closest_row[REF_COL]
                 st.session_state['selected_ref'] = new_ref
                  
@@ -151,14 +159,14 @@ st.markdown("---")
 
 selected_ref = st.session_state['selected_ref']
 st.header("🔍 Détails du Lot Sélectionné")
-# LIGNE DE DEBUG CRITIQUE : Rapportez-moi cette valeur après avoir cliqué
+# DIAGNOSTIC CRITIQUE : Cette valeur doit changer après le clic
 st.text(f"DEBUG REF: {selected_ref if selected_ref else 'NOT SET'}") 
 st.markdown("---")
 
 if selected_ref and selected_ref != 'None':
     selected_ref_clean = selected_ref.strip()
     
-    # Filtre sécurisé
+    # Filtre sécurisé sur la colonne de référence nettoyée
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
     
     if len(selected_data_series) > 0:
@@ -248,10 +256,8 @@ if selected_ref and selected_ref != 'None':
         st.markdown("---")
             
     else:
-        # Affichage du diagnostic d'échec de la recherche
         st.error("❌ ÉCHEC : La référence a été capturée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
         st.text(f"Référence cherchée : '{selected_ref}' (Long: {len(selected_ref)})")
-        st.text(f"5 premières Références du DF : {data_df[REF_COL].head(5).tolist()}")
         
 else:
     st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ci-dessous.")
