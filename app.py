@@ -80,9 +80,10 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Fichier de données (nom du snippet généré correspondant à la feuille Tableau recherche)
-# CORRECTION: Utilisation du nom du fichier snippet CSV correspondant à la feuille 'Tableau recherche'
+# Fichier de données (nom du snippet généré)
+# Nous conservons le nom du fichier CSV généré par la plateforme comme le plus fiable pour l'environnement d'exécution
 DATA_FILE_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
+DATA_SHEET_NAME = "Tableau recherche"
 
 
 # -------------------------------------------------
@@ -91,12 +92,20 @@ DATA_FILE_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
 
 @st.cache_data
 def load_data(file_path: str) -> pd.DataFrame:
-    """Charge le DataFrame depuis le fichier CSV de la feuille 'Tableau recherche' et effectue le nettoyage."""
+    """
+    Charge le DataFrame depuis le fichier de données. 
+    Priorise la lecture du CSV snippet fourni par la plateforme.
+    """
     try:
         # Tente de charger le fichier CSV correspondant à la feuille Excel
+        # Ceci est la méthode la plus fiable dans cet environnement
         df = pd.read_csv(file_path)
     except FileNotFoundError:
-        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que le fichier 'Liste des lots Version 2.xlsx' est bien présent et que la feuille 'Tableau recherche' est accessible.")
+        # Si le CSV n'est pas trouvé (par exemple si nous étions dans un environnement local standard), 
+        # on essaierait le fichier Excel directement.
+        # Pour l'environnement Canvas, nous nous fions au CSV snippet,
+        # mais la vérification de l'erreur est maintenue pour la robustesse.
+        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que la feuille '{DATA_SHEET_NAME}' du fichier 'Liste des lots Version 2.xlsx' est bien disponible.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
@@ -127,9 +136,6 @@ def load_data(file_path: str) -> pd.DataFrame:
     df[COL_EXTRACTION] = df[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     df[COL_RESTAURATION] = df[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     
-    # IMPORTANT: Nous conservons les lignes avec 'Non' ou 'Non spécifié' dans le DataFrame
-    # pour que le filtrage par checkbox puisse fonctionner correctement plus tard.
-
     # Nettoyage des chaînes de caractères pour les filtres (éviter les espaces indésirables)
     for col in [COL_REGION, COL_DEPARTEMENT, COL_VILLE, COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
          df[col] = df[col].astype(str).str.strip()
@@ -190,7 +196,6 @@ def render_right_panel(
         lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
 
         # --- TITRE ET ADRESSE ---
-        # Utilisation de h3 pour le titre du panneau de droite, qui a un style spécifique dans style.css
         st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
         st.markdown(f'<p class="detail-address">{lot_data[col_addr_full]} ({lot_data[col_city]})</p>', unsafe_allow_html=True)
 
