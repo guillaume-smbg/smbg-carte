@@ -235,7 +235,8 @@ if not data_df.empty:
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        DISTANCE_THRESHOLD = 0.0005 
+        # 🟢 MODIFICATION ICI : Augmentation du seuil de distance
+        DISTANCE_THRESHOLD = 0.005 # 0.005 est beaucoup plus tolérant que 0.0005.
 
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
