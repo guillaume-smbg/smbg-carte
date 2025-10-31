@@ -4,7 +4,7 @@ import folium
 from streamlit_folium import st_folium 
 import numpy as np 
 # --- NOUVEAU: Import pour les pins numérotés ---
-from folium.features import DivIcon 
+# from folium.features import DivIcon # <-- COMMENTÉ/SUPPRIMÉ
 
 # --- COULEURS SMBG ---
 COLOR_SMBG_BLUE = "#05263D" 
@@ -25,7 +25,6 @@ EXCEL_FILE_PATH = 'data/Liste des lots.xlsx'
 REF_COL = 'Référence annonce' 
 
 # --- CSS / HTML pour le volet flottant --- 
-# J'ai corrigé le bloc en le déclarant comme une simple triple-string (non f-string) pour éviter les erreurs d'interprétation d'indentation.
 CUSTOM_CSS = """ 
 <style> 
 /* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */ 
@@ -259,10 +258,7 @@ if not data_df.empty:
         lat = row['Latitude'] 
         lon = row['Longitude'] 
         
-        # Référence sans zéros de tête pour l'affichage
-        ref = row[REF_COL].lstrip('0') 
-        
-        # 1. CircleMarker (pour la zone de clic - Couleur SMBG)
+        # UNIQUEMENT le CircleMarker (Cercle bleu SMBG)
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
@@ -272,18 +268,17 @@ if not data_df.empty:
             fill_opacity=0.8, 
         ).add_to(m) 
         
-        # 2. DivIcon (pour le numéro - Couleur Cuivre SMBG)
-        # 🎯 ATTENTION: pointer-events: none est essentiel pour laisser passer le clic
-        icon_style = f"font-size: 10px; font-weight: bold; color: {COLOR_SMBG_COPPER}; text-align: center; line-height: 20px; width: 20px; height: 20px; pointer-events: none;"
-
-        folium.Marker( 
-            location=[lat, lon], 
-            icon=DivIcon( 
-                icon_size=(20, 20), 
-                icon_anchor=(10, 10), 
-                html=f'<div style="{icon_style}">{ref}</div>', 
-            ) 
-        ).add_to(m) 
+        # Le DivIcon pour le numéro est maintenant COMMENTÉ/SUPPRIMÉ
+        # ref = row[REF_COL].lstrip('0') 
+        # icon_style = f"font-size: 10px; font-weight: bold; color: {COLOR_SMBG_COPPER}; text-align: center; line-height: 20px; width: 20px; height: 20px; pointer-events: none;"
+        # folium.Marker( 
+        #     location=[lat, lon], 
+        #     icon=DivIcon( 
+        #         icon_size=(20, 20), 
+        #         icon_anchor=(10, 10), 
+        #         html=f'<div style="{icon_style}">{ref}</div>', 
+        #     ) 
+        # ).add_to(m) 
 
     # Affichage et capture des événements de clic 
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
