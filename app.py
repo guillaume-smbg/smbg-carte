@@ -58,9 +58,8 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- Fonction utilitaire de formatage (utilisée uniquement par le panneau de droite) ---
 def format_value(value, unit=""):
     """
-    Formate la valeur: 
-    - Supprime les unités si la valeur est un texte descriptif.
-    - Ajoute les unités si la valeur est numérique et les arrondit si nécessaire.
+    Formate la valeur en utilisant un ESPACE comme séparateur de milliers
+    et une VIRGULE comme séparateur décimal (norme FR).
     """
     val_str = str(value).strip()
     
@@ -76,12 +75,21 @@ def format_value(value, unit=""):
     try:
         num_value = float(value)
         
-        # Arrondit à 2 décimales si nécessaire et formatage français
+        # --- NOUVEAU FORMATAGE FRANÇAIS (espace milliers, virgule décimale) ---
         if num_value != round(num_value, 2):
-            val_str = f"{num_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            # Format avec décimales (Ex: 12,345.67 avec f-string standard)
+            val_str = f"{num_value:,.2f}"
+            
+            # 1. Remplacer la virgule de milliers par un espace
+            val_str = val_str.replace(',', ' ') 
+            # 2. Remplacer le point décimal par une virgule
+            val_str = val_str.replace('.', ',')
         else:
-            # Ajout d'un séparateur de milliers simple
-            val_str = f"{num_value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            # Format sans décimales (Ex: 12,345 avec f-string standard)
+            val_str = f"{num_value:,.0f}"
+            
+            # Remplacer la virgule de milliers par un espace
+            val_str = val_str.replace(',', ' ') 
             
         # Ajoute l'unité si elle n'est pas déjà présente
         if unit and not val_str.lower().endswith(unit.lower().strip()):
@@ -208,7 +216,7 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# Le code du panneau de droite est laissé tel quel en attendant la résolution du problème de rendu HTML.
+# Le formatage dans cette section utilise la fonction format_value, maintenant mise à jour.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -337,53 +345,63 @@ if show_details:
         else:
             display_df = selected_row_df
             
-        # --- NOUVELLE LOGIQUE: Limiter les colonnes jusqu'à 'Commentaires' inclus ---
+        # --- LOGIQUE: Limiter les colonnes jusqu'à 'Commentaires' inclus ---
         all_cols = display_df.columns.tolist()
         try:
-            # 1. Trouver l'index de 'Commentaires'
             commentaires_index = all_cols.index('Commentaires')
-            
-            # 2. Garder toutes les colonnes jusqu'à cet index (inclus)
             cols_to_keep = all_cols[:commentaires_index + 1]
             display_df = display_df[cols_to_keep]
         except ValueError:
-            # Si 'Commentaires' n'existe pas, garder toutes les colonnes
             st.warning("La colonne 'Commentaires' est introuvable. Affichage de toutes les colonnes disponibles.")
 
         # Transposition du DataFrame
         transposed_df = display_df.T.reset_index()
         transposed_df.columns = ['Champ', 'Valeur']
         
-        # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE ---
+        # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
         
         money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
         
         def format_monetary_value(row):
-            """Applique le formatage uniquement si le Champ est monétaire ou si c'est une surface/coordonnée."""
+            """Applique le formatage en utilisant un ESPACE comme séparateur de milliers."""
             champ = row['Champ']
             value = row['Valeur']
             
-            # Vérifie si le champ est monétaire et si la valeur est numérique
+            # Vérifie si la valeur est un nombre
+            is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value))
+            
+            # Colonne monétaire
             is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords)
             
-            if is_money_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
+            if is_money_col and is_numeric:
                 try:
-                    # Formatage en euros sans décimales avec séparateur de milliers
-                    return f"€{float(value):,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    float_value = float(value)
+                    
+                    # 1. Formatage standard US sans décimales (ex: 85,723)
+                    formatted_value = f"{float_value:,.0f}" 
+                    
+                    # 2. Remplacer la virgule de milliers par un espace
+                    formatted_value = formatted_value.replace(",", " ")
+                    
+                    return f"€{formatted_value}"
+                    
                 except (ValueError, TypeError):
                     return value 
             
-            # Si le champ est une surface
+            # Colonne surface
             is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
-            if is_surface_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
+            if is_surface_col and is_numeric:
                  try:
-                    # Formatage de la surface sans décimales
-                    return f"{float(value):,.0f} m²".replace(",", "X").replace(".", ",").replace("X", ".")
+                    float_value = float(value)
+                    formatted_value = f"{float_value:,.0f}" # 12,345
+                    formatted_value = formatted_value.replace(",", " ") # 12 345
+                    
+                    return f"{formatted_value} m²"
                  except (ValueError, TypeError):
                     return value
                     
-            # Si le champ est Latitude/Longitude, on les arrondit
-            if champ in ['Latitude', 'Longitude'] and pd.api.types.is_numeric_dtype(pd.Series(value)):
+            # Coordonnées
+            if champ in ['Latitude', 'Longitude'] and is_numeric:
                  try:
                     return f"{float(value):.4f}"
                  except (ValueError, TypeError):
