@@ -337,36 +337,29 @@ if show_details:
         else:
             display_df = selected_row_df
             
+        # --- NOUVELLE LOGIQUE: Limiter les colonnes jusqu'à 'Commentaires' inclus ---
+        all_cols = display_df.columns.tolist()
+        try:
+            # 1. Trouver l'index de 'Commentaires'
+            commentaires_index = all_cols.index('Commentaires')
+            
+            # 2. Garder toutes les colonnes jusqu'à cet index (inclus)
+            cols_to_keep = all_cols[:commentaires_index + 1]
+            display_df = display_df[cols_to_keep]
+        except ValueError:
+            # Si 'Commentaires' n'existe pas, garder toutes les colonnes
+            st.warning("La colonne 'Commentaires' est introuvable. Affichage de toutes les colonnes disponibles.")
+
         # Transposition du DataFrame
         transposed_df = display_df.T.reset_index()
         transposed_df.columns = ['Champ', 'Valeur']
         
         # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE ---
         
-        # 1. Identifier les colonnes qui contiennent des valeurs monétaires
-        # Nous allons nous baser sur les noms de colonnes qui contiennent ces mots-clés
         money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
         
-        # Colonnes à formater
-        cols_to_format = [col for col in display_df.columns if any(keyword.lower() in col.lower() for keyword in money_keywords)]
-        
-        # 2. Créer un dictionnaire de formatage pour les valeurs monétaires
-        # Format : Pas de décimales, séparateur de milliers et suffixe €
-        format_dict = {col: "€{:,.0f}" for col in cols_to_format}
-        
-        # Appliquer le formatage au DataFrame original (avant transposition)
-        # Note: on utilise st.data_editor pour une meilleure interactivité de style
-        styled_df = display_df.style.format(format_dict, na_rep='N/A')
-        
-        # Pour afficher le DataFrame stylisé transposé :
-        # Malheureusement, st.dataframe() de Streamlit n'affiche pas directement un DataFrame stylisé transposé de manière élégante.
-        # La solution la plus simple est de formater uniquement la colonne "Valeur" du DataFrame transposé pour les lignes monétaires.
-        
-        
-        # --- Nouvelle approche de formatage après transposition (plus complexe mais nécessaire pour l'affichage vertical) ---
-        
         def format_monetary_value(row):
-            """Applique le formatage uniquement si le Champ est monétaire."""
+            """Applique le formatage uniquement si le Champ est monétaire ou si c'est une surface/coordonnée."""
             champ = row['Champ']
             value = row['Valeur']
             
@@ -375,15 +368,16 @@ if show_details:
             
             if is_money_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
                 try:
-                    # Formatage en euros sans décimales
+                    # Formatage en euros sans décimales avec séparateur de milliers
                     return f"€{float(value):,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 except (ValueError, TypeError):
-                    return value # Retourne la valeur non modifiée si ce n'est pas un nombre
+                    return value 
             
-            # Si le champ est une surface (pour l'arrondi)
+            # Si le champ est une surface
             is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
             if is_surface_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
                  try:
+                    # Formatage de la surface sans décimales
                     return f"{float(value):,.0f} m²".replace(",", "X").replace(".", ",").replace("X", ".")
                  except (ValueError, TypeError):
                     return value
