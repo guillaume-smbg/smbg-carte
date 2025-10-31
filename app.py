@@ -27,8 +27,10 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-# CORRECTION DÉFINITIVE DU NOM DE FICHIER UTILISÉ
-DEFAULT_LOCAL_PATH = "Liste des lots.xlsx - Tableau recherche.csv"
+# CORRECTION DÉFINITIVE DU CHEMIN ET DU NOM DU FICHIER EXCEL/CSV
+# Le fichier CSV extrait de l'onglet "Tableau recherche" est utilisé ici.
+# Le chemin d'accès au fichier est défini par l'utilisateur comme étant dans le dossier 'data/'
+DEFAULT_LOCAL_PATH = "data/Liste des lots.xlsx - Tableau recherche.csv"
 
 
 # -------------------------------------------------
@@ -302,13 +304,13 @@ def load_data(url_or_path: str) -> pd.DataFrame:
     """Charge le DataFrame depuis un fichier local ou une URL."""
     try:
         # Tente de charger le fichier en considérant l'encodage comme 'latin-1' (souvent pour les CSV français)
-        # Utilise l'index de ligne 1 pour les entêtes (si l'entête est à la 2e ligne du CSV)
+        # Utilise l'index de ligne 0 pour les entêtes
         df = pd.read_csv(
             url_or_path,
             sep=',',
-            header=0,  # L'entête est à la première ligne (index 0) après les lignes vides/commentaires
+            header=0,
             skipinitialspace=True,
-            encoding='utf-8' # ou 'latin-1' si 'utf-8' échoue
+            encoding='utf-8' # Test initial en utf-8
         )
     except UnicodeDecodeError:
         # Si utf-8 échoue, tente latin-1
@@ -330,9 +332,6 @@ def load_data(url_or_path: str) -> pd.DataFrame:
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """Nettoie et prépare le DataFrame."""
-
-    # Renommer les colonnes si nécessaire (si les noms ne correspondent pas exactement aux CONSTANTES)
-    # Dans l'exemple fourni, les noms de colonnes semblent correspondre.
 
     # Conversion des colonnes numériques
     for col in [COL_SURFACE_GLA, COL_LOYER_M2, COL_LAT, COL_LON]:
@@ -397,17 +396,23 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
 
     # Filtre Extraction/Restauration/Actif (Checkbox)
     if filters.get(COL_EXTRACTION):
-         # Supprime les NaN pour ce filtre, puis filtre sur les valeurs sélectionnées
-        df_temp = df_filtered.dropna(subset=[COL_EXTRACTION])
-        df_filtered = df_filtered[df_filtered[COL_EXTRACTION].isin(filters[COL_EXTRACTION])]
+        # Filtrer sur les valeurs sélectionnées, en gérant les NaN
+        df_filtered = df_filtered[
+            df_filtered[COL_EXTRACTION].astype(str).isin(filters[COL_EXTRACTION]) |
+            df_filtered[COL_EXTRACTION].isna()
+        ]
 
     if filters.get(COL_RESTAURATION):
-        df_temp = df_filtered.dropna(subset=[COL_RESTAURATION])
-        df_filtered = df_filtered[df_filtered[COL_RESTAURATION].isin(filters[COL_RESTAURATION])]
+        df_filtered = df_filtered[
+            df_filtered[COL_RESTAURATION].astype(str).isin(filters[COL_RESTAURATION]) |
+            df_filtered[COL_RESTAURATION].isna()
+        ]
 
     if filters.get(COL_ACTIF):
-        df_temp = df_filtered.dropna(subset=[COL_ACTIF])
-        df_filtered = df_filtered[df_filtered[COL_ACTIF].isin(filters[COL_ACTIF])]
+        df_filtered = df_filtered[
+            df_filtered[COL_ACTIF].astype(str).isin(filters[COL_ACTIF]) |
+            df_filtered[COL_ACTIF].isna()
+        ]
 
 
     return df_filtered
@@ -421,8 +426,13 @@ def format_value(value: Optional[any], unit: str = "", default: str = "-") -> st
     if pd.isna(value) or value is None or value == '' or str(value).strip() == '/':
         return default
     if isinstance(value, (int, float)):
-        # Formatage avec séparateur de milliers
-        return f"{int(value):,}".replace(",", " ") + f" {unit}".strip()
+        # Formatage avec séparateur de milliers et gestion des décimales
+        if unit in ["€", "€/m²"]:
+            # Pour l'argent, afficher deux décimales si l'unité est présente
+            return f"{value:,.2f}".replace(",", " ").replace(".", ",") + f" {unit}".strip()
+        else:
+             # Pour les autres nombres, utiliser un entier si possible
+            return f"{int(value):,}".replace(",", " ") + f" {unit}".strip()
     return str(value)
 
 def render_detail_row(label: str, value: Optional[any], unit: str = ""):
@@ -470,11 +480,15 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
     # Détails
     st.markdown('<h4>Détails de l\'Offre</h4>', unsafe_allow_html=True)
 
+    # Note: J'utilise les noms de colonnes du CSV pour l'affichage,
+    # même s'ils ne correspondent pas aux constantes de filtrage pour les autres détails.
     columns_to_display = {
         "Surface GLA": COL_SURFACE_GLA,
         "Surface utile": "Surface utile",
         "Loyer annuel": "Loyer annuel",
+        "Loyer Mensuel": "Loyer Mensuel",
         "Loyer €/m²": COL_LOYER_M2,
+        "Charges anuelles": "Charges anuelles",
         "Charges Mensuelles": "Charges Mensuelles",
         "Charges €/m²": "Charges €/m²",
         "Typologie": COL_TYPOLOGIE,
@@ -492,7 +506,9 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
         COL_SURFACE_GLA: "m²",
         "Surface utile": "m²",
         "Loyer annuel": "€",
+        "Loyer Mensuel": "€",
         COL_LOYER_M2: "€/m²",
+        "Charges anuelles": "€",
         "Charges Mensuelles": "€",
         "Charges €/m²": "€/m²",
     }
@@ -544,13 +560,13 @@ def main():
     df = load_data(file_path)
 
     if df.empty:
-        st.error(f"Impossible de charger les données. Vérifiez que le fichier '{file_path}' existe et est correctement formaté.")
+        st.error(f"Impossible de charger les données. Vérifiez que le chemin d'accès '{file_path}' est correct et que le fichier est correctement formaté (séparateur: virgule, encodage: utf-8 ou latin-1).")
         return
 
     # Renommage des colonnes pour la compatibilité (si nécessaire)
     # Assurez-vous que les colonnes attendues existent
     if COL_LAT not in df.columns or COL_LON not in df.columns or COL_REF not in df.columns:
-        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans le fichier de données.")
+        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans le fichier de données. Colonnes trouvées: {df.columns.tolist()}")
         return
 
     # ======== PANNEAU GAUCHE (filtres) ========
@@ -607,11 +623,11 @@ def main():
         st.markdown('<h3>Critères Numériques</h3>', unsafe_allow_html=True)
 
         # Préparation des valeurs min/max pour les sliders
-        surface_min_all = int(df[COL_SURFACE_GLA].min()) if not df[COL_SURFACE_GLA].empty else 0
-        surface_max_all = int(df[COL_SURFACE_GLA].max()) if not df[COL_SURFACE_GLA].empty else 10000
+        surface_min_all = int(df[COL_SURFACE_GLA].min()) if not df[COL_SURFACE_GLA].empty and df[COL_SURFACE_GLA].min() is not None and not pd.isna(df[COL_SURFACE_GLA].min()) else 0
+        surface_max_all = int(df[COL_SURFACE_GLA].max()) if not df[COL_SURFACE_GLA].empty and df[COL_SURFACE_GLA].max() is not None and not pd.isna(df[COL_SURFACE_GLA].max()) else 10000
 
-        loyer_min_all = int(df[COL_LOYER_M2].min()) if not df[COL_LOYER_M2].empty else 0
-        loyer_max_all = int(df[COL_LOYER_M2].max()) if not df[COL_LOYER_M2].empty else 1000
+        loyer_min_all = int(df[COL_LOYER_M2].min()) if not df[COL_LOYER_M2].empty and df[COL_LOYER_M2].min() is not None and not pd.isna(df[COL_LOYER_M2].min()) else 0
+        loyer_max_all = int(df[COL_LOYER_M2].max()) if not df[COL_LOYER_M2].empty and df[COL_LOYER_M2].max() is not None and not pd.isna(df[COL_LOYER_M2].max()) else 1000
 
         # Filtres appliqués jusqu'à présent (sauf les sliders de surface/loyer)
         temp_filters = {
@@ -621,29 +637,28 @@ def main():
         }
         df_temp_filtered = filter_dataframe(df, temp_filters)
 
-        # Déterminer les min/max actuels pour les sliders (Correction pour éviter ValueError sur NaN)
-        
         # 4. Filtre Surface GLA
         if not df_temp_filtered.empty and COL_SURFACE_GLA in df_temp_filtered.columns:
-            # Ne pas utiliser min/max si la colonne n'est pas remplie après filtre, utiliser les valeurs globales
-            if df_temp_filtered[COL_SURFACE_GLA].dropna().empty:
+            # S'assurer que les valeurs min/max des filtres appliqués sont valides et dans les bornes
+            valid_surfaces = df_temp_filtered[COL_SURFACE_GLA].dropna()
+            if not valid_surfaces.empty:
+                current_surface_min = int(valid_surfaces.min())
+                current_surface_max = int(valid_surfaces.max())
+            else:
                  current_surface_min = surface_min_all
                  current_surface_max = surface_max_all
-            else:
-                current_surface_min = int(df_temp_filtered[COL_SURFACE_GLA].min())
-                current_surface_max = int(df_temp_filtered[COL_SURFACE_GLA].max())
         else:
             current_surface_min = surface_min_all
             current_surface_max = surface_max_all
-        
+
         # S'assurer que les valeurs min/max actuelles sont dans les bornes globales
         current_surface_min = max(min(current_surface_min, surface_max_all), surface_min_all)
         current_surface_max = min(max(current_surface_max, surface_min_all), surface_max_all)
-        
+
         if current_surface_min > current_surface_max:
              current_surface_min = surface_min_all
              current_surface_max = surface_max_all
-        
+
         selected_surface_range = st.slider(
             "Surface GLA (m²)",
             min_value=surface_min_all,
@@ -652,16 +667,17 @@ def main():
             step=50,
             key=f"surface_filter_{st.session_state['reset_filters']}"
         )
-        
-        
+
+
         # 5. Filtre Loyer €/m²
         if not df_temp_filtered.empty and COL_LOYER_M2 in df_temp_filtered.columns:
-             if df_temp_filtered[COL_LOYER_M2].dropna().empty:
-                 current_loyer_min = loyer_min_all
-                 current_loyer_max = loyer_max_all
-             else:
-                current_loyer_min = int(df_temp_filtered[COL_LOYER_M2].min())
-                current_loyer_max = int(df_temp_filtered[COL_LOYER_M2].max())
+            valid_loyers = df_temp_filtered[COL_LOYER_M2].dropna()
+            if not valid_loyers.empty:
+                current_loyer_min = int(valid_loyers.min())
+                current_loyer_max = int(valid_loyers.max())
+            else:
+                current_loyer_min = loyer_min_all
+                current_loyer_max = loyer_max_all
         else:
             current_loyer_min = loyer_min_all
             current_loyer_max = loyer_max_all
@@ -689,7 +705,7 @@ def main():
 
         # 6. Filtres Checkbox
         # Extraction
-        extraction_opts = sorted(df[COL_EXTRACTION].dropna().unique().tolist())
+        extraction_opts = sorted(df[COL_EXTRACTION].astype(str).dropna().unique().tolist())
         selected_extraction = st.multiselect(
             "Extraction (Cheminée)",
             options=extraction_opts,
@@ -698,16 +714,16 @@ def main():
         )
 
         # Restauration
-        restau_opts = sorted(df[COL_RESTAURATION].dropna().unique().tolist())
+        restau_opts = sorted(df[COL_RESTAURATION].astype(str).dropna().unique().tolist())
         selected_restau = st.multiselect(
             "Restauration",
             options=restau_opts,
             default=[],
             key=f"restau_filter_{st.session_state['reset_filters']}"
         )
-        
+
         # Actif
-        actif_opts = sorted(df[COL_ACTIF].dropna().unique().tolist())
+        actif_opts = sorted(df[COL_ACTIF].astype(str).dropna().unique().tolist())
         selected_actif = st.multiselect(
             "Statut d'Actif",
             options=actif_opts,
