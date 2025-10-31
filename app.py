@@ -46,31 +46,34 @@ def load_data(file_path):
 data_df, error_message = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Définition de la Mise en Page (3 Colonnes) ---
-SIDEBAR_WIDTH = 2
-DETAILS_PANEL_WIDTH = 2
-col_left, col_map, col_right = st.columns([SIDEBAR_WIDTH, 6, DETAILS_PANEL_WIDTH]) 
+# Nouvelles proportions: 1 (Contrôles) / 4 (Carte) / 2 (Détails)
+COL_CONTROLS_WIDTH = 1
+COL_MAP_WIDTH = 4
+COL_DETAILS_WIDTH = 2
+col_left, col_map, col_right = st.columns([COL_CONTROLS_WIDTH, COL_MAP_WIDTH, COL_DETAILS_WIDTH]) 
 
 
-# --- 2. Panneau de Contrôle Gauche ---
+# --- 2. Panneau de Contrôle Gauche (Nettoyé) ---
 with col_left:
     st.header("⚙️ Contrôles")
     st.markdown("---")
-    st.write(f"Lots chargés: **{len(data_df)}**")
     
-    # --- PANNEAU DE DIAGNOSTIC ---
-    st.header("⚠️ Diagnostic Données")
-    if error_message:
-        st.error(error_message)
-    elif not data_df.empty:
-        st.caption("5 premières références :")
-        st.dataframe(data_df[[REF_COL]].head(), use_container_width=True)
+    # Affichage du nombre de lots et indication de statut
+    st.info(f"Lots chargés: **{len(data_df)}**")
+    
+    # Bouton pour masquer les détails
+    if st.session_state['selected_ref']:
+        if st.button("Masquer les détails", key="hide_left", use_container_width=True):
+            st.session_state['selected_ref'] = None
+            st.experimental_rerun()
     
     st.markdown("---")
     
-    if st.session_state['selected_ref']:
-        if st.button("Masquer les détails", key="hide_left"):
-            st.session_state['selected_ref'] = None
-            st.experimental_rerun()
+    # Option pour afficher les données brutes (si erreur)
+    if error_message:
+        st.error(error_message)
+    elif data_df.empty:
+        st.warning("Le DataFrame est vide.")
 
 
 # --- 3. Zone de la Carte ---
@@ -84,12 +87,11 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs (CircleMarker standard SANS POPUP NI TOOLTIP) ---
+        # --- Création des marqueurs (CircleMarker standard sans popup) ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
             
-            # Création d'un CircleMarker simple pour assurer la transmission du clic
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=10,
@@ -107,7 +109,6 @@ with col_map:
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
             
-            # Seulement si un nouveau point a été cliqué
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
@@ -119,7 +120,7 @@ with col_map:
                 st.session_state['selected_ref'] = new_ref
                  
     else:
-        st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Vérifiez si le fichier s'est chargé correctement.")
+        st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
 # --- 4. Panneau de Détails Droit (Volet rétractable) ---
@@ -132,7 +133,6 @@ with col_right:
     if selected_ref and selected_ref != 'None':
         selected_ref_clean = selected_ref.strip()
         
-        # Filtre sécurisé sur la colonne de référence nettoyée
         selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
         
         if len(selected_data_series) > 0:
@@ -145,8 +145,6 @@ with col_right:
                 display_title_ref = selected_ref
 
             st.subheader(f"Réf. : {display_title_ref}")
-            
-            # Affichage en utilisant des st.metric ou st.write pour les champs
             
             colonnes_a_afficher = [
                 ('Emplacement', selected_data.get('Emplacement', 'N/A')),
