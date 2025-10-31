@@ -21,16 +21,15 @@ st.set_page_config(
     layout="wide",
 )
 
-# 🚨 CHEMIN DU FICHIER 🚨
-# Le chemin pointe vers le fichier EXCEL (.xlsx) dans le sous-dossier 'data'
-DATA_FILE_PATH = "data/Liste des lots Version 2.xlsx"
-EXCEL_SHEET_NAME = "Tableau recherche" # Nom de la feuille de calcul à charger
-
 # Configuration des couleurs et dimensions
 LOGO_BLUE = "#05263d"
 COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
+
+# URL du logo (Utilisation d'une image placeholder pour l'exemple)
+# NOTE: Remplacer par l'URL réelle du logo SMBG si disponible
+LOGO_URL = "https://placehold.co/250x60/fff/05263d?text=LOGO+SMBG" 
 
 # Noms des colonnes pour les FILTRES et les COORDONNEES
 COL_REGION = "Région"
@@ -40,6 +39,14 @@ COL_REF = "Référence annonce"
 COL_LAT = "Latitude"
 COL_LON = "Longitude"
 COL_ADDR_FULL = "Adresse"
+
+# NOUVELLES COLONNES POUR LES FILTRES
+COL_TYPOLOGIE = "Typologie"
+COL_TYPE = "Type"
+COL_CESSION = "Cession / Droit au bail"
+COL_EXTRACTION = "Extraction"
+COL_RESTAURATION = "Restauration"
+
 
 # LISTE COMPLÈTE DES COLONNES À AFFICHER DE G À AH
 # Les colonnes sont affichées dans l'ordre de cette liste
@@ -74,6 +81,10 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
+# Fichier de données
+DATA_FILE_PATH = "data/Liste des lots Version 2.xlsx"
+EXCEL_SHEET_NAME = "Tableau recherche"
+
 
 # -------------------------------------------------
 # CHARGEMENT ET PREPARATION DES DONNEES
@@ -107,6 +118,14 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     df["_lat_plot"] = df[COL_LAT]
     df["_lon_plot"] = df[COL_LON]
 
+    # Remplacer NaN dans les colonnes de filtre spécifiques pour le fonctionnement des selectbox
+    df[COL_TYPOLOGIE] = df[COL_TYPOLOGIE].fillna('Non spécifié')
+    df[COL_TYPE] = df[COL_TYPE].fillna('Non spécifié')
+    df[COL_CESSION] = df[COL_CESSION].fillna('Non spécifié')
+    df[COL_EXTRACTION] = df[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+    df[COL_RESTAURATION] = df[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+
+
     return df
 
 # -------------------------------------------------
@@ -122,6 +141,7 @@ def get_global_css_style(css_file_path: str) -> str:
         return f"<style>{css_content}</style>"
     except FileNotFoundError:
         # En cas d'erreur, renvoie un style minimal
+        st.warning("Fichier style.css non trouvé. Le style de l'application sera minimal.")
         return "<style>/* Fichier style.css non trouvé. Styles par défaut appliqués. */</style>"
 
 
@@ -228,17 +248,21 @@ def main():
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
     # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
-    # CORRECTION : Remplacement de gap="20px" (non valide) par gap="medium"
     col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="medium")
 
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
     with col_left:
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
+        
+        # 0. Affichage du LOGO
+        st.image(LOGO_URL, use_column_width=True)
+
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
+        # --- FILTRES GÉOGRAPHIQUES (1, 2, 3) ---
+
         # 1. Filtre Région
-        # Utilise .dropna() pour exclure les valeurs manquantes
         regions = ['Toutes'] + sorted(df[COL_REGION].dropna().unique().tolist())
         selected_region = st.selectbox("Région", regions, key="region_filter")
 
@@ -262,17 +286,68 @@ def main():
         # Filtrage par Ville
         if selected_ville != 'Toutes':
             df_filtered = df_filtered[df_filtered[COL_VILLE] == selected_ville]
+            
+        # --- SÉPARATEUR ---
+        st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
+        
+        # --- NOUVEAUX FILTRES SPÉCIFIQUES (4, 5, 6) ---
 
-        # Affichage du nombre de lots trouvés
-        st.markdown(f"**{len(df_filtered)}** lots trouvés.", unsafe_allow_html=True)
+        # 4. Filtre Typologie
+        typologies = ['Toutes'] + sorted(df_filtered[COL_TYPOLOGIE].unique().tolist())
+        selected_typologie = st.selectbox("Typologie", typologies, key="typologie_filter")
+        
+        if selected_typologie != 'Toutes':
+            df_filtered = df_filtered[df_filtered[COL_TYPOLOGIE] == selected_typologie]
+
+        # 5. Filtre Type
+        types = ['Tous'] + sorted(df_filtered[COL_TYPE].unique().tolist())
+        selected_type = st.selectbox("Type d'Opération", types, key="type_filter")
+        
+        if selected_type != 'Tous':
+            df_filtered = df_filtered[df_filtered[COL_TYPE] == selected_type]
+
+        # 6. Filtre Cession / Droit au bail
+        cessions = ['Toutes'] + sorted(df_filtered[COL_CESSION].unique().tolist())
+        selected_cession = st.selectbox("Cession / Droit au bail", cessions, key="cession_filter")
+        
+        if selected_cession != 'Toutes':
+            df_filtered = df_filtered[df_filtered[COL_CESSION] == selected_cession]
+            
+        # --- SÉPARATEUR ---
+        st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
+
+        # --- FILTRES BINAIRES (7, 8) ---
+        st.markdown("<p style='font-weight: bold; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
+        
+        # 7. Filtre Extraction
+        filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
+        if filter_extraction:
+            # Filtre pour inclure uniquement 'Oui' ou 'Non spécifié' pour être tolérant
+            df_filtered = df_filtered[df_filtered[COL_EXTRACTION].isin(['Oui', 'Non spécifié'])]
+
+
+        # 8. Filtre Restauration
+        filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
+        if filter_restauration:
+            df_filtered = df_filtered[df_filtered[COL_RESTAURATION].isin(['Oui', 'Non spécifié'])]
+
+
+        # --- AFFICHAGE DU RÉSULTAT ET BOUTON ---
+        st.markdown(f"<p style='margin-top: 20px;'>**{len(df_filtered)}** lots trouvés.</p>", unsafe_allow_html=True)
 
         # Bouton de Réinitialisation 
-        if st.button("Réinitialiser la sélection", key="reset_button"):
+        if st.button("Réinitialiser les filtres", key="reset_button"):
             st.session_state["selected_ref"] = "NO_SELECTION"
-            # Réinitialiser les selectbox pour une cohérence totale
+            # Réinitialiser les selectbox
             st.session_state.region_filter = 'Toutes'
             st.session_state.departement_filter = 'Tous'
             st.session_state.ville_filter = 'Toutes'
+            st.session_state.typologie_filter = 'Toutes'
+            st.session_state.type_filter = 'Tous'
+            st.session_state.cession_filter = 'Toutes'
+            # Réinitialiser les checkbox
+            st.session_state.extraction_filter = False
+            st.session_state.restauration_filter = False
             st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True) # fin .left-panel
