@@ -4,7 +4,7 @@ import folium
 from streamlit_folium import st_folium
 import numpy as np
 # Importation pour l'icône de texte sur le marqueur
-from folium.features import DivIcon 
+from folium.features import DivIcon # ⚠️ Importation ajoutée
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -45,12 +45,6 @@ CUSTOM_CSS = """
 /* 3. Classe pour l'état OUVERT (visible) */
 .details-panel-open {
     transform: translateX(0);
-}
-
-/* 🟢 RÉTABLI : Force tous les marqueurs Leaflet (Pin) à laisser passer les événements de clic. */
-/* Ceci est CRITIQUE pour que la carte capture les coordonnées même si le clic est visuellement sur le pin. */
-.leaflet-marker-icon {
-    pointer-events: none !important; 
 }
 
 /* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
@@ -200,38 +194,40 @@ if not data_df.empty:
         except ValueError:
             clean_ref = ref_annonce
 
-        # 1. Ajout du Pin Classique (Visuel)
-        # L'ID du marqueur est ignoré ici car le CSS global rend le Pin non cliquable
-        folium.Marker(
+        # 1. Ajout du Marqueur Circulaire (Visuel)
+        folium.CircleMarker(
             location=[lat, lon],
-            icon=folium.Icon(color='blue', icon='tag', prefix='fa') 
+            radius=10,
+            color="#0072B2",
+            fill=True,
+            fill_color="#0072B2",
+            fill_opacity=0.8,
+            # Le CircleMarker est généralement mieux pour laisser passer les événements
         ).add_to(m)
 
-        # 2. Ajout du numéro (DivIcon)
+        # 2. Ajout du Numéro de Référence (Texte)
         text_icon = DivIcon(
-            icon_size=(30, 20), 
-            icon_anchor=(0, 0), # Ancrage de base
+            icon_size=(20, 20),
+            icon_anchor=(10, 10), # Ancrage au centre du DivIcon (20x20)
             html=f"""
                 <div style="
                     font-size: 10px;
                     color: white; 
                     font-weight: bold;
                     text-align: center;
-                    width: 30px; 
-                    line-height: 12px;
-                    /* Décalage pour centrer le texte sur l'icône standard du Pin Leaflet */
-                    transform: translate(-15px, -35px); 
-                    /* Le clic doit atteindre la carte, pas le texte */
+                    width: 20px; 
+                    line-height: 20px;
+                    /* Rendre le texte non cliquable pour que le clic atteigne la carte */
                     pointer-events: none; 
                 ">{clean_ref}</div>
             """
         )
 
+        # On utilise folium.Marker pour le DivIcon (qui est traité comme un marqueur personnalisé)
         folium.Marker(
             location=[lat, lon],
             icon=text_icon
         ).add_to(m)
-
 
     # Affichage et capture des événements de clic
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
@@ -246,8 +242,8 @@ if not data_df.empty:
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # Seuil très tolérant pour les clics dézoomés (0.05 pour plus de marge qu'un petit cercle)
-        DISTANCE_THRESHOLD = 0.05 
+        # 🟢 NOUVEAU SEUIL PLUS TOLÉRANT : 0.01 (pour rendre le clic plus facile/intuitif sur le cercle)
+        DISTANCE_THRESHOLD = 0.01 
 
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
@@ -363,7 +359,7 @@ else:
     # Message par défaut quand aucun lot n'est sélectionné
     html_content += """
     <p style="font-weight: bold; margin-top: 10px; color: #0072B2;">
-        Cliquez sur un marqueur (pin) sur la carte pour afficher ses détails ici.
+        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.
     </p>
     """
 
