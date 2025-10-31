@@ -15,10 +15,11 @@ if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
 # --- Chemin d'accès du fichier (CONFIRMÉ ET FIXÉ) ---
-EXCEL_FILE_PATH = 'data/Liste des Lots.xlsx' 
+# UTILISATION DE LA CASSE EXACTE: "Liste des lots.xlsx"
+EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (Simplifiée pour Excel) ---
+# --- Fonction de Chargement des Données ---
 @st.cache_data
 def load_data(file_path):
     try:
@@ -42,7 +43,7 @@ def load_data(file_path):
         return df
     except Exception as e:
         # Message d'erreur clair si le fichier n'est pas trouvé ou illisible
-        st.error(f"Erreur de chargement du fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
+        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -131,7 +132,7 @@ with col_map:
                     st.session_state['selected_ref'] = new_ref
                  
     else:
-        st.info("Le DataFrame est vide ou les coordonnées sont manquantes.")
+        st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Vérifiez si le fichier s'est chargé correctement.")
 
 
 # --- 4. Panneau de Détails Droit (Colonnes G à AH) ---
