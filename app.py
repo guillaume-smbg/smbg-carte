@@ -17,7 +17,8 @@
             overflow: hidden;
         }
         .custom-marker {
-            box-shadow: 0 4px 8px #0000004d;
+            /* CORRECTION: Utilisation de rgba() au lieu de l'hexadécimal avec transparence (#0000004d) pour éviter l'erreur "invalid decimal literal" dans l'environnement Python */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
             cursor: pointer;
         }
     </style>
@@ -113,11 +114,11 @@
         ];
         
         let map;
-        let dataMarkers = []; // Pour stocker les marqueurs Leaflet
-        let originalData = []; // Pour stocker les données après parsing
-        let filteredData = []; // Pour stocker les données filtrées
-        let selectedMarker = null; // Marqueur actuellement sélectionné
-        let currentFilter = 'all'; // Filtre de typologie actuel
+        let dataMarkers = []; 
+        let originalData = []; 
+        let filteredData = []; 
+        let selectedMarker = null; 
+        let currentFilter = 'all'; 
 
         // Initialisation de la carte (Leaflet)
         function initMap() {
