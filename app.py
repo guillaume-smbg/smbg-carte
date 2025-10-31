@@ -4,7 +4,6 @@ import folium
 from folium.features import DivIcon
 from streamlit_folium import st_folium
 import numpy as np
-import io
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive (Panneaux Fixes)") 
@@ -19,7 +18,7 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (Nettoyage Maximal et Réactivation du Cache) ---
+# --- Fonction de Chargement des Données (Nettoyage Maximal et Cache Réactivé) ---
 @st.cache_data
 def load_data(file_path):
     try:
@@ -39,7 +38,7 @@ def load_data(file_path):
         # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
         df[REF_COL] = df[REF_COL].astype(str).str.strip()
         # Supprime tout '.0' ou partie décimale (ex: "1.0" -> "1")
-        df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0])
+        df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0] if isinstance(x, str) else str(x).split('.')[0])
         # Force le format 5 chiffres avec des zéros en tête (ex: "1" -> "00001")
         df[REF_COL] = df[REF_COL].str.zfill(5) 
         
@@ -70,11 +69,10 @@ with col_left:
         st.error(error_message)
     elif not data_df.empty:
         st.caption("5 premières lignes lues par Pandas :")
-        # Affichage du diagnostic (comme demandé)
         st.dataframe(data_df.head(), use_container_width=True)
         ref_dtype = data_df[REF_COL].dtype
         st.caption(f"Type de '{REF_COL}': **{ref_dtype}**")
-        st.info("Tout semble correct dans le chargement des données.")
+        st.info("Le chargement des données est vérifié et semble correct.")
     # --- FIN DIAGNOSTIC ---
     
     st.markdown("---")
@@ -138,7 +136,7 @@ with col_map:
         # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- Logique de détection de clic (AMÉLIORÉE) ---
+        # --- Logique de détection de clic ---
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
@@ -146,16 +144,14 @@ with col_map:
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # RECHERCHE DU LOT LE PLUS PROCHE :
-                # Calcul de la distance euclidienne carrée (plus rapide)
+                # Recherche du lot le plus proche
                 data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
-                # Seuil de tolérance élargi à 0.0005 pour les erreurs de clic ou de précision
+                # Seuil de tolérance
                 if closest_row['distance_sq'] < 0.0005**2: 
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
-                # IMPORTANT : Ajout d'une gestion d'erreur visuelle si le clic est trop loin
                 else:
                     st.session_state['selected_ref'] = None
                     st.session_state['no_ref_found'] = True
@@ -173,8 +169,9 @@ with col_right:
     
     if selected_ref:
         # Recherche du lot sélectionné
-        # Utilisation de isin() pour une recherche par correspondance de chaîne fiable
-        selected_data_series = data_df[data_df[REF_COL].isin([selected_ref])]
+        # FIX ULTIME : Nettoyer la colonne du DF au moment du filtre, juste au cas où.
+        # Ceci est la ligne la plus critique pour la correspondance :
+        selected_data_series = data_df[data_df[REF_COL].str.strip().isin([selected_ref.strip()])]
         
         if len(selected_data_series) > 0:
             selected_data = selected_data_series.iloc[0].copy()
@@ -200,7 +197,7 @@ with col_right:
             
             # --- Lien Google Maps (Bouton d'Action) ---
             lien_maps = selected_data.get('Lien Google Maps', None)
-            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower() not in ('nan', 'n/a', 'none', ''):
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
                 st.markdown(
                     f'<a href="{lien_maps}" target="_blank">'
                     f'<button style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; width: 100%;">'
@@ -216,6 +213,7 @@ with col_right:
             # --- Informations Détaillées (I à AH) ---
             st.markdown("##### Informations Détaillées")
             
+            # Liste des colonnes à afficher (avec leurs unités)
             colonnes_a_afficher = [
                 ('Emplacement', selected_data.get('Emplacement', 'N/A')),
                 ('Typologie', selected_data.get('Typologie', 'N/A')),
@@ -248,6 +246,7 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 valeur_str = str(valeur).strip()
+                # N'affiche pas les champs si la valeur est vide, 'nan', 'N/A' ou juste l'unité
                 if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None'): 
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
@@ -258,8 +257,7 @@ with col_right:
             st.markdown("---")
             
         else:
-            # Cette erreur ne devrait plus apparaître si le clic fonctionne
-            st.error(f"❌ La référence **'{selected_ref}'** a été détectée mais n'a pas pu être trouvée dans le DataFrame (Incohérence des données).")
+            st.error(f"❌ La référence **'{selected_ref}'** a été capturée mais n'a pas été trouvée dans le DataFrame (Erreur de correspondance de chaîne).")
 
     else:
         # Affichage d'une erreur si le clic était trop loin
