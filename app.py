@@ -27,9 +27,9 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-# URL du logo (Utilisation du fichier uploadé par l'utilisateur)
-# J'utilise le dernier logo que vous avez téléversé
-LOGO_URL = "image_7f28be.png" 
+# CORRECTION DU PROBLÈME DE CHARGEMENT D'IMAGE
+# Mise à jour pour utiliser le chemin local du logo fourni par l'utilisateur.
+LOGO_URL = "assets/Logo bleu crop.png" 
 
 # Noms des colonnes pour les FILTRES et les COORDONNEES
 COL_REGION = "Région"
@@ -81,8 +81,7 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# --- CORRECTION CLÉ ICI : Utilisation des ESPACES dans le nom du fichier ---
-# Le chemin dans le dépôt est "data/Liste des lots.xlsx"
+# Chemin du fichier de données (Corrigé lors de la dernière étape)
 DATA_FILE_PATH = "data/Liste des lots.xlsx" 
 DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée pour les données
 
@@ -438,7 +437,6 @@ def main():
         st.session_state["selected_ref"] = "NO_SELECTION"
 
     # Chargement des données
-    # --- CHANGEMENT CLÉ ICI : Appel de la fonction de chargement ---
     df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME)
     if df.empty:
         return
@@ -454,7 +452,8 @@ def main():
     with col_left:
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
         
-        # 0. Affichage du LOGO (Utilisation du fichier uploadé)
+        # 0. Affichage du LOGO (Utilisation du chemin local corrigé)
+        # S'assurer que le chemin d'accès au fichier local est correct.
         st.image(LOGO_URL, use_column_width=True)
 
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
@@ -468,6 +467,7 @@ def main():
         # Filtrage par Région
         df_filtered = df.copy()
         if selected_region != 'Toutes':
+            # Assure la comparaison même si 'Non spécifié' est inclus
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
         # 2. Filtre Département (dépend de la région sélectionnée)
@@ -557,8 +557,16 @@ def main():
 
         # Calculer le centre de la carte et le zoom
         if not df_filtered.empty:
-            center_lat = df_filtered["_lat_plot"].mean()
-            center_lon = df_filtered["_lon_plot"].mean()
+            # S'assurer qu'il y a des données valides pour le calcul de la moyenne
+            valid_lat = df_filtered["_lat_plot"].dropna()
+            valid_lon = df_filtered["_lon_plot"].dropna()
+            
+            if not valid_lat.empty and not valid_lon.empty:
+                center_lat = valid_lat.mean()
+                center_lon = valid_lon.mean()
+            else:
+                 # Si les données filtrées sont vides de coordonnées, revenir au centre de la France
+                center_lat, center_lon = 46.603354, 1.888334 
         else:
             center_lat, center_lon = 46.603354, 1.888334 # Centre de la France (Par défaut)
         
@@ -582,6 +590,10 @@ def main():
         
         # Ajout des marqueurs à la carte
         for index, r in df_filtered.iterrows():
+            # Vérifier que les coordonnées sont bien des nombres avant de tenter le tracé
+            if pd.isna(r["_lat_plot"]) or pd.isna(r["_lon_plot"]):
+                continue
+
             # Conversion en float nécessaire pour folium
             lat = float(r["_lat_plot"]) 
             lon = float(r["_lon_plot"])
