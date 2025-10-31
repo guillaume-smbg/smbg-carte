@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import folium
-from folium.features import DivIcon
 from streamlit_folium import st_folium
 import numpy as np
 
@@ -45,31 +44,38 @@ def load_data(file_path):
 # --- Chargement des données ---
 data_df, error_message = load_data(EXCEL_FILE_PATH)
 
-# --- 1. Définition de la Mise en Page (3 Colonnes) ---
-# Nouvelles proportions: 1 (Contrôles) / 4 (Carte) / 2 (Détails)
-COL_CONTROLS_WIDTH = 1
-COL_MAP_WIDTH = 4
-COL_DETAILS_WIDTH = 2
-col_left, col_map, col_right = st.columns([COL_CONTROLS_WIDTH, COL_MAP_WIDTH, COL_DETAILS_WIDTH]) 
+# --- 1. Définition de la Mise en Page (Colonnes conditionnelles) ---
 
+# Vérifie si le panneau de détails doit être affiché
+selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None
+show_details = selected_ref_clean and selected_ref_clean != 'None' and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
 
-# --- 2. Panneau de Contrôle Gauche (Nettoyé) ---
+if show_details:
+    # 3 colonnes: Contrôles (1), Carte (5), Détails (2)
+    # La carte est plus étroite mais les détails sont visibles
+    col_left, col_map, col_right = st.columns([1, 5, 2])
+else:
+    # 2 colonnes: Contrôles (1), Carte (7)
+    # La carte prend la place du panneau de détails (7/8 de l'espace restant)
+    col_left, col_map = st.columns([1, 7])
+    col_right = None # col_right est désactivé
+
+# --- 2. Panneau de Contrôle Gauche ---
 with col_left:
     st.header("⚙️ Contrôles")
     st.markdown("---")
     
-    # Affichage du nombre de lots et indication de statut
     st.info(f"Lots chargés: **{len(data_df)}**")
     
-    # Bouton pour masquer les détails
-    if st.session_state['selected_ref']:
+    # Bouton pour masquer les détails (Visible uniquement si les détails sont affichés)
+    if show_details:
         if st.button("Masquer les détails", key="hide_left", use_container_width=True):
             st.session_state['selected_ref'] = None
             st.experimental_rerun()
     
     st.markdown("---")
     
-    # Option pour afficher les données brutes (si erreur)
+    # Gestion des erreurs de chargement
     if error_message:
         st.error(error_message)
     elif data_df.empty:
@@ -87,11 +93,12 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs (CircleMarker standard sans popup) ---
+        # --- Création des marqueurs ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
             
+            # Utilisation de CircleMarker sans popup/tooltip pour un clic fiable
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=10,
@@ -109,6 +116,7 @@ with col_map:
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
             
+            # Seulement si un nouveau point a été cliqué
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
@@ -118,21 +126,22 @@ with col_map:
                 
                 new_ref = closest_row[REF_COL]
                 st.session_state['selected_ref'] = new_ref
+                
+                # Force le rafraîchissement si une nouvelle référence est sélectionnée
+                # pour passer de 2 à 3 colonnes immédiatement.
+                st.experimental_rerun()
                  
     else:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
-# --- 4. Panneau de Détails Droit (Volet rétractable) ---
-with col_right:
-    st.header("🔍 Détails du Lot")
-    st.markdown("---") 
+# --- 4. Panneau de Détails Droit (Conditionnel) ---
+if col_right: # Exécuté uniquement si show_details est True
+    with col_right:
+        st.header("🔍 Détails du Lot")
+        st.markdown("---") 
 
-    selected_ref = st.session_state['selected_ref']
-
-    if selected_ref and selected_ref != 'None':
-        selected_ref_clean = selected_ref.strip()
-        
+        # Puisque show_details est True, selected_ref est valide.
         selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
         
         if len(selected_data_series) > 0:
@@ -140,9 +149,9 @@ with col_right:
             selected_data = selected_data_series.iloc[0].copy()
             
             try:
-                display_title_ref = str(int(selected_ref))
+                display_title_ref = str(int(selected_ref_clean))
             except ValueError:
-                display_title_ref = selected_ref
+                display_title_ref = selected_ref_clean
 
             st.subheader(f"Réf. : {display_title_ref}")
             
@@ -157,7 +166,6 @@ with col_right:
                 ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
             ]
             
-            # Utilisation d'un conteneur rétractable
             with st.expander("Informations clés", expanded=True):
                 for nom, valeur in colonnes_a_afficher:
                     valeur_str = str(valeur).strip()
@@ -186,7 +194,7 @@ with col_right:
                     unsafe_allow_html=True
                 )
 
-            # --- Détails supplémentaires dans un autre expander ---
+            # --- Détails supplémentaires ---
             with st.expander("Détails supplémentaires"):
                 commentaires = selected_data.get('Commentaires', 'N/A')
                 if str(commentaires).strip() not in ('N/A', 'nan', ''):
@@ -201,7 +209,10 @@ with col_right:
 
 
         else:
-            st.error("❌ Erreur : La référence capturée n'a pas été trouvée dans le DataFrame.")
+            st.error("❌ Erreur : La référence capturée n'a pas été trouvée.")
             
-    else:
-        st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails ici.")
+else:
+    # Message dans l'espace Map si aucun détail n'est affiché
+    with col_map:
+        if not show_details and not data_df.empty:
+            st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
