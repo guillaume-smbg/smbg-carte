@@ -1,172 +1,277 @@
-/* --- VARIABLES ET RESET --- */
+/* -------------------------------------------------
+   CONSTANTES DE COULEURS
+   ------------------------------------------------- */
 :root {
-    --logo-blue: #05263d; /* Correspondant à LOGO_BLUE dans app.py */
-    --copper: #b87333; /* Correspondant à COPPER dans app.py */
-    --light-gray: #f4f7f9;
-    --border-radius: 8px;
+    --logo-blue: #05263d; /* Bleu foncé principal */
+    --copper: #b87333;   /* Cuivre/Marron pour l'accentuation */
+    --left-panel-width: 275px;
+    --right-panel-width: 275px;
 }
 
-/* Police et couleur globale */
+/* -------------------------------------------------
+   RÉINITIALISATION & POLICE
+   ------------------------------------------------- */
+
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
-    /* Utilisation de Futura, conformément à votre charte graphique */
-    font-family: 'Futura', 'Trebuchet MS', 'Arial', sans-serif !important; 
-    color: #333;
-    font-size: 14px;
-    line-height: 1.6;
+    font-family: 'Futura', sans-serif !important;
+    color: #000;
+    font-size: 13px;
+    line-height: 1.4;
 }
 
-/* Titre principal */
-h1 {
-    color: var(--logo-blue);
-    border-bottom: 2px solid var(--copper);
-    padding-bottom: 8px;
-    margin-bottom: 20px;
-}
+/* -------------------------------------------------
+   PANNEAU GAUCHE (FILTRES)
+   ------------------------------------------------- */
 
-h3 {
-    color: #fff; /* Couleur par défaut pour les h3 dans le panneau de gauche */
-    border-bottom: 1px solid var(--copper);
-    padding-bottom: 5px;
-    margin-bottom: 15px;
-    font-weight: 600; /* Futura est souvent épaisse */
-}
-
-/* Correction du padding par défaut de Streamlit pour que le layout "wide" soit propre */
-div.block-container:first-of-type {
-    padding-top: 20px;
-    padding-left: 1rem;
-    padding-right: 1rem;
-}
-
-/* ===== PANNEAU GAUCHE (filtres) ===== */
 .left-panel {
     background-color: var(--logo-blue);
+    color: #fff !important;
     padding: 16px;
-    border-radius: var(--border-radius);
-    min-height: 800px; 
-    box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    min-width: var(--left-panel-width);
+    max-width: var(--left-panel-width);
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    z-index: 1000;
 }
 
-.left-panel * {
-    color: #fff !important; /* Force le texte des widgets en blanc */
+.left-panel::-webkit-scrollbar {
+    display: none;
 }
 
-/* Style spécifique pour le nombre de lots trouvés */
-.left-panel strong {
+/* Rendre le fond du corps des filtres transparent pour laisser voir la couleur du panneau */
+.left-panel .st-emotion-cache-1r7r3z, 
+.left-panel .st-emotion-cache-1c7v0s {
+    background-color: transparent;
+}
+
+/* Couleur des labels dans le panneau de gauche */
+.left-panel label {
+    color: #fff !important;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    display: block;
+}
+
+/* Couleur et style des titres de section */
+.left-panel .stMarkdown h3 {
     color: var(--copper) !important;
     font-size: 16px;
-}
-
-/* Style des selectbox dans le panneau de gauche */
-.stSelectbox label {
-    font-weight: bold;
-    margin-top: 10px;
-    margin-bottom: 5px;
-}
-
-
-/* ===== PANNEAU DROIT (détails) ===== */
-.right-panel {
-    background-color: var(--light-gray);
-    padding: 16px;
-    border-radius: var(--border-radius);
-    box-shadow: -4px 4px 10px rgba(0, 0, 0, 0.1);
-    min-height: 800px;
-}
-
-/* Titre des détails */
-.right-panel h3 {
-    color: var(--logo-blue);
-    border-bottom: 2px solid var(--copper);
-    margin-top: 0;
-}
-
-.detail-address {
-    font-size: 12px;
-    color: #666;
-    margin-bottom: 15px;
-    font-style: italic;
-}
-
-.detail-line {
-    display: flex;
-    justify-content: space-between;
-    padding: 4px 0;
-    border-bottom: 1px dotted #ddd;
-}
-
-.detail-label {
-    font-weight: 600;
-    color: var(--logo-blue);
-    flex-basis: 50%;
-}
-
-.detail-value {
-    text-align: right;
-    flex-basis: 50%;
-    color: #333;
-}
-
-.detail-comments {
-    background-color: #fff;
-    border: 1px solid #ddd;
-    padding: 10px;
-    border-radius: var(--border-radius);
-    margin-top: 10px;
-    font-style: italic;
-    white-space: pre-wrap;
-}
-
-.no-selection-msg {
-    text-align: center;
-    color: #666;
-    margin-top: 50px;
-    padding: 20px;
-    border: 1px dashed var(--copper);
-    border-radius: var(--border-radius);
-    background-color: #fff;
-}
-
-
-/* ===== CARTE (Center Panel) ===== */
-.map-wrapper {
-    padding: 0;
-    margin: 0;
-    border-radius: var(--border-radius);
-    overflow: hidden; 
-}
-
-/* Style des marqueurs Folium (Référence annonce) */
-.custom-marker {
-    background-color: var(--logo-blue);
-    color: #fff;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: bold;
-    font-size: 11px;
-    border: 1px solid var(--copper);
-    box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
-    transform: translate(-50%, -100%); /* Centre l'icône au point de coordonnée */
-    cursor: pointer;
-}
-
-/* Style du bouton Google Maps */
-.stButton button {
-    background-color: var(--copper) !important;
-    border-color: var(--copper) !important;
-    color: #fff !important;
-    transition: background-color 0.2s ease;
-    width: 100%;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--copper);
+    padding-bottom: 5px;
+    margin-top: 15px;
     margin-bottom: 10px;
 }
 
-.stButton button:hover {
-    background-color: #a3652c !important; /* Couleur légèrement plus foncée au survol */
-    border-color: #a3652c !important;
+/* Message de compte de résultats injecté via JS */
+#result-count-message {
+    text-align: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+    margin-top: 10px;
 }
 
-/* Correction de la couleur du texte dans la barre d'outils Folium */
-.leaflet-container .leaflet-control-zoom,
-.leaflet-container .leaflet-control-scale {
-    color: var(--logo-blue) !important; 
+/* Widgets (slider, multiselect) */
+.left-panel .stSlider > div:first-child {
+    background-color: #333333;
+    border-radius: 8px;
+}
+.left-panel .stSlider .st-emotion-cache-1r6p3m5 {
+    background-color: var(--copper);
+}
+
+/* Boutons de réinitialisation */
+.left-panel .stButton button {
+    background-color: var(--copper);
+    color: #fff !important;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-weight: bold;
+    transition: background-color 0.3s;
+    width: 100%;
+    margin-top: 15px;
+}
+.left-panel .stButton button:hover {
+    background-color: #e09849;
+}
+
+/* Style pour les Multiselects */
+.left-panel .stMultiSelect div[data-baseweb="select"] {
+    background-color: #fff;
+    border-radius: 8px;
+    color: #000;
+}
+.left-panel .stMultiSelect div[data-baseweb="select"] input {
+    color: #000;
+}
+.left-panel .stMultiSelect [data-baseweb="tag"] {
+    background-color: var(--copper);
+    color: #fff;
+}
+
+/* -------------------------------------------------
+   CORPS PRINCIPAL & CARTE
+   ------------------------------------------------- */
+
+.main-content-wrapper {
+    margin-left: var(--left-panel-width);
+    padding: 16px;
+    display: flex;
+    gap: 16px;
+}
+
+.map-wrapper {
+    flex-grow: 1;
+    min-height: 800px;
+}
+
+/* CARTE FOLIUM (Marker) */
+.map-wrapper .streamlit-folium {
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Style des marqueurs personnalisés (les numéros de référence sur la carte) */
+.map-wrapper .folium-div-icon {
+    background-color: var(--logo-blue) !important;
+    color: white !important;
+    border-radius: 50% !important;
+    width: 28px !important;
+    height: 28px !important;
+    line-height: 28px !important;
+    text-align: center !important;
+    font-size: 11px !important;
+    font-weight: bold !important;
+    border: 2px solid var(--copper) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+/* Style pour le marqueur cliqué/sélectionné */
+.map-wrapper .folium-div-icon.selected-marker {
+    background-color: var(--copper) !important;
+    border: 2px solid var(--logo-blue) !important;
+    transform: scale(1.2);
+    width: 32px !important;
+    height: 32px !important;
+    line-height: 32px !important;
+    font-size: 13px !important;
+}
+
+/* -------------------------------------------------
+   PANNEAU DROIT (DÉTAILS)
+   ------------------------------------------------- */
+
+.right-panel {
+    min-width: var(--right-panel-width);
+    max-width: var(--right-panel-width);
+    background-color: #f7f7f7;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.right-panel h4 {
+    color: var(--logo-blue);
+    font-size: 16px;
+    font-weight: bold;
+    margin-top: 0;
+    margin-bottom: 10px;
+    border-bottom: 2px solid var(--copper);
+    padding-bottom: 5px;
+}
+
+/* Style des lignes de détail */
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed #ddd;
+    font-size: 14px;
+}
+.detail-label {
+    font-weight: bold;
+    color: #444;
+}
+.detail-value {
+    color: #111;
+    text-align: right;
+}
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+/* Mise en forme de l'adresse et de la ville */
+.addr-line {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+.city-line {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--logo-blue);
+    margin-bottom: 10px;
+}
+h3 span {
+    font-size: inherit;
+}
+
+/* Boutons dans le panneau de droite */
+.right-panel .stButton button {
+    background-color: var(--logo-blue);
+    color: #fff !important;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-weight: bold;
+    transition: background-color 0.3s;
+    width: 100%;
+    margin-top: 10px;
+}
+.right-panel .stButton button:hover {
+    background-color: var(--copper);
+}
+
+/* -------------------------------------------------
+   MESSAGES D'ALERTE (Améliorations suite aux commentaires)
+   ------------------------------------------------- */
+
+/* Alerte d'absence de sélection (pour panneau de droite) */
+.no-selection-message {
+    background-color: #fff3cd; /* Jaune clair */
+    color: #856404;
+    border: 1px solid #ffeeba;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+    text-align: center;
+    font-weight: bold;
+}
+
+/* Alerte d'absence de résultats (pour la carte) */
+.no-results-message {
+    background-color: #f8d7da; /* Rouge clair */
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+    text-align: center;
+    font-weight: bold;
 }
