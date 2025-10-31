@@ -29,7 +29,7 @@ RIGHT_PANEL_WIDTH_PX = 275
 # CORRECTION DÉFINITIVE DU CHEMIN ET DU NOM DU FICHIER EXCEL
 # Chemin d'accès au fichier Excel tel que défini par l'utilisateur
 DEFAULT_LOCAL_PATH = "data/Liste des lots.xlsx"
-# IMPORTANT: Spécifiez le nom de la feuille à lire (à ajuster si différent)
+# IMPORTANT: Spécifiez le nom de la feuille à lire
 EXCEL_SHEET_NAME = "Tableau recherche"
 
 
