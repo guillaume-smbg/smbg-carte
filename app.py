@@ -4,6 +4,7 @@ import folium
 from folium.features import DivIcon
 from streamlit_folium import st_folium
 import numpy as np
+import io
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive (Panneaux Fixes)") 
@@ -18,28 +19,18 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (Diagnostic et Nettoyage Maximal) ---
-# NOTE: Le cache est désactivé pour forcer une nouvelle lecture propre.
+# --- Fonction de Chargement des Données (Nettoyage Maximal et Réactivation du Cache) ---
+@st.cache_data
 def load_data(file_path):
     try:
-        # Tente de lire la feuille 'Tableau recherche' en premier, sinon la première feuille.
-        try:
-             df = pd.read_excel(file_path, sheet_name='Tableau recherche', dtype={REF_COL: str})
-        except ValueError:
-             # Si la feuille n'est pas trouvée, lit la première feuille par défaut
-             df = pd.read_excel(file_path, dtype={REF_COL: str})
+        # Lecture du fichier en forçant la colonne REF_COL en chaîne de caractères
+        df = pd.read_excel(file_path, dtype={REF_COL: str})
         
         # Nettoyage des noms de colonnes
         df.columns = df.columns.str.strip() 
         
-        # VÉRIFICATION CRITIQUE
-        if REF_COL not in df.columns:
-             st.error(f"Colonne de référence ('{REF_COL}') introuvable. Colonnes trouvées : {list(df.columns)}")
-             return pd.DataFrame()
-            
-        if 'Latitude' not in df.columns or 'Longitude' not in df.columns:
-             st.error(f"Colonnes de coordonnées (Latitude ou Longitude) introuvables. Vérifiez les en-têtes exacts.")
-             return pd.DataFrame()
+        if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
+             return pd.DataFrame(), f"Colonnes essentielles manquantes. Colonnes trouvées : {list(df.columns)}"
             
         # Conversion des coordonnées
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
@@ -53,13 +44,12 @@ def load_data(file_path):
         df[REF_COL] = df[REF_COL].str.zfill(5) 
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
-        return df
+        return df, None
     except Exception as e:
-        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Détails : {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), f"❌ Erreur critique lors du chargement: {e}"
 
 # --- Chargement des données ---
-data_df = load_data(EXCEL_FILE_PATH)
+data_df, error_message = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Définition de la Mise en Page (3 Colonnes Fixes) ---
 SIDEBAR_WIDTH = 2
@@ -76,15 +66,15 @@ with col_left:
     
     # --- PANNEAU DE DIAGNOSTIC ---
     st.header("⚠️ Diagnostic")
-    if not data_df.empty:
+    if error_message:
+        st.error(error_message)
+    elif not data_df.empty:
         st.caption("5 premières lignes lues par Pandas :")
+        # Affichage du diagnostic (comme demandé)
         st.dataframe(data_df.head(), use_container_width=True)
-        # Affichage des types pour vérifier le format de la colonne de référence
         ref_dtype = data_df[REF_COL].dtype
         st.caption(f"Type de '{REF_COL}': **{ref_dtype}**")
-        st.info("La colonne de référence doit être affichée avec 5 chiffres (ex: '00001').")
-    else:
-        st.warning("Échec du chargement du DataFrame. Vérifiez le chemin du fichier.")
+        st.info("Tout semble correct dans le chargement des données.")
     # --- FIN DIAGNOSTIC ---
     
     st.markdown("---")
@@ -114,13 +104,12 @@ with col_map:
             reference = row.get(REF_COL, 'N/A')
             
             # LOGIQUE POUR L'AFFICHAGE DU PIN : Supprimer les zéros en tête
+            display_ref = reference
             if reference != 'N/A' and reference.isdigit():
                 try:
                     display_ref = str(int(reference)) 
                 except ValueError:
-                    display_ref = reference
-            else:
-                display_ref = reference
+                    pass 
             
             html = f"""
                 <div id='lot-{reference}' style='
@@ -149,7 +138,7 @@ with col_map:
         # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- Logique de détection de clic ---
+        # --- Logique de détection de clic (AMÉLIORÉE) ---
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
@@ -157,13 +146,19 @@ with col_map:
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # Recherche du lot le plus proche
-                data_df['distance'] = np.sqrt((data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2)
-                closest_row = data_df.loc[data_df['distance'].idxmin()]
+                # RECHERCHE DU LOT LE PLUS PROCHE :
+                # Calcul de la distance euclidienne carrée (plus rapide)
+                data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
+                closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
-                if closest_row['distance'] < 0.0001: 
+                # Seuil de tolérance élargi à 0.0005 pour les erreurs de clic ou de précision
+                if closest_row['distance_sq'] < 0.0005**2: 
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
+                # IMPORTANT : Ajout d'une gestion d'erreur visuelle si le clic est trop loin
+                else:
+                    st.session_state['selected_ref'] = None
+                    st.session_state['no_ref_found'] = True
                  
     else:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Vérifiez si le fichier s'est chargé correctement.")
@@ -178,6 +173,7 @@ with col_right:
     
     if selected_ref:
         # Recherche du lot sélectionné
+        # Utilisation de isin() pour une recherche par correspondance de chaîne fiable
         selected_data_series = data_df[data_df[REF_COL].isin([selected_ref])]
         
         if len(selected_data_series) > 0:
@@ -191,7 +187,7 @@ with col_right:
 
             st.subheader(f"Réf. : {display_title_ref}")
             
-            # --- Colonne G: Adresse ---
+            # --- Adresse ---
             adresse = selected_data.get('Adresse', 'N/A')
             code_postal = selected_data.get('Code Postal', '')
             ville = selected_data.get('Ville', '')
@@ -202,7 +198,7 @@ with col_right:
             else:
                 st.write("Adresse non renseignée.")
             
-            # --- Colonne H: Lien Google Maps (Bouton d'Action) ---
+            # --- Lien Google Maps (Bouton d'Action) ---
             lien_maps = selected_data.get('Lien Google Maps', None)
             if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower() not in ('nan', 'n/a', 'none', ''):
                 st.markdown(
@@ -217,7 +213,7 @@ with col_right:
             
             st.markdown("---")
             
-            # --- Colonnes I à AH (Liste) ---
+            # --- Informations Détaillées (I à AH) ---
             st.markdown("##### Informations Détaillées")
             
             colonnes_a_afficher = [
@@ -262,7 +258,13 @@ with col_right:
             st.markdown("---")
             
         else:
-            st.error(f"❌ La référence **'{selected_ref}'** n'a pas pu être trouvée dans le DataFrame (Vérifiez le panneau de diagnostic à gauche).")
+            # Cette erreur ne devrait plus apparaître si le clic fonctionne
+            st.error(f"❌ La référence **'{selected_ref}'** a été détectée mais n'a pas pu être trouvée dans le DataFrame (Incohérence des données).")
 
     else:
-        st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
+        # Affichage d'une erreur si le clic était trop loin
+        if st.session_state.get('no_ref_found'):
+            st.warning("Veuillez cliquer **exactement** sur un des marqueurs bleus.")
+            del st.session_state['no_ref_found']
+        else:
+            st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
