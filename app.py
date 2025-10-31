@@ -81,9 +81,9 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# --- CHANGEMENT CLÉ ICI : Utilisation du chemin du dépôt GitHub ---
-# Le chemin dans le dépôt est "data/Liste_des_lots.xlsx"
-DATA_FILE_PATH = "data/Liste_des_lots.xlsx" 
+# --- CORRECTION CLÉ ICI : Utilisation des ESPACES dans le nom du fichier ---
+# Le chemin dans le dépôt est "data/Liste des lots.xlsx"
+DATA_FILE_PATH = "data/Liste des lots.xlsx" 
 DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée pour les données
 
 
@@ -99,7 +99,6 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """
     try:
         # Tente de lire directement le fichier Excel à partir du chemin local
-        # Le premier paramètre est le chemin d'accès au fichier (ex: data/Liste_des_lots.xlsx)
         df = pd.read_excel(file_path, sheet_name=sheet_name)
         
         # Vérification minimale des colonnes critiques
@@ -110,7 +109,12 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
                 return pd.DataFrame()
 
     except FileNotFoundError:
-        st.error(f"Fichier de données Excel non trouvé. Veuillez vous assurer que le fichier est présent au chemin '{file_path}'.")
+        # Message d'erreur plus clair pour le fichier non trouvé
+        st.error(
+            f"Fichier de données Excel non trouvé. "
+            f"Veuillez vous assurer que le fichier est nommé exactemement **`Liste des lots.xlsx`** "
+            f"et qu'il est présent au chemin : **`{file_path}`**."
+        )
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier Excel. Détails: {e}")
