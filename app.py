@@ -130,7 +130,7 @@ with col_map:
         # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- Logique de détection de clic ---
+        # --- Logique de détection de clic (AMÉLIORÉE) ---
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
@@ -142,13 +142,13 @@ with col_map:
                 data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
-                # Seuil de tolérance
-                if closest_row['distance_sq'] < 0.0005**2: 
+                # --- NOUVELLE LOGIQUE : Supprimer la condition de distance ---
+                # On prend TOUJOURS la référence la plus proche si elle existe
+                if not closest_row.empty: 
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
                 else:
                     st.session_state['selected_ref'] = None
-                    st.session_state['no_ref_found'] = True
                  
     else:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Vérifiez si le fichier s'est chargé correctement.")
@@ -159,13 +159,13 @@ with col_right:
     st.header("🔍 Détails du Lot")
     st.markdown("---")
     
-    # LIGNE DE DIAGNOSTIC FORCÉ : Veuillez me reporter ce texte
+    # LIGNE DE DIAGNOSTIC FORCÉ :
     st.text(f"DEBUG REF: {st.session_state.get('selected_ref', 'NOT SET')}") 
     st.markdown("---")
     
     selected_ref = st.session_state['selected_ref']
     
-    if selected_ref:
+    if selected_ref and selected_ref != 'None':
         selected_ref_clean = selected_ref.strip()
         
         # Filtre sécurisé sur la colonne de référence nettoyée
@@ -175,7 +175,6 @@ with col_right:
             # --- SUCCÈS : Affichage des données ---
             selected_data = selected_data_series.iloc[0].copy()
             
-            # Affichage de la référence SANS les zéros pour les titres
             try:
                 display_title_ref = str(int(selected_ref))
             except ValueError:
@@ -183,7 +182,7 @@ with col_right:
 
             st.subheader(f"Réf. : {display_title_ref}")
             
-            # --- Adresse et autres détails (comme dans les versions précédentes) ---
+            # --- Adresse ---
             adresse = selected_data.get('Adresse', 'N/A')
             code_postal = selected_data.get('Code Postal', '')
             ville = selected_data.get('Ville', '')
@@ -252,13 +251,7 @@ with col_right:
             st.markdown("---")
             
         else:
-            # Affichage du diagnostic d'échec de la recherche
             st.error("❌ ÉCHEC : La référence a été trouvée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
 
     else:
-        # Affichage d'une erreur si le clic était trop loin ou info par défaut
-        if st.session_state.get('no_ref_found'):
-            st.warning("Veuillez cliquer **exactement** sur un des marqueurs bleus. Le clic a été enregistré, mais il était trop éloigné du point connu.")
-            del st.session_state['no_ref_found']
-        else:
-            st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
+        st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
