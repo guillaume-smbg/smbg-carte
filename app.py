@@ -14,17 +14,15 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
-# --- Chemin d'accès du fichier (CORRIGÉ) ---
-# L'utilisateur a confirmé que le nom est juste "Liste des Lots".
-EXCEL_FILE_PATH = 'Liste des Lots.xlsx' 
+# --- Chemin d'accès du fichier (CONFIRMÉ ET FIXÉ) ---
+EXCEL_FILE_PATH = 'data/Liste des Lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données ---
+# --- Fonction de Chargement des Données (Simplifiée pour Excel) ---
 @st.cache_data
 def load_data(file_path):
     try:
-        # Tente de lire le fichier en tant qu'Excel (ou le type d'origine)
-        # S'il y a un problème de feuille dans l'Excel, cela pourrait nécessiter un paramètre 'sheet_name'.
+        # Lecture EXCLUSIVE du fichier Excel, comme demandé
         df = pd.read_excel(file_path)
 
         # NETTOYAGE CRITIQUE : Supprimer les espaces avant/après les noms de colonnes
@@ -43,8 +41,8 @@ def load_data(file_path):
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
     except Exception as e:
-        # Cette erreur affichera si le chemin ou le nom du fichier est incorrect
-        st.error(f"Erreur de chargement du fichier '{file_path}'. Assurez-vous que le fichier est au bon emplacement et accessible : {e}")
+        # Message d'erreur clair si le fichier n'est pas trouvé ou illisible
+        st.error(f"Erreur de chargement du fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -136,7 +134,7 @@ with col_map:
         st.info("Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
-# --- 4. Panneau de Détails Droit (Toujours affiché - 275px) ---
+# --- 4. Panneau de Détails Droit (Colonnes G à AH) ---
 with col_right:
     st.header("🔍 Détails du Lot")
     st.markdown("---")
@@ -144,7 +142,7 @@ with col_right:
     selected_ref = st.session_state['selected_ref']
     
     if selected_ref:
-        # Recherche du lot sélectionné (comparaison de chaînes pures)
+        # Recherche du lot sélectionné
         selected_data_series = data_df[data_df[REF_COL] == selected_ref]
         
         if len(selected_data_series) > 0:
