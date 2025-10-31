@@ -16,6 +16,11 @@
             font-family: 'Inter', sans-serif;
             overflow: hidden; /* Empêche tout défilement */
         }
+        /* Styles personnalisés pour les marqueurs Leaflet */
+        .custom-marker {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -24,6 +29,7 @@
     <div id="app" class="flex h-screen overflow-hidden">
 
         <!-- 1. Panneau Gauche (Filtres/Navigation) - Largeur fixe 275px -->
+        <!-- NOTE: Utilisation de w-[275px] pour éviter la syntaxe Python `_` (taille 275 pixels) -->
         <div id="left-panel" class="w-[275px] flex-shrink-0 bg-blue-900 text-white shadow-2xl p-6 overflow-y-auto">
             <h1 class="text-3xl font-bold mb-6 text-yellow-500 border-b-4 border-yellow-600 pb-2">
                 Carte SMBG Immo
@@ -100,7 +106,7 @@
 
     <!-- Script principal -->
     <script>
-        // CORRECTION: Utilisation du nom exact du fichier et encodage pour l'URL
+        // Chemin d'accès à votre fichier CSV de données
         const DATA_FILE_PATH = 'Liste des lots.xlsx - Tableau recherche.csv';
         // Colonnes essentielles pour la carte et les détails
         const REQUIRED_COLUMNS = [
@@ -119,7 +125,7 @@
         function initMap() {
             // Centre la carte sur la France par défaut
             map = L.map('map-container', {
-                zoomControl: false // Contrôle le zoom dans le panneau droit si besoin
+                zoomControl: false 
             }).setView([46.603354, 1.888334], 6); // Coordonnées et zoom initial
 
             // Ajout du calque OpenStreetMap
@@ -133,36 +139,36 @@
             L.control.zoom({ position: 'topleft' }).addTo(map);
         }
 
-        // Fonction utilitaire pour lire le CSV (adaptée à l'environnement Immersive)
+        // Fonction utilitaire pour lire le CSV
         async function loadData() {
+            console.log("Tentative de chargement du fichier:", DATA_FILE_PATH);
             try {
-                // Utilise la fonction d'accès aux fichiers du conteneur
-                // CORRECTION: Encodage du chemin du fichier
+                // Encodage du chemin du fichier pour l'URL
                 const encodedPath = encodeURIComponent(DATA_FILE_PATH);
                 const response = await fetch(encodedPath); 
                 
                 if (!response.ok) throw new Error(`Erreur de chargement: ${response.statusText} (${response.status})`);
                 
                 const csvText = await response.text();
-                // Simule un parser CSV simple
                 const rows = csvText.trim().split('\n').filter(row => row.trim() !== ''); // Filtrer les lignes vides
                 
                 if (rows.length === 0) {
                     throw new Error("Le fichier CSV est vide.");
                 }
 
-                // Détecter le séparateur
+                // Détection du séparateur
                 let separator = ',';
                 if (rows.length > 0 && rows[0].includes(';')) {
                     separator = ';';
                 }
+                console.log(`Séparateur détecté: "${separator}"`);
 
                 const header = rows[0].split(separator).map(h => h.trim().replace(/"/g, ''));
                 
                 const data = [];
                 for (let i = 1; i < rows.length; i++) {
                     const values = rows[i].split(separator);
-                    // Si le nombre de colonnes ne correspond pas ou la ligne est vide, on passe
+                    // Si le nombre de colonnes ne correspond pas, on passe
                     if (values.length !== header.length || values.every(v => v.trim() === '')) continue;
 
                     const row = {};
@@ -170,18 +176,19 @@
                         row[col] = values[index] ? values[index].trim().replace(/"/g, '') : '';
                     });
                     
-                    // Vérification des colonnes essentielles et conversion de types
+                    // Conversion de types pour Latitude et Longitude
                     if (row['Latitude'] && row['Longitude']) {
-                        // Remplacer la virgule par un point pour la décimale si nécessaire
-                        let latStr = row.Latitude.replace(',', '.');
-                        let lonStr = row.Longitude.replace(',', '.');
+                        
+                        // ESSENTIEL: Remplacer TOUTES les virgules par des points pour la conversion en flottant
+                        let latStr = String(row.Latitude).replace(/,/g, '.');
+                        let lonStr = String(row.Longitude).replace(/,/g, '.');
                         
                         row.Latitude = parseFloat(latStr);
                         row.Longitude = parseFloat(lonStr);
                         row['Référence annonce'] = row['Référence annonce'] || 'N/A';
                         
-                        // Assurez-vous que les données sont valides
-                        if (!isNaN(row.Latitude) && !isNaN(row.Longitude)) {
+                        // Si les coordonnées sont valides, on ajoute la ligne
+                        if (!isNaN(row.Latitude) && !isNaN(row.Longitude) && row.Latitude !== 0 && row.Longitude !== 0) {
                             data.push(row);
                         }
                     }
@@ -189,20 +196,20 @@
                 
                 originalData = data;
                 document.getElementById('total-count').textContent = originalData.length;
+                console.log(`Données chargées. ${originalData.length} lots avec coordonnées valides trouvés.`);
                 
                 // Peupler le filtre de typologie
                 populateTypologyFilter(originalData);
                 
-                // Afficher les données initiales
+                // Afficher les données initiales (les pins)
                 applyFilterAndRenderMap();
                 
                 if (originalData.length === 0) {
-                    showMessageBox("Avertissement Données", "Aucune donnée de lot valide n'a pu être chargée (vérifiez les colonnes 'Latitude' et 'Longitude').");
+                    showMessageBox("Avertissement Données", "Aucune donnée de lot valide n'a pu être chargée. Vérifiez que les colonnes 'Latitude' et 'Longitude' existent et contiennent des nombres (avec '.' ou ',' comme séparateur décimal).");
                 }
                 
             } catch (error) {
                 console.error("Erreur critique lors du chargement des données:", error);
-                // Utiliser une boîte de message à la place d'alert()
                 showMessageBox("Erreur de chargement", `Impossible de charger ou d'analyser le fichier de données. Détail: ${error.message}. Consultez la console pour les détails.`);
             }
         }
@@ -210,8 +217,6 @@
         // Boîte de message personnalisée (remplace alert())
         function showMessageBox(title, message) {
             let msgBox = document.getElementById('message-box');
-            
-            // Mise à jour du contenu
             document.getElementById('message-title').textContent = title;
             document.getElementById('message-text').textContent = message;
             msgBox.classList.remove('hidden');
@@ -384,7 +389,7 @@
         // Fonction utilitaire pour créer une ligne de détail stylisée
         function createDetailRow(label, value) {
             // S'assurer que les valeurs vides affichent N/A
-            const displayValue = (value && value.trim() !== '') ? value : 'N/A';
+            const displayValue = (value && String(value).trim() !== '') ? value : 'N/A';
             return `
                 <div class="flex justify-between items-center border-b border-gray-100 py-2">
                     <span class="text-sm font-medium text-gray-500">${label}</span>
@@ -412,8 +417,8 @@
         
         // Fonction utilitaire pour formater les devises (Euro)
         function formatCurrency(value) {
-            // Nettoyer et convertir
-            const strValue = String(value).trim().replace(',', '.');
+            // Nettoyer et convertir: remplacer les virgules par des points
+            const strValue = String(value).trim().replace(/,/g, '.');
             const num = parseFloat(strValue.replace(/[^0-9.]/g, ''));
             
             if (isNaN(num) || num === 0) return 'N/A';
@@ -429,8 +434,8 @@
         
         // Fonction utilitaire pour formater les nombres avec des espaces
         function formatNumber(value) {
-             // Nettoyer et convertir
-            const strValue = String(value).trim().replace(',', '.');
+             // Nettoyer et convertir: remplacer les virgules par des points
+            const strValue = String(value).trim().replace(/,/g, '.');
             const num = parseFloat(strValue.replace(/[^0-9.]/g, ''));
 
              if (isNaN(num) || num === 0) return 'N/A';
@@ -451,6 +456,19 @@
 
         // Initialisation de l'application au chargement complet de la fenêtre
         window.onload = function() {
+            // Mise à jour de la boîte de message dans le DOM
+             const msgBox = document.getElementById('message-box');
+             if (!msgBox.querySelector('#message-title')) {
+                // S'assurer que le contenu de la boîte de message est là
+                msgBox.innerHTML = `
+                    <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+                        <h3 id="message-title" class="text-xl font-bold mb-3 text-red-600"></h3>
+                        <p id="message-text" class="text-gray-700 mb-4"></p>
+                        <button onclick="document.getElementById('message-box').classList.add('hidden')" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">Fermer</button>
+                    </div>
+                `;
+             }
+
             initMap();
             loadData();
         };
