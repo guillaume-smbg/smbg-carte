@@ -15,18 +15,19 @@ if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
 # --- Chemin d'accès du fichier (CONFIRMÉ ET FIXÉ) ---
-# UTILISATION DE LA CASSE EXACTE: "Liste des lots.xlsx"
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données ---
+# --- Fonction de Chargement des Données (Correction de Type Robuste) ---
 @st.cache_data
 def load_data(file_path):
     try:
-        # Lecture EXCLUSIVE du fichier Excel, comme demandé
-        df = pd.read_excel(file_path)
-
-        # NETTOYAGE CRITIQUE : Supprimer les espaces avant/après les noms de colonnes
+        # Lecture du fichier Excel
+        # NOTE : Utilisation de sheet_name='Tableau recherche' si le fichier a plusieurs feuilles
+        # Si votre fichier n'a qu'une seule feuille, laissons le paramètre par défaut.
+        df = pd.read_excel(file_path, sheet_name='Tableau recherche')
+        # Si la ligne d'en-tête est la première ligne (index 0) du DataFrame
+        
         df.columns = df.columns.str.strip() 
         
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
@@ -36,17 +37,20 @@ def load_data(file_path):
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
         
-        # SÉCURISATION : Conversion de la colonne de référence en string
-        df[REF_COL] = df[REF_COL].apply(str).str.strip() 
+        # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
+        # 1. Tente de convertir en nombre entier
+        df[REF_COL] = pd.to_numeric(df[REF_COL], errors='coerce').astype('Int64', errors='ignore')
+        # 2. Convertit en chaîne et force le format 5 chiffres avec des zéros en tête
+        df[REF_COL] = df[REF_COL].apply(lambda x: f'{x:05d}' if pd.notna(x) else 'N/A')
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
     except Exception as e:
-        # Message d'erreur clair si le fichier n'est pas trouvé ou illisible
-        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
+        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}', le format Excel et le nom de la feuille (utilisé 'Tableau recherche') : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
+# NOTE: Le nom de la feuille 'Tableau recherche' est utilisé, basé sur les fichiers .csv précédents.
 data_df = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Définition de la Mise en Page (3 Colonnes Fixes) ---
@@ -84,9 +88,10 @@ with col_map:
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            reference = str(row.get(REF_COL, 'N/A')).strip() 
+            reference = row.get(REF_COL, 'N/A')
             
-            display_ref = reference[-4:] if len(reference) > 4 and reference != 'nan' else reference
+            # Affichage tronqué de la référence (si elle est très longue)
+            display_ref = reference[-4:] if len(reference) > 4 and reference != 'N/A' else reference
             
             html = f"""
                 <div id='lot-{reference}' style='
@@ -128,7 +133,8 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
                 if closest_row['distance'] < 0.0001: 
-                    new_ref = str(closest_row[REF_COL]).strip()
+                    # La référence est déjà dans le bon format 5 chiffres
+                    new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
                  
     else:
@@ -193,7 +199,7 @@ with col_right:
                 ('Charges €/m²', f"{selected_data.get('Charges €/m²', 'N/A')} €/m²"),
                 ('Dépôt de garantie', selected_data.get('Dépôt de garantie', 'N/A')),
                 ('GAPD', selected_data.get('GAPD', 'N/A')),
-                ('Taxe foncière', selected_data.get('Taxe foncière', 'N/A')),
+                ('Taxe foncière', f"{selected_data.get('Taxe foncière', 'N/A')} €"), # Ajout de l'unité €
                 ('Marketing', selected_data.get('Marketing', 'N/A')),
                 ('Gestion', selected_data.get('Gestion', 'N/A')),
                 ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
@@ -206,7 +212,8 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 # N'affiche pas les champs s'ils sont manquants ou "nan"
-                if not (isinstance(valeur, str) and valeur.strip().lower() in ('nan', 'n/a')) and str(valeur).strip() != 'N/A':
+                valeur_str = str(valeur).strip()
+                if valeur_str not in ('N/A', 'nan', ''):
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
                         st.text(valeur)
@@ -215,13 +222,8 @@ with col_right:
             
             st.markdown("---")
             
-            # Bouton pour désélectionner
-            if st.button("Masquer les détails", key="deselect_right"):
-                 st.session_state['selected_ref'] = None
-                 st.experimental_rerun() 
-                 
         else:
-            st.error(f"Erreur de recherche : Aucune ligne trouvée pour la référence '{selected_ref}'.")
+            st.error(f"Erreur de correspondance: Aucune ligne trouvée pour la référence '{selected_ref}'.")
 
     else:
         st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
