@@ -3,6 +3,8 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
+# Importation pour l'icône de texte sur le marqueur
+from folium.features import DivIcon 
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -179,25 +181,47 @@ if not data_df.empty:
     
     m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-    # --- Création des marqueurs ---
+    # --- Création des marqueurs personnalisés (référence inscrite) ---
     for index, row in data_df.iterrows():
         lat = row['Latitude']
         lon = row['Longitude']
         
-        ref_annonce = row[REF_COL] # Récupération de la référence
+        ref_annonce = row[REF_COL]
         
-        # AJOUT de l'infobulle avec la référence
-        tooltip_text = f"Réf. : {ref_annonce}" 
-        
-        folium.CircleMarker(
+        # Nettoyage de la référence : enlève les zéros non significatifs
+        try:
+            # Tente de convertir en entier pour supprimer les zéros à gauche (ex: '00005' -> '5')
+            clean_ref = str(int(ref_annonce)) 
+        except ValueError:
+            # Si ce n'est pas un nombre, utilise la référence telle quelle
+            clean_ref = ref_annonce
+
+        # Création de l'icône personnalisée (texte stylisé)
+        icon = DivIcon(
+            icon_size=(20, 20),
+            icon_anchor=(10, 10),
+            html=f"""
+                <div style="
+                    font-size: 10px;
+                    color: white;
+                    background-color: #0072B2; /* Fond bleu */
+                    border-radius: 50%;
+                    width: 20px; 
+                    height: 20px;
+                    text-align: center;
+                    line-height: 20px; /* Centrage vertical du texte */
+                    border: 1px solid #005A8D;
+                    font-weight: bold;
+                ">{clean_ref}</div>
+            """
+        )
+
+        # Ajout du Marqueur standard avec l'icône personnalisée
+        folium.Marker(
             location=[lat, lon],
-            radius=10,
-            color="#0072B2",
-            fill=True,
-            fill_color="#0072B2",
-            fill_opacity=0.8,
-            tooltip=tooltip_text # Ajout de l'infobulle
+            icon=icon
         ).add_to(m)
+
 
     # Affichage et capture des événements de clic
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
