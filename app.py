@@ -16,15 +16,17 @@ from streamlit_folium import st_folium
 # CONFIG DE BASE ET CONSTANTES
 # -------------------------------------------------
 
+# Configurer la page pour utiliser tout l'espace
 st.set_page_config(
     page_title="SMBG Carte Immo",
     layout="wide",
+    initial_sidebar_state="collapsed" # Le sidebar Streamlit est masqué pour laisser place au panneau de filtres
 )
 
 # Configuration des couleurs et dimensions
 LOGO_BLUE = "#05263d"
 COPPER = "#b87333"
-# Mise à jour des largeurs à 275px comme demandé
+# Largeurs fixes pour les panneaux
 LEFT_PANEL_WIDTH_PX = 275 
 RIGHT_PANEL_WIDTH_PX = 275 
 
@@ -92,59 +94,42 @@ DATA_SHEET_NAME = "Tableau recherche"
 @st.cache_data
 def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """
-    Charge le DataFrame depuis le fichier Excel spécifié en utilisant 
-    la fonction pd.read_excel.
+    Charge le DataFrame et effectue le nettoyage/formatage initial.
     """
     try:
-        # Tente de lire directement le fichier Excel à partir du chemin local
         df = pd.read_excel(file_path, sheet_name=sheet_name)
         
-        # Vérification minimale des colonnes critiques
         required_cols = [COL_LAT, COL_LON, COL_REF]
         for col in required_cols:
             if col not in df.columns:
-                st.error(f"La colonne requise '{col}' est manquante dans le fichier de données. Veuillez vérifier le contenu de la feuille '{sheet_name}'.")
+                st.error(f"La colonne requise '{col}' est manquante.")
                 return pd.DataFrame()
 
     except FileNotFoundError:
-        # Message d'erreur plus clair pour le fichier non trouvé
-        st.error(
-            f"Fichier de données Excel non trouvé. "
-            f"Veuillez vous assurer que le fichier est nommé exactemement **`Liste des lots.xlsx`** "
-            f"et qu'il est présent au chemin : **`{file_path}`**."
-        )
+        st.error(f"Fichier de données Excel non trouvé: `{file_path}`.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier Excel. Détails: {e}")
         return pd.DataFrame()
 
 
-    # Nettoyage des coordonnées (Conversion en numériques et suppression des lignes invalides)
     df[COL_LAT] = pd.to_numeric(df[COL_LAT], errors='coerce')
     df[COL_LON] = pd.to_numeric(df[COL_LON], errors='coerce')
     
-    # Suppression des lignes avec des coordonnées manquantes ou invalides pour la carte
-    # Nous utilisons une copie pour les modifications pour éviter SettingWithCopyWarning
     df_clean = df.dropna(subset=[COL_LAT, COL_LON]).copy()
     
-    # Assurer que la colonne de référence est une chaîne de caractères
     df_clean.loc[:, COL_REF] = df_clean[COL_REF].astype(str).str.strip()
 
-    # Créer les colonnes de coordonnées utilisées pour le tracé (avec des noms uniques)
     df_clean.loc[:, "_lat_plot"] = df_clean[COL_LAT]
     df_clean.loc[:, "_lon_plot"] = df_clean[COL_LON]
 
-    # Remplacer NaN dans les colonnes de filtre spécifiques pour le fonctionnement des selectbox
-    df_clean.loc[:, COL_TYPOLOGIE] = df_clean[COL_TYPOLOGIE].fillna('Non spécifié')
-    df_clean.loc[:, COL_TYPE] = df_clean[COL_TYPE].fillna('Non spécifié')
-    df_clean.loc[:, COL_CESSION] = df_clean[COL_CESSION].fillna('Non spécifié')
+    # Remplacer NaN dans les colonnes de filtre spécifiques
+    for col in [COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
+        df_clean.loc[:, col] = df_clean[col].fillna('Non spécifié')
     
-    # Gestion des valeurs pour Extraction et Restauration
-    # On normalise les valeurs binaires pour n'avoir que 'Oui', 'Non' ou 'Non spécifié'
     df_clean.loc[:, COL_EXTRACTION] = df_clean[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     df_clean.loc[:, COL_RESTAURATION] = df_clean[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     
-    # Nettoyage des chaînes de caractères pour les filtres (éviter les espaces indésirables)
     for col in [COL_REGION, COL_DEPARTEMENT, COL_VILLE, COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
          df_clean.loc[:, col] = df_clean[col].astype(str).str.strip()
 
@@ -156,30 +141,103 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
 
 GLOBAL_CSS = f"""
 <style>
-/* Police et couleur globale */
-.stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {{
-    font-family: 'Futura', sans-serif !important;
-    color: #000;
-    font-size: 14px; /* Augmenté légèrement la taille de police */
-    line-height: 1.4;
+/* 1. Rendre l'application NON-SCROLLABLE et utiliser toute la hauteur de la fenêtre */
+.stApp, div[data-testid="stAppViewContainer"] {{
+    /* Définir la hauteur de l'application à 100% de la hauteur du viewport */
+    height: 100vh;
+    /* Empêcher le scroll sur le corps principal */
+    overflow: hidden !important; 
 }}
 
+/* Le conteneur principal */
+div[data-testid="stAppViewContainer"] > .main {{
+    padding: 10px 10px 10px 20px !important; /* Ajuste le padding extérieur */
+    max-width: none !important; /* Utiliser toute la largeur */
+    height: 100vh;
+    overflow: hidden;
+}}
+
+/* Conteneur du titre et des colonnes */
+div[data-testid="stVerticalBlock"] {{
+    gap: 15px; /* Espace entre le titre et les colonnes */
+    height: 100%; /* Important: Assure que les colonnes utilisent tout l'espace restant */
+    overflow: hidden;
+}}
+
+/* Le bloc contenant les colonnes (div[data-testid="stHorizontalBlock"]) */
+/* Ceci garantit que les colonnes s'alignent sans overflow vertical */
+div[data-testid="stHorizontalBlock"] {{
+    height: calc(100vh - 80px); /* Hauteur calculée: 100vh moins la hauteur du titre/padding */
+    overflow: hidden;
+    gap: 15px; /* Espace entre les colonnes */
+}}
+
+
+/* ===== PANNEAUX LATÉRAUX et CARTE ===== */
+
+/* Conteneur de la carte (col_map) doit être flexible */
+[data-testid="stColumn"]:nth-child(2) {{
+    height: 100%;
+    padding: 0 5px; /* Petit padding horizontal */
+}}
+
+/* Panneau Gauche (Filtres) */
+.left-panel {{
+    background-color: {LOGO_BLUE};
+    color: #fff !important;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    min-width: {LEFT_PANEL_WIDTH_PX}px;
+    max-width: {LEFT_PANEL_WIDTH_PX}px;
+    
+    /* Hauteur fixe pour le panneau de filtres */
+    height: 100%; 
+    overflow-y: auto; /* Permet le scroll uniquement dans ce panneau si nécessaire */
+}}
+
+/* Panneau Droit (Détails) */
+.right-panel {{
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    background-color: #f9f9f9;
+    min-width: {RIGHT_PANEL_WIDTH_PX}px;
+    max-width: {RIGHT_PANEL_WIDTH_PX}px;
+    
+    /* Hauteur fixe pour le panneau de détails */
+    height: 100%;
+    overflow-y: auto; /* Permet le scroll uniquement dans ce panneau si nécessaire */
+}}
+
+/* Carte Folium (centre) */
+.map-wrapper {{
+    height: 100%; /* Prend toute la hauteur du conteneur */
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}}
+
+/* Le conteneur iframe de la carte */
+.map-wrapper iframe {{
+    height: 100% !important; /* Forcer l'iframe à prendre 100% de la hauteur */
+}}
+
+/* Le titre Streamlit doit être ajusté pour ne pas prendre trop de place */
+h1 {{
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-size: 26px;
+    color: {LOGO_BLUE};
+}}
+
+
+/* --- Autres Styles conservés --- */
 :root {{
     --logo-blue: {LOGO_BLUE};
     --copper: {COPPER};
 }}
 
-/* ===== GÉNÉRALITÉ STREAMLIT ===== */
-/* Ajuster l'apparence des widgets pour correspondre au thème */
-.stSelectbox > div > div, .stTextInput > div > div, .stCheckbox > label {{
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    padding: 4px 8px;
-    background-color: #fff;
-    color: var(--logo-blue);
-}}
-
-/* Boutons */
 .stButton > button {{
     background-color: var(--copper);
     color: white;
@@ -188,17 +246,16 @@ GLOBAL_CSS = f"""
     border: none;
     padding: 8px 16px;
     transition: background-color 0.3s;
-    width: 100%; /* Important: Assurer que le bouton utilise toute la largeur dans le panneau de filtre */
+    width: 100%;
 }}
 .stButton > button:hover {{
-    background-color: #9e642d; /* Copper plus foncé */
+    background-color: #9e642d;
 }}
 
-/* Bouton spécial pour fermer le panneau de détails (panneau droit) */
 .close-button {{
     background-color: #e0e0e0;
     color: #333;
-    width: auto; /* Ne prend pas toute la largeur */
+    width: auto;
     padding: 4px 10px;
     font-size: 12px;
     font-weight: normal;
@@ -209,113 +266,6 @@ GLOBAL_CSS = f"""
     background-color: #ccc;
 }}
 
-/* Bouton Link (Google Maps) */
-.stLinkButton > a {{
-    background-color: var(--logo-blue);
-    color: white;
-    font-weight: bold;
-    border-radius: 8px;
-    padding: 8px 16px;
-    text-decoration: none;
-    transition: background-color 0.3s;
-    display: block; /* S'assurer qu'il prend toute la largeur */
-    text-align: center;
-}}
-.stLinkButton > a:hover {{
-    background-color: #031a29; /* Bleu plus foncé */
-}}
-
-
-/* ===== TITRES ET PANNEAUX ===== */
-h1, h2, h3 {{
-    color: var(--logo-blue);
-    font-weight: 700;
-    margin-top: 0;
-}}
-h1 {{
-    font-size: 26px; /* Ajuster la taille du titre principal */
-}}
-h3 {{
-    margin-bottom: 15px; /* Plus d'espace sous le titre des filtres */
-    font-size: 18px;
-}}
-
-/* Conteneur de l'application Streamlit */
-.stApp {{
-    padding: 0;
-}}
-
-/* Rendre le conteneur principal flexible et bien centré */
-/* Le conteneur principal Streamlit est 'data-testid="stAppViewContainer"' */
-div[data-testid="stAppViewContainer"] > .main {{
-    padding: 20px !important; /* Ajoute un padding général autour des colonnes */
-}}
-
-/* Pour gérer l'espacement des colonnes */
-div[data-testid="stVerticalBlock"] {{
-    gap: 20px; /* Ajoute de l'espace entre les éléments verticaux */
-}}
-
-/* Cadres des colonnes */
-[data-testid="stColumn"] {{
-    padding: 0 10px;
-}}
-
-
-/* ===== PANNEAU GAUCHE (filtres) ===== */
-.left-panel {{
-    background-color: var(--logo-blue);
-    color: #fff !important;
-    padding: 20px; /* Plus de padding */
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    /* Utilise la largeur fixe définie */
-    min-width: {LEFT_PANEL_WIDTH_PX}px;
-    max-width: {LEFT_PANEL_WIDTH_PX}px;
-    /* S'assurer que le panneau prend la bonne hauteur */
-    min-height: 850px; 
-}}
-
-/* Style spécifique pour le logo */
-.logo-container {{
-    text-align: center;
-    margin-bottom: 25px; /* Espace sous le logo */
-}}
-.logo-container img {{
-    max-width: 80%; /* Assure que le logo n'est pas trop large */
-    height: auto;
-}}
-
-
-.left-panel h3, .left-panel label, .left-panel p, .left-panel .stCheckbox > label > div:first-child {{
-    color: #fff !important;
-}}
-.left-panel .stSelectbox > label, .left-panel .stCheckbox > label {{
-    font-weight: bold;
-}}
-/* Rendre le fond des selectbox blanc dans le panneau gauche pour la lisibilité */
-.left-panel .stSelectbox > div > div {{
-    background-color: #fff;
-    color: var(--logo-blue);
-}}
-.left-panel .stSelectbox > label > div > p {{
-    color: #fff !important;
-    font-size: 14px;
-}}
-.left-panel .stSelectbox .st-ag {{
-    color: var(--logo-blue) !important;
-}}
-
-
-/* ===== CARTE (centre) ===== */
-.map-wrapper {{
-    /* S'assurer que la carte utilise tout l'espace vertical disponible */
-    height: 850px; /* Aligné avec le min-height des panneaux latéraux */
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}}
-/* Style du marqueur Folium */
 .custom-marker {{
     background-color: var(--logo-blue);
     color: white;
@@ -330,30 +280,10 @@ div[data-testid="stVerticalBlock"] {{
     line-height: 1;
 }}
 
-/* ===== PANNEAU DROIT (détails) ===== */
-.right-panel {{
-    padding: 20px; /* Plus de padding */
-    border: 1px solid #e0e0e0;
-    border-radius: 12px;
-    background-color: #f9f9f9;
-    min-height: 850px; /* Aligné avec la carte */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    /* Utilise la largeur fixe définie */
-    min-width: {RIGHT_PANEL_WIDTH_PX}px;
-    max-width: {RIGHT_PANEL_WIDTH_PX}px;
-}}
-
-.detail-address {{
-    font-weight: 500;
-    color: #555;
-    margin-bottom: 25px;
-    font-size: 16px;
-}}
-
 .detail-line {{
     display: flex;
     justify-content: space-between;
-    padding: 8px 0; /* Plus de padding vertical */
+    padding: 8px 0;
     border-bottom: 1px dotted #ccc;
     font-size: 14px;
 }}
@@ -369,16 +299,6 @@ div[data-testid="stVerticalBlock"] {{
     text-align: right;
     word-break: break-word;
     color: #333;
-}}
-
-.detail-comments {{
-    background-color: #fff;
-    border: 1px solid #ddd;
-    border-left: 4px solid var(--copper);
-    padding: 10px;
-    border-radius: 4px;
-    margin-top: 15px;
-    white-space: pre-wrap;
 }}
 
 .no-selection-msg {{
@@ -400,11 +320,9 @@ div[data-testid="stVerticalBlock"] {{
 def format_value(value):
     """
     Applique les règles de formatage pour l'affichage dans le panneau de détails.
-    - Retourne None si la valeur est vide/NaN.
-    - Retourne "Non spécifié" si la valeur est '/' ou '-'.
     """
     if pd.isna(value) or value is None or str(value).strip() == "":
-        return None # Ne pas afficher le champ s'il est vide
+        return None
     
     value_str = str(value).strip()
     
@@ -425,65 +343,58 @@ def render_right_panel(
 ):
     """Affiche le panneau de droite avec les détails du lot sélectionné."""
     
-    # Bouton pour masquer le panneau
-    if st.button("X Masquer les détails", key="hide_details_button", help="Cliquez pour masquer ce panneau de détails."):
-        st.session_state["show_right_panel"] = False
-        st.session_state["selected_ref"] = "NO_SELECTION"
-        st.rerun()
-
-    st.markdown('<div class="right-panel">', unsafe_allow_html=True)
-    
-    if selected_ref and selected_ref != "NO_SELECTION":
-        
-        # Récupérer les données du lot sélectionné
-        # Utiliser .fillna('') pour remplacer les NaN par des chaînes vides
-        lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
-
-        # --- TITRE ET ADRESSE ---
-        st.markdown(f"<h3>Lot Référence : {selected_ref}</h3>", unsafe_allow_html=True)
-        st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
-
-        # --- BOUTON GOOGLE MAPS (Traitement spécial pour Lien Google Maps) ---
-        gmaps_link = format_value(lot_data.get(col_gmaps))
-        if gmaps_link and gmaps_link != "Non spécifié":
-             # st.link_button est le widget Streamlit le plus approprié
-             st.link_button("Voir sur Google Maps 🗺️", gmaps_link, help="Ouvre le lien Google Maps dans un nouvel onglet", type="primary")
-             st.markdown("---") # Séparateur après le bouton
-        
-        
-        # --- AFFICHAGE DES AUTRES CHAMPS DE DÉTAILS ---
-        
-        # Filtrer la liste des colonnes pour exclure celles déjà traitées (Lien Google Maps et Commentaires)
-        data_columns_to_show = [col for col in detail_columns if col != col_gmaps and col != "Commentaires"]
-        
-        for col_name in data_columns_to_show:
-            value = lot_data.get(col_name)
-            formatted_value = format_value(value)
+    with st.container():
+        # Bouton pour masquer le panneau (utilise float:right dans le CSS)
+        if st.button("X Masquer les détails", key="hide_details_button", help="Cliquez pour masquer ce panneau de détails.", classes="close-button"):
+            st.session_state["show_right_panel"] = False
+            st.session_state["selected_ref"] = "NO_SELECTION"
+            st.rerun()
             
-            # Si format_value retourne None, on n'affiche pas cette ligne (valeur vide)
-            if formatted_value is not None:
-                # Utilise un format HTML pour un alignement précis Label/Valeur
-                st.markdown(
-                    f"""
-                    <div class="detail-line">
-                        <span class="detail-label">{col_name} :</span>
-                        <span class="detail-value">{formatted_value}</span>
-                    </div>
-                    """, 
-                    unsafe_allow_html=True
-                )
+        st.markdown('<div class="right-panel">', unsafe_allow_html=True)
         
-        # --- AFFICHAGE DES COMMENTAIRES (en bas avec un style dédié) ---
-        comments = format_value(lot_data.get("Commentaires"))
-        if comments is not None:
-             st.markdown('<br><span class="detail-label">Commentaires :</span>', unsafe_allow_html=True)
-             st.markdown(f'<p class="detail-comments">{comments}</p>', unsafe_allow_html=True)
+        if selected_ref and selected_ref != "NO_SELECTION":
+            
+            lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
 
-    else:
-        # Message si aucun lot n'est sélectionné
-        st.markdown('<p class="no-selection-msg">Cliquez sur un marqueur sur la carte pour voir les détails du lot.</p>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True) # fin .right-panel
+            # --- TITRE ET ADRESSE ---
+            st.markdown(f"<h3>Lot Réf. : {selected_ref}</h3>", unsafe_allow_html=True)
+            st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
+
+            # --- BOUTON GOOGLE MAPS ---
+            gmaps_link = format_value(lot_data.get(col_gmaps))
+            if gmaps_link and gmaps_link != "Non spécifié":
+                 st.link_button("Voir sur Google Maps 🗺️", gmaps_link, help="Ouvre le lien Google Maps dans un nouvel onglet", type="primary")
+                 st.markdown("---")
+            
+            
+            # --- AFFICHAGE DES AUTRES CHAMPS DE DÉTAILS ---
+            data_columns_to_show = [col for col in detail_columns if col != col_gmaps and col != "Commentaires"]
+            
+            for col_name in data_columns_to_show:
+                value = lot_data.get(col_name)
+                formatted_value = format_value(value)
+                
+                if formatted_value is not None:
+                    st.markdown(
+                        f"""
+                        <div class="detail-line">
+                            <span class="detail-label">{col_name} :</span>
+                            <span class="detail-value">{formatted_value}</span>
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
+            
+            # --- AFFICHAGE DES COMMENTAIRES ---
+            comments = format_value(lot_data.get("Commentaires"))
+            if comments is not None:
+                 st.markdown('<br><span class="detail-label">Commentaires :</span>', unsafe_allow_html=True)
+                 st.markdown(f'<p class="detail-comments">{comments}</p>', unsafe_allow_html=True)
+
+        else:
+            st.markdown('<p class="no-selection-msg">Cliquez sur un marqueur sur la carte pour voir les détails du lot.</p>', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True) # fin .right-panel
 
 
 # -------------------------------------------------
@@ -498,69 +409,65 @@ def main():
     if "selected_ref" not in st.session_state:
         st.session_state["selected_ref"] = "NO_SELECTION"
     if "show_right_panel" not in st.session_state:
-        # Masqué par défaut
         st.session_state["show_right_panel"] = False
+    if "click_registry" not in st.session_state:
+        st.session_state["click_registry"] = {}
+
 
     # Chargement des données
     df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME)
     if df.empty:
         return
 
-    # Le titre est mieux placé au-dessus des colonnes pour une meilleure structure
+    # Le titre est mieux placé au-dessus des colonnes
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
     # Détermination de la structure des colonnes
     if st.session_state["show_right_panel"]:
         # Panneau de droite visible: [275px, Flexible, 275px]
-        col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1, RIGHT_PANEL_WIDTH_PX], gap="medium")
+        # Le 0.1 ajouté aux largeurs fixes garantit que Streamlit les traite comme des colonnes de largeur fixe
+        col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX/1000 + 0.1, 1, RIGHT_PANEL_WIDTH_PX/1000 + 0.1], gap="medium")
     else:
         # Panneau de droite masqué: [275px, Flexible]
-        col_left, col_map = st.columns([LEFT_PANEL_WIDTH_PX, 1], gap="medium")
-        col_right = None # La colonne droite n'existe pas dans ce cas
+        col_left, col_map = st.columns([LEFT_PANEL_WIDTH_PX/1000 + 0.1, 1], gap="medium")
+        col_right = None 
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
+    # Le panneau gauche contient le filtre et les contrôles
     with col_left:
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
         
-        # 0. Affichage du LOGO (Utilisation du chemin local corrigé et centré)
+        # 0. Affichage du LOGO
         st.markdown('<div class="logo-container">', unsafe_allow_html=True)
         st.image(LOGO_URL, use_column_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
-        # --- FILTRES GÉOGRAPHIQUES (1, 2, 3) ---
-
         # 1. Filtre Région
         regions = ['Toutes'] + sorted(df[COL_REGION].dropna().unique().tolist())
         selected_region = st.selectbox("Région", regions, key="region_filter")
 
-        # Filtrage par Région
         df_filtered = df.copy()
         if selected_region != 'Toutes':
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
-        # 2. Filtre Département (dépend de la région sélectionnée)
+        # 2. Filtre Département
         departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].dropna().unique().tolist())
         selected_departement = st.selectbox("Département", departements, key="departement_filter")
 
-        # Filtrage par Département
         if selected_departement != 'Tous':
             df_filtered = df_filtered[df_filtered[COL_DEPARTEMENT] == selected_departement]
             
-        # 3. Filtre Ville (dépend de la région/département sélectionné)
+        # 3. Filtre Ville
         villes = ['Toutes'] + sorted(df_filtered[COL_VILLE].dropna().unique().tolist())
         selected_ville = st.selectbox("Ville", villes, key="ville_filter")
         
-        # Filtrage par Ville
         if selected_ville != 'Toutes':
             df_filtered = df_filtered[df_filtered[COL_VILLE] == selected_ville]
             
-        # --- SÉPARATEUR ---
         st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
         
-        # --- NOUVEAUX FILTRES SPÉCIFIQUES (4, 5, 6) ---
-
         # 4. Filtre Typologie
         typologies = ['Toutes'] + sorted(df_filtered[COL_TYPOLOGIE].unique().tolist())
         selected_typologie = st.selectbox("Typologie", typologies, key="typologie_filter")
@@ -582,32 +489,27 @@ def main():
         if selected_cession != 'Toutes':
             df_filtered = df_filtered[df_filtered[COL_CESSION] == selected_cession]
             
-        # --- SÉPARATEUR ---
         st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
 
-        # --- FILTRES BINAIRES (7, 8) ---
+        # 7. Filtre Extraction
         st.markdown("<p style='font-weight: bold; color: white; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
         
-        # 7. Filtre Extraction
         filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
         if filter_extraction:
             df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
-
 
         # 8. Filtre Restauration
         filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
         if filter_restauration:
             df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
 
-
         # --- AFFICHAGE DU RÉSULTAT ET BOUTON ---
         st.markdown(f"<p style='margin-top: 20px; color: white;'>**{len(df_filtered)}** lots trouvés.</p>", unsafe_allow_html=True)
 
-        # Bouton de Réinitialisation (qui utilise maintenant 100% de la largeur du panneau)
         if st.button("Réinitialiser les filtres", key="reset_button"):
             st.session_state["selected_ref"] = "NO_SELECTION"
-            st.session_state["show_right_panel"] = False # Masque le panneau au reset
-            # Réinitialiser tous les états de session des filtres
+            st.session_state["show_right_panel"] = False
+            
             st.session_state.region_filter = 'Toutes'
             st.session_state.departement_filter = 'Tous'
             st.session_state.ville_filter = 'Toutes'
@@ -624,8 +526,8 @@ def main():
     with col_map:
         st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
 
-        # Calculer le centre de la carte et le zoom
-        center_lat, center_lon = 46.603354, 1.888334 # Centre de la France (Par défaut)
+        # Calcul du centre et du zoom
+        center_lat, center_lon = 46.603354, 1.888334
         zoom_start = 6 
 
         if not df_filtered.empty:
@@ -636,7 +538,6 @@ def main():
                 center_lat = valid_lat.mean()
                 center_lon = valid_lon.mean()
                 
-                # Ajustement dynamique du zoom
                 if selected_region != 'Toutes': zoom_start = 8
                 if selected_departement != 'Tous': zoom_start = 10
                 if selected_ville != 'Toutes': zoom_start = 12
@@ -658,11 +559,11 @@ def main():
             if pd.isna(r["_lat_plot"]) or pd.isna(r["_lon_plot"]):
                 continue
 
-            lat = float(r["_lat_plot"]) 
-            lon = float(r["_lon_plot"])
+            # Arrondir les coordonnées à 6 décimales pour la correspondance
+            lat = round(float(r["_lat_plot"]), 6) 
+            lon = round(float(r["_lon_plot"]), 6)
             raw_label = str(r[COL_REF]).strip()
 
-            # Utilisation de la classe CSS .custom-marker pour le style
             icon = folium.DivIcon(html=f'<div class="custom-marker" style="white-space:nowrap;">{raw_label}</div>')
 
             layer.add_child(
@@ -672,27 +573,52 @@ def main():
                 )
             )
 
-            # Enregistre la référence pour la détection du clic
-            click_registry[(round(lat, 6), round(lon, 6))] = raw_label
+            # Enregistre la référence
+            click_registry[(lat, lon)] = raw_label
+
+        # Mettre à jour le registre dans la session state
+        st.session_state["click_registry"] = click_registry
 
         # Affichage de la carte Streamlit
-        out = st_folium(m, height=850, width=None) # Ajusté la hauteur
+        # La hauteur de 100% est gérée par le CSS .map-wrapper
+        out = st_folium(m, height="100%", width="100%")
 
         clicked_ref = None
+        last_clicked_location = None
+        
+        # 1. Détecter si Streamlit a renvoyé des informations de clic
         if isinstance(out, dict):
             loc_info = out.get("last_object_clicked")
-            # Vérifie si un marqueur a été cliqué
+            # Vérifie si un clic a eu lieu (peu importe où)
             if isinstance(loc_info, dict) and "lat" in loc_info and "lng" in loc_info:
-                lat_clicked = round(float(loc_info["lat"]), 6)
-                lon_clicked = round(float(loc_info["lng"]), 6)
-                clicked_ref = click_registry.get((lat_clicked, lon_clicked))
+                lat_clicked_raw = float(loc_info["lat"])
+                lon_clicked_raw = float(loc_info["lng"])
+                
+                # Coordonnées arrondies pour la vérification du marqueur
+                lat_clicked_rounded = round(lat_clicked_raw, 6)
+                lon_clicked_rounded = round(lon_clicked_raw, 6)
+                
+                last_clicked_location = (lat_clicked_rounded, lon_clicked_rounded)
 
-        # Met à jour l'état de la session si une référence a été cliquée
-        if clicked_ref:
+                # 2. Chercher si ce clic correspond à un marqueur enregistré
+                clicked_ref = st.session_state["click_registry"].get(last_clicked_location)
+        
+        # 3. Gérer la réaction au clic
+        
+        # CAS A: Clic sur un marqueur
+        if clicked_ref and clicked_ref != st.session_state["selected_ref"]:
             st.session_state["selected_ref"] = clicked_ref
-            # Rendre le panneau de droite visible
             st.session_state["show_right_panel"] = True
-            st.rerun() # Re-exécuter pour afficher le panneau
+            st.rerun() 
+            
+        # CAS B: Clic sur la carte (pas sur le marqueur ou sur le même marqueur)
+        # last_clicked_location est présent (il y a eu un clic)
+        # MAIS clicked_ref n'est PAS dans le registre (le clic n'était PAS sur un marqueur)
+        elif last_clicked_location and not clicked_ref:
+            # Rétracter le panneau si on clique en dehors d'un pins
+            st.session_state["selected_ref"] = "NO_SELECTION"
+            st.session_state["show_right_panel"] = False
+            st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)  # fin .map-wrapper
 
