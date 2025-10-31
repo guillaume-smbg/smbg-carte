@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 import numpy as np
 
 # --- 0. Configuration et Initialisation ---
+# On supprime le layout="wide" dans la sidebar pour ne pas interférer avec le corps principal
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
 
 # Initialisation de la session state
@@ -44,53 +45,75 @@ def load_data(file_path):
 # --- Chargement des données ---
 data_df, error_message = load_data(EXCEL_FILE_PATH)
 
-# --- 1. Définition de la Mise en Page (Colonnes conditionnelles) ---
+# --- 1. Préparation des variables de mise en page ---
 
 # Nettoyage de la référence pour la vérification
 selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None
 if selected_ref_clean == 'None':
     selected_ref_clean = None
-    st.session_state['selected_ref'] = None # Nettoyage si la chaîne 'None' est passée
+    st.session_state['selected_ref'] = None 
 
-# Vérifie si le panneau de détails doit être affiché
 show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
 
-# Définition de la mise en page basée sur l'affichage des détails
+
+# --- 2. Panneau de Contrôle Gauche (avec Sidebar) ---
+# Le st.sidebar est utilisé ici pour le panneau de contrôle, mais il est par défaut rétractable.
+# Pour le volet de droite (détails), nous allons utiliser la colonne principale.
+
+# NOTE : La meilleure façon d'avoir un panneau *fixe* à gauche et un panneau *superposé* à droite
+# n'est pas possible directement sans CSS. Cependant, si vous utilisez le st.sidebar
+# standard pour les contrôles, et la colonne principale pour la carte, la carte sera
+# toujours de la même largeur par rapport au corps de l'application.
+
+# Si vous voulez un panneau de contrôle *non-rétractable* à gauche (comme précédemment),
+# nous devons le coder en dur. Rétablissons les colonnes, mais cette fois la carte sera dans
+# un conteneur qui simule la pleine largeur, en espérant que Streamlit ne la réduise pas.
+
+# --- REVENONS À LA LOGIQUE À 3 COLONNES EN FORÇANT LA TAILLE (APPROCHE 2) ---
+# Définition de la mise en page : Contrôles (1), Carte (6), Détails (1)
 COL_CONTROLS_WIDTH = 1
-COL_DETAILS_WIDTH = 2
+COL_DETAILS_WIDTH = 1 # Sera caché lorsque non sélectionné
 
-if show_details:
-    # 3 colonnes: Contrôles (1), Carte (5), Détails (2)
-    col_left, col_map, col_right = st.columns([COL_CONTROLS_WIDTH, 5, COL_DETAILS_WIDTH])
-else:
-    # 2 colonnes: Contrôles (1), Carte (7)
-    col_left, col_map = st.columns([COL_CONTROLS_WIDTH, 7])
-    col_right = None # col_right est désactivé
+# On utilise un conteneur pour la carte afin d'essayer de forcer sa taille
+container_map = st.container()
 
-# --- 2. Panneau de Contrôle Gauche (Nettoyé) ---
-with col_left:
+# La logique de colonnes conditionnelles est la seule façon de le faire sans CSS personnalisé,
+# mais elle cause le redimensionnement que vous voulez éviter.
+# Nous allons donc utiliser la colonne de gauche (contrôles) et le corps principal (carte + détails).
+
+# --- 1. Mise en place du panneau de contrôle de gauche ---
+with st.sidebar:
     st.header("⚙️ Contrôles")
     st.markdown("---")
     
     st.info(f"Lots chargés: **{len(data_df)}**")
     
-    # Bouton pour masquer les détails (Visible uniquement si les détails sont affichés)
     if show_details:
-        # st.rerun() est utilisé ici, car st.experimental_rerun() est obsolète
         if st.button("Masquer les détails", key="hide_left", use_container_width=True):
             st.session_state['selected_ref'] = None
-            st.rerun() # Correction appliquée ici !
+            st.rerun() 
     
     st.markdown("---")
     
-    # Gestion des erreurs de chargement
     if error_message:
         st.error(error_message)
     elif data_df.empty:
         st.warning("Le DataFrame est vide.")
 
+# --- 2. Définition de la Mise en Page (Carte + Détails dans le corps principal) ---
+# Le corps principal contient la carte et, conditionnellement, le panneau de détails.
 
-# --- 3. Zone de la Carte ---
+if show_details:
+    # 2 colonnes dans le corps principal : Carte (8) et Détails (4)
+    # NOTE : C'est ici que la carte sera réduite par défaut.
+    col_map, col_right = st.columns([4, 1])
+else:
+    # 1 colonne : Carte (qui prend toute la place restante)
+    col_map = st.container() 
+    col_right = None 
+
+
+# --- 3. Zone de la Carte (dans la colonne Map ou le conteneur Map) ---
 with col_map:
     MAP_HEIGHT = 800 
     st.header("Carte des Lots Immobiliers")
@@ -106,7 +129,6 @@ with col_map:
             lat = row['Latitude']
             lon = row['Longitude']
             
-            # Utilisation de CircleMarker sans popup/tooltip pour un clic fiable
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=10,
@@ -124,7 +146,6 @@ with col_map:
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
             
-            # Seulement si un nouveau point a été cliqué
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
@@ -134,27 +155,23 @@ with col_map:
                 
                 new_ref = closest_row[REF_COL]
                 
-                # On ne rafraîchit que si la référence change et qu'il faut afficher les détails
                 if new_ref != st.session_state['selected_ref']:
                     st.session_state['selected_ref'] = new_ref
-                    # st.rerun() est utilisé ici, car st.experimental_rerun() est obsolète
-                    st.rerun() # Correction appliquée ici !
+                    st.rerun()
                  
     else:
         st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
 # --- 4. Panneau de Détails Droit (Conditionnel) ---
-if col_right: # Exécuté uniquement si show_details est True
+if col_right: # Exécuté uniquement si show_details est True (donc mise en page à 2 colonnes du corps principal)
     with col_right:
         st.header("🔍 Détails du Lot")
         st.markdown("---") 
 
-        # selected_ref_clean est déjà vérifié et nettoyé
         selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
         
         if len(selected_data_series) > 0:
-            # --- SUCCÈS : Affichage des données ---
             selected_data = selected_data_series.iloc[0].copy()
             
             try:
@@ -220,7 +237,8 @@ if col_right: # Exécuté uniquement si show_details est True
         else:
             st.error("❌ Erreur : La référence capturée n'a pas été trouvée.")
             
-# Message dans l'espace Map si aucun détail n'est affiché
-if not show_details and not data_df.empty:
-    with col_map:
-        st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
+else:
+    # Message si aucun détail n'est affiché
+    with col_map: # Col_map est le conteneur principal si show_details est False
+        if not show_details and not data_df.empty:
+            st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
