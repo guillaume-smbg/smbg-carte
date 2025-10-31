@@ -51,11 +51,7 @@ CUSTOM_CSS = """
 }
 
 /* ---------------------------------------------------------------------- */
-/* NOUVEAU: Limitation de la largeur maximale du tableau sous la carte (275px) */
-/* La classe ciblée est le conteneur de l'élément st.dataframe */
-/* Nous utilisons un sélecteur plus générique et le restreignons au corps principal */
-/* Cela nécessite de l'injecter dans un conteneur dédié (voir Section 5) */
-
+/* Limitation de la largeur maximale du tableau sous la carte (275px) */
 div.stDataFrame {
     max-width: 275px !important;
 }
@@ -227,7 +223,6 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# Le style du panneau a été nettoyé et le bouton Maps conservé.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -356,7 +351,6 @@ st.markdown(html_content, unsafe_allow_html=True)
 st.markdown("---")
 st.header("📋 Annonce du Lot Sélectionné")
 
-# 🚨 Ajout d'un conteneur pour appliquer la largeur maximale de 275px au st.dataframe
 # L'injection CSS ci-dessus cible div.stDataFrame.
 dataframe_container = st.container()
 
@@ -408,4 +402,64 @@ with dataframe_container:
             money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
             
             def format_monetary_value(row):
-                """Applique le formatage en utilisant un ESPACE comme
+                """Applique le formatage en utilisant un ESPACE comme séparateur de milliers."""
+                
+                # CORRECTION: La docstring est maintenant fermée, évitant l'erreur SyntaxError.
+                
+                champ = row['Champ']
+                value = row['Valeur']
+                
+                # Vérifie si la valeur est un nombre
+                is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value))
+                
+                # Colonne monétaire
+                is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords)
+                
+                if is_money_col and is_numeric:
+                    try:
+                        float_value = float(value)
+                        
+                        # 1. Formatage standard US sans décimales (ex: 85,723)
+                        formatted_value = f"{float_value:,.0f}" 
+                        
+                        # 2. Remplacer la virgule de milliers par un espace
+                        formatted_value = formatted_value.replace(",", " ")
+                        
+                        return f"€{formatted_value}"
+                        
+                    except (ValueError, TypeError):
+                        return value 
+                
+                # Colonne surface
+                is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
+                if is_surface_col and is_numeric:
+                     try:
+                        float_value = float(value)
+                        formatted_value = f"{float_value:,.0f}" # 12,345
+                        formatted_value = formatted_value.replace(",", " ") # 12 345
+                        
+                        return f"{formatted_value} m²"
+                     except (ValueError, TypeError):
+                        return value
+                        
+                # Coordonnées (à ne plus afficher dans ce tableau, mais la logique est là si on les réintroduit)
+                if champ in ['Latitude', 'Longitude'] and is_numeric:
+                     try:
+                        return f"{float(value):.4f}"
+                     except (ValueError, TypeError):
+                        return value
+
+                return value
+            
+            # Appliquer la fonction de formatage à la colonne 'Valeur'
+            transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1)
+            
+            # Affichage du tableau formaté
+            st.dataframe(transposed_df, hide_index=True, use_container_width=True)
+            
+        else:
+            st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
+    else:
+        st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
+
+# Fin du conteneur dataframe_container
