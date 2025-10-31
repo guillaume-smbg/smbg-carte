@@ -18,25 +18,36 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- Fonction de Chargement des Données (NETTOYAGE MAXIMAL SANS CACHE) ---
-# NOTE: Le cache est TEMPORAIREMENT désactivé pour forcer une nouvelle lecture propre.
+# --- Fonction de Chargement des Données (Diagnostic et Nettoyage Maximal) ---
+# NOTE: Le cache est désactivé pour forcer une nouvelle lecture propre.
 def load_data(file_path):
     try:
-        # Lecture du fichier. On force dtype=str pour la colonne de référence pour empêcher les conversions automatiques.
-        df = pd.read_excel(file_path, dtype={REF_COL: str})
-
+        # Tente de lire la feuille 'Tableau recherche' en premier, sinon la première feuille.
+        try:
+             df = pd.read_excel(file_path, sheet_name='Tableau recherche', dtype={REF_COL: str})
+        except ValueError:
+             # Si la feuille n'est pas trouvée, lit la première feuille par défaut
+             df = pd.read_excel(file_path, dtype={REF_COL: str})
+        
+        # Nettoyage des noms de colonnes
         df.columns = df.columns.str.strip() 
         
-        if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
-             st.error(f"Colonnes essentielles ({REF_COL}, Latitude ou Longitude) introuvables. Vérifiez les en-têtes exacts.")
+        # VÉRIFICATION CRITIQUE
+        if REF_COL not in df.columns:
+             st.error(f"Colonne de référence ('{REF_COL}') introuvable. Colonnes trouvées : {list(df.columns)}")
              return pd.DataFrame()
             
+        if 'Latitude' not in df.columns or 'Longitude' not in df.columns:
+             st.error(f"Colonnes de coordonnées (Latitude ou Longitude) introuvables. Vérifiez les en-têtes exacts.")
+             return pd.DataFrame()
+            
+        # Conversion des coordonnées
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
         
         # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
         df[REF_COL] = df[REF_COL].astype(str).str.strip()
-        # Supprime tout '.0' ou partie décimale
+        # Supprime tout '.0' ou partie décimale (ex: "1.0" -> "1")
         df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0])
         # Force le format 5 chiffres avec des zéros en tête (ex: "1" -> "00001")
         df[REF_COL] = df[REF_COL].str.zfill(5) 
@@ -44,7 +55,7 @@ def load_data(file_path):
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
     except Exception as e:
-        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Vérifiez le chemin '{file_path}' et le format Excel : {e}")
+        st.error(f"❌ Erreur critique: Impossible de charger le fichier. Détails : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -62,6 +73,21 @@ with col_left:
     st.info("Espace de 275px à gauche pour les filtres.")
     st.markdown("---")
     st.write(f"Lots chargés: **{len(data_df)}**")
+    
+    # --- PANNEAU DE DIAGNOSTIC ---
+    st.header("⚠️ Diagnostic")
+    if not data_df.empty:
+        st.caption("5 premières lignes lues par Pandas :")
+        st.dataframe(data_df.head(), use_container_width=True)
+        # Affichage des types pour vérifier le format de la colonne de référence
+        ref_dtype = data_df[REF_COL].dtype
+        st.caption(f"Type de '{REF_COL}': **{ref_dtype}**")
+        st.info("La colonne de référence doit être affichée avec 5 chiffres (ex: '00001').")
+    else:
+        st.warning("Échec du chargement du DataFrame. Vérifiez le chemin du fichier.")
+    # --- FIN DIAGNOSTIC ---
+    
+    st.markdown("---")
     
     # Bouton pour désélectionner
     if st.session_state['selected_ref']:
@@ -85,7 +111,6 @@ with col_map:
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            # La référence stockée dans le DataFrame est au format '00025'
             reference = row.get(REF_COL, 'N/A')
             
             # LOGIQUE POUR L'AFFICHAGE DU PIN : Supprimer les zéros en tête
@@ -137,7 +162,6 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
                 if closest_row['distance'] < 0.0001: 
-                    # On stocke la référence au format '00025' dans la session state pour la recherche
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
                  
@@ -173,8 +197,7 @@ with col_right:
             ville = selected_data.get('Ville', '')
             
             st.markdown("##### 📍 Adresse")
-            # Ajout d'une condition pour ne pas afficher la ligne si les valeurs sont manquantes
-            if str(adresse).strip() not in ('N/A', 'nan'):
+            if str(adresse).strip() not in ('N/A', 'nan', ''):
                 st.write(f"{adresse} \n{code_postal} - {ville}")
             else:
                 st.write("Adresse non renseignée.")
@@ -229,7 +252,6 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 valeur_str = str(valeur).strip()
-                # N'affiche pas les champs si la valeur est vide, 'nan', 'N/A' ou juste l'unité
                 if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None'): 
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
@@ -240,8 +262,7 @@ with col_right:
             st.markdown("---")
             
         else:
-            # Message d'erreur si la recherche échoue, pour un diagnostic futur
-            st.error(f"❌ La référence '{selected_ref}' n'a pas pu être trouvée dans le DataFrame (vérifiez le formatage).")
+            st.error(f"❌ La référence **'{selected_ref}'** n'a pas pu être trouvée dans le DataFrame (Vérifiez le panneau de diagnostic à gauche).")
 
     else:
         st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
