@@ -38,13 +38,11 @@ CUSTOM_CSS = """
 }
 
 /* 2. Classe pour l'état FERMÉ (caché) */
-/* Translate le panneau de 100% de sa largeur (300px) vers la droite, hors écran */
 .details-panel-closed {
     transform: translateX(100%);
 }
 
 /* 3. Classe pour l'état OUVERT (visible) */
-/* Le panneau est à sa position normale (translateX(0)) */
 .details-panel-open {
     transform: translateX(0);
 }
@@ -58,22 +56,20 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
-# --- Fonction utilitaire de formatage (NOUVELLE) ---
+# --- Fonction utilitaire de formatage ---
 def format_value(value, unit=""):
     """Formate la valeur: supprime les unités si la valeur est un texte."""
     val_str = str(value).strip()
     
-    # Vérifie si la valeur ressemble à un NaN ou à une chaîne vide/non pertinente
-    if val_str in ('N/A', 'nan', '', 'None'):
+    # Valeurs vides ou non pertinentes
+    if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²'):
         return "Non renseigné"
         
     # Vérifie si la valeur est une chaîne contenant des lettres (ex: "Selon surface")
     if any(c.isalpha() for c in val_str):
-        # Si c'est un texte, on retourne le texte seul
         return val_str
     
-    # Si c'est un nombre (ou une plage comme "36 à 265 m²" déjà formatée dans l'Excel)
-    # on n'ajoute l'unité que si elle n'est pas déjà présente pour éviter les doublons.
+    # Si c'est un nombre, on ajoute l'unité
     if unit and not val_str.lower().endswith(unit.lower().strip()):
         return f"{val_str} {unit}"
         
@@ -170,7 +166,6 @@ if not data_df.empty:
         clicked_coords = map_output["last_clicked"]
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
-        # Vérifie si le clic est éloigné des pins (logique approximative pour "clic sur la carte")
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
@@ -181,12 +176,10 @@ if not data_df.empty:
             st.session_state['last_clicked_coords'] = current_coords
             
             if min_distance_sq > DISTANCE_THRESHOLD:
-                # Clic loin du pin le plus proche -> Masquer le volet
                 if st.session_state['selected_ref'] is not None:
                      st.session_state['selected_ref'] = None
                      st.rerun()
             else:
-                # Clic proche d'un pin -> Afficher les détails
                 new_ref = closest_row[REF_COL]
                 if new_ref != st.session_state['selected_ref']:
                     st.session_state['selected_ref'] = new_ref
@@ -213,69 +206,83 @@ if show_details:
         except ValueError:
             display_title_ref = selected_ref_clean
             
-        
+        # --- Entête ---
         html_content += f"""
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3>
             <hr style="border: 1px solid #ccc; margin: 5px 0;">
             <h4 style="color: #0072B2;">Réf. : {display_title_ref}</h4>
         """
         
-        html_content += '<div style="background-color: #f7f7f7; padding: 10px; border-radius: 5px; margin-bottom: 10px;">'
-        html_content += '<p style="font-weight: bold; margin: 5px 0;">Informations clés:</p>'
+        # --- LOGIQUE D'AFFICHAGE DES COLONNES G à AH ---
         
-        # --- Utilisation de la fonction format_value() ---
-        
-        # 1. Empêche la double unité "m² m²"
-        val_gla = format_value(selected_data.get('Surface GLA', 'N/A'), unit="m²")
-        
-        # 2. Empêche le doublon "Selon surface €"
-        val_loyer = format_value(selected_data.get('Loyer annuel', 'N/A'), unit="€")
-        
-        # 3. Traite les autres valeurs
-        val_emplacement = format_value(selected_data.get('Emplacement', 'N/A'))
-        val_typologie = format_value(selected_data.get('Typologie', 'N/A'))
-        
-        colonnes_a_afficher = [
-            ('Emplacement', val_emplacement),
-            ('Typologie', val_typologie),
-            ('Surface GLA', val_gla),
-            ('Loyer annuel', val_loyer),
+        # Colonnes à exclure de l'affichage détaillé pour éviter la redondance
+        cols_to_exclude = [
+            REF_COL, 
+            'Latitude', 'Longitude', 
+            'Adresse', 'Code Postal', 'Ville', 'Lien Google Maps' 
+            # Ajoutez ici les noms des colonnes que vous voulez exclure de la liste générale
+            # si vous les traitez ailleurs.
         ]
         
-        for nom, valeur in colonnes_a_afficher:
-             html_content += f'<div style="margin-bottom: 5px;"><span style="font-weight: bold; color: #555;">{nom} :</span> {valeur}</div>'
-                 
-        html_content += '</div>' 
+        # Début de la colonne G. L'indice 0 est la première colonne (A). L'indice 6 est la colonne G.
+        # On prend toutes les colonnes à partir de l'indice 6
+        all_cols = data_df.columns.tolist()
+        detail_cols = all_cols[6:] 
+
+        html_content += '<div style="margin-top: 15px;">'
         
-        # --- Correction de l'affichage de l'adresse ---
+        # Première boucle : Affichage de l'adresse séparément (colonne H/I/J typiquement)
         adresse = selected_data.get('Adresse', 'N/A')
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
         
-        st.write(f"valeur adresse: {adresse}")
-        st.write(f"valeur code postal: {code_postal}")
-        st.write(f"valeur ville: {ville}")
-        
-        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 0px;">📍 Adresse</p>'
-        
-        # On affiche uniquement la ligne Code Postal - Ville s'ils sont renseignés
+        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse complète</p>'
         adresse_str = str(adresse).strip()
         code_ville_str = f"{code_postal} - {ville}".strip()
         
         if adresse_str not in ('N/A', 'nan', ''):
-             html_content += f'<p style="margin: 0;">{adresse_str}<br>'
+             html_content += f'<p style="margin: 0; font-size: 14px;">{adresse_str}<br>'
              if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
                  html_content += f'{code_ville_str}'
              html_content += '</p>'
         else:
-             html_content += f'<p style="margin: 0;">Adresse non renseignée.</p>'
-             
-        # --- Lien Google Maps ---
+             html_content += f'<p style="margin: 0; font-size: 14px;">Adresse non renseignée.</p>'
+
+        html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
+        
+        # Seconde boucle : Affichage de toutes les autres colonnes G à AH
+        html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
+        
+        for col_name in detail_cols:
+            if col_name not in cols_to_exclude:
+                value = selected_data.get(col_name, 'N/A')
+                
+                # Formatage de la valeur : on tente d'appliquer l'unité si la colonne la suggère
+                unit = ''
+                if '€' in col_name or 'EUR' in col_name:
+                    unit = '€'
+                elif 'Surface' in col_name or 'GLA' in col_name or 'utile' in col_name:
+                    unit = 'm²'
+                
+                formatted_value = format_value(value, unit=unit)
+                
+                # Affichage des paires Nom : Valeur
+                html_content += f'''
+                <div style="margin-bottom: 8px;">
+                    <span style="font-weight: bold; color: #555; font-size: 14px;">{col_name} :</span> 
+                    <span style="font-size: 14px;">{formatted_value}</span>
+                </div>
+                '''
+
+        html_content += '</div>'
+        
+        # --- Lien Google Maps (en bas du volet, comme demandé) ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
              html_content += f'''
+             <hr style="border: 1px solid #eee; margin: 20px 0;">
              <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
-                <button style="background-color: #4CAF50; color: white; border: none; padding: 10px 0px; text-align: center; text-decoration: none; display: block; font-size: 14px; margin-top: 20px; cursor: pointer; border-radius: 4px; width: 100%;">
+                <button style="background-color: #4CAF50; color: white; border: none; padding: 10px 0px; text-align: center; text-decoration: none; display: block; font-size: 14px; margin-top: 10px; cursor: pointer; border-radius: 4px; width: 100%;">
                     Voir sur Google Maps
                 </button>
             </a>
@@ -289,7 +296,3 @@ html_content += '</div>'
 
 # Injection du panneau de détails flottant
 st.markdown(html_content, unsafe_allow_html=True)
-
-# Message dans le corps principal si aucun détail n'est affiché (pour la visibilité initiale)
-if not show_details and not data_df.empty:
-    st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
