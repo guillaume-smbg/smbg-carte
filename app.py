@@ -27,9 +27,8 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-# URL du logo (Utilisation d'une image placeholder pour l'exemple)
-# NOTE: Remplacer par l'URL réelle du logo SMBG si disponible
-LOGO_URL = "https://placehold.co/250x60/fff/05263d?text=LOGO+SMBG" 
+# URL du logo (Utilisation du fichier uploadé par l'utilisateur)
+LOGO_URL = "image_7f0ed6.png" 
 
 # Noms des colonnes pour les FILTRES et les COORDONNEES
 COL_REGION = "Région"
@@ -81,9 +80,8 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Fichier de données
-DATA_FILE_PATH = "data/Liste des lots Version 2.xlsx"
-EXCEL_SHEET_NAME = "Tableau recherche"
+# Fichier de données (nom du snippet généré)
+DATA_FILE_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
 
 
 # -------------------------------------------------
@@ -91,16 +89,17 @@ EXCEL_SHEET_NAME = "Tableau recherche"
 # -------------------------------------------------
 
 @st.cache_data
-def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
-    """Charge le DataFrame depuis le fichier Excel et effectue le nettoyage."""
+def load_data(file_path: str) -> pd.DataFrame:
+    """Charge le DataFrame depuis le fichier CSV de la feuille 'Tableau recherche' et effectue le nettoyage."""
     try:
-        # Tente de charger le fichier EXCEL (.xlsx)
-        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        # Tente de charger le fichier CSV correspondant à la feuille Excel
+        # Utilisation du nom du fichier snippet
+        df = pd.read_csv(file_path)
     except FileNotFoundError:
-        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vérifier le chemin d'accès.")
+        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que le fichier 'Liste des lots Version 2.xlsx' est bien présent et traité en tant que CSV.")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier Excel (feuille: '{sheet_name}'). Détails: {e}")
+        st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
         return pd.DataFrame()
 
 
@@ -122,9 +121,18 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     df[COL_TYPOLOGIE] = df[COL_TYPOLOGIE].fillna('Non spécifié')
     df[COL_TYPE] = df[COL_TYPE].fillna('Non spécifié')
     df[COL_CESSION] = df[COL_CESSION].fillna('Non spécifié')
+    
+    # Gestion des valeurs pour Extraction et Restauration
+    # On normalise les valeurs binaires pour n'avoir que 'Oui', 'Non' ou 'Non spécifié'
     df[COL_EXTRACTION] = df[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     df[COL_RESTAURATION] = df[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+    
+    # IMPORTANT: Nous conservons les lignes avec 'Non' ou 'Non spécifié' dans le DataFrame
+    # pour que le filtrage par checkbox puisse fonctionner correctement plus tard.
 
+    # Nettoyage des chaînes de caractères pour les filtres (éviter les espaces indésirables)
+    for col in [COL_REGION, COL_DEPARTEMENT, COL_VILLE, COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
+         df[col] = df[col].astype(str).str.strip()
 
     return df
 
@@ -241,7 +249,7 @@ def main():
         st.session_state["selected_ref"] = "NO_SELECTION"
 
     # Chargement des données
-    df = load_data(DATA_FILE_PATH, EXCEL_SHEET_NAME)
+    df = load_data(DATA_FILE_PATH)
     if df.empty:
         return
 
@@ -255,7 +263,8 @@ def main():
     with col_left:
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
         
-        # 0. Affichage du LOGO
+        # 0. Affichage du LOGO (Utilisation du fichier uploadé)
+        # S'assurer que l'image s'affiche bien dans la colonne
         st.image(LOGO_URL, use_column_width=True)
 
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
@@ -319,17 +328,18 @@ def main():
         # --- FILTRES BINAIRES (7, 8) ---
         st.markdown("<p style='font-weight: bold; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
         
-        # 7. Filtre Extraction
+        # 7. Filtre Extraction (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
         filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
         if filter_extraction:
-            # Filtre pour inclure uniquement 'Oui' ou 'Non spécifié' pour être tolérant
-            df_filtered = df_filtered[df_filtered[COL_EXTRACTION].isin(['Oui', 'Non spécifié'])]
+            # Si coché, on filtre pour n'afficher que les lots où la valeur est STRICTEMENT 'Oui'
+            df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
 
 
-        # 8. Filtre Restauration
+        # 8. Filtre Restauration (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
         filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
         if filter_restauration:
-            df_filtered = df_filtered[df_filtered[COL_RESTAURATION].isin(['Oui', 'Non spécifié'])]
+            # Si coché, on filtre pour n'afficher que les lots où la valeur est STRICTEMENT 'Oui'
+            df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
 
 
         # --- AFFICHAGE DU RÉSULTAT ET BOUTON ---
