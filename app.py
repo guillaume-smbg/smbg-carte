@@ -5,59 +5,115 @@ from streamlit_folium import folium_static
 import json
 import numpy as np
 
-# --- 1. DONNÉES DE DÉMONSTRATION (Remplacer par vos données réelles) ---
+# --- 1. CONFIGURATION INITIALE & GESTION DES DONNÉES ---
+
+# Configure la page en mode large et définit le titre
+st.set_page_config(layout="wide", page_title="SMBG Carte Immo") 
+
+# --- A. DONNÉES DE DÉMONSTRATION ---
 # Simule le fichier "Liste des lots.xlsx - Tableau recherche.csv"
+# *** IMPORTANT ***
+# REMPLACER CES DONNÉES PAR LA LECTURE DE VOTRE FICHIER CSV RÉEL
+# df = pd.read_csv("Liste des lots.xlsx - Tableau recherche.csv")
+# Assurez-vous d'avoir les colonnes 'Latitude', 'Longitude', 'Référence annonce', 'Surface GLA', 'Typologie', 'Région', 'Département'.
+
 try:
-    # Ajout d'une colonne 'Département' pour la nouvelle fonctionnalité de filtre
+    # Création du DataFrame de démonstration
+    # Ajout des colonnes 'Département' et 'N° Département' pour le filtrage local
     DATA = {
-        'Référence annonce': ['00022', '00023', '00024', '00025', '00026', '00027', '00028', '00029'],
-        'Latitude': [48.763870, 48.822532, 48.8566, 45.764043, 44.837789, 43.6047, 48.5734, 43.7102],
-        'Longitude': [2.288359, 2.190669, 2.3522, 4.835659, -0.579180, 1.4442, 7.7521, 7.2620],
-        'Ville': ['Montrouge', 'Ville-d\'Avray', 'Paris', 'Lyon', 'Bordeaux', 'Toulouse', 'Strasbourg', 'Nice'],
-        'Adresse': ['11 Rue des Coquelicots', '30 Rue de la Ronce', '10 Rue de la Paix', 'Place Bellecour', 'Rue Sainte Catherine', 'Place du Capitole', 'Grande Île', 'Promenade des Anglais'],
-        'Surface GLA': [325, 105, 500, 450, 200, 300, 150, 250],
-        'Loyer annuel': [150000, 120000, 300000, 250000, 90000, 180000, 80000, 160000],
-        'Typologie': ['Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble'],
-        'Région': ['Ile-de-France', 'Ile-de-France', 'Ile-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 'Occitanie', 'Grand Est', 'Provence-Alpes-Côte d\'Azur'],
-        'Département': ['Hauts-de-Seine', 'Hauts-de-Seine', 'Paris', 'Rhône', 'Gironde', 'Haute-Garonne', 'Bas-Rhin', 'Alpes-Maritimes'],
-        'N° Département': ['92', '92', '75', '69', '33', '31', '67', '06'],
+        'Référence annonce': ['00022', '00023', '00024', '00025', '00026', '00027', '00028', '00029', '00030', '00031', '00032', '00033', '00034', '00035', '00036', '00037'],
+        'Latitude': [48.763870, 48.822532, 48.8566, 45.764043, 44.837789, 43.6047, 48.5734, 43.7102, 43.3000, 45.1885, 47.2184, 48.4069, 49.4432, 47.0811, 47.3941, 46.2276],
+        'Longitude': [2.288359, 2.190669, 2.3522, 4.835659, -0.579180, 1.4442, 7.7521, 7.2620, 5.4000, 5.7245, -1.5536, 1.9333, 2.1000, 2.4000, 5.0400, 2.2137],
+        'Ville': ['Montrouge', 'Ville-d\'Avray', 'Paris', 'Lyon', 'Bordeaux', 'Toulouse', 'Strasbourg', 'Nice', 'Marseille', 'Grenoble', 'Nantes', 'Orléans', 'Rouen', 'Bourges', 'Dijon', 'Paris-Sud'],
+        'Adresse': ['11 Rue des Coquelicots', '30 Rue de la Ronce', '10 Rue de la Paix', 'Place Bellecour', 'Rue Sainte Catherine', 'Place du Capitole', 'Grande Île', 'Promenade des Anglais', 'Vieux-Port', 'Place Grenette', 'Quai de la Fosse', 'Place du Martroi', 'Gros Horloge', 'Place Jacques Cœur', 'Place de la Libération', 'Rond-point des champs'],
+        'Surface GLA': [325, 105, 500, 450, 200, 300, 150, 250, 600, 180, 220, 350, 400, 100, 130, 700],
+        'Loyer annuel': [150000, 120000, 300000, 250000, 90000, 180000, 80000, 160000, 400000, 100000, 110000, 190000, 220000, 50000, 70000, 450000],
+        'Typologie': ['Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Commercial', 'Pied d\'immeuble', 'Bureaux', 'Commercial', 'Pied d\'immeuble', 'Bureaux'],
+        'Région': ['Ile-de-France', 'Ile-de-France', 'Ile-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 'Occitanie', 'Grand Est', 'Provence-Alpes-Côte d\'Azur', 'Provence-Alpes-Côte d\'Azur', 'Auvergne-Rhône-Alpes', 'Pays de la Loire', 'Centre-Val de Loire', 'Normandie', 'Centre-Val de Loire', 'Bourgogne-Franche-Comté', 'Ile-de-France'],
+        'Département': ['Hauts-de-Seine', 'Hauts-de-Seine', 'Paris', 'Rhône', 'Gironde', 'Haute-Garonne', 'Bas-Rhin', 'Alpes-Maritimes', 'Bouches-du-Rhône', 'Isère', 'Loire-Atlantique', 'Loiret', 'Seine-Maritime', 'Cher', 'Côte-d\'Or', 'Essonne'],
+        'N° Département': ['92', '92', '75', '69', '33', '31', '67', '06', '13', '38', '44', '45', '76', '18', '21', '91'],
     }
     df = pd.DataFrame(DATA)
-    # Rendre la référence annonce lisible dans les marqueurs (sans la partie 000)
+    # Colonne utilitaire pour l'affichage dans le marqueur (retire les zéros inutiles)
     df['ref_clean'] = df['Référence annonce'].apply(lambda x: int(x))
     
 except Exception as e:
-    st.error(f"Erreur de chargement des données de démo: {e}")
+    st.error(f"Erreur lors du chargement ou de la préparation des données de démo: {e}")
     df = pd.DataFrame()
 
 
-# --- 2. FONCTION D'INJECTION CSS ET JS ---
+# Structure pour le filtre Région -> Départements (basée sur les données de démo)
+REGION_DEPARTMENTS = df.groupby('Région')['Département'].unique().apply(list).to_dict()
+
+# --- 2. GESTION DES SESSIONS STATE (ÉTAT DE L'APPLICATION) ---
+
+# Initialise l'état de la référence sélectionnée (panneau de droite)
+if 'selected_ref' not in st.session_state:
+    st.session_state.selected_ref = None 
+
+# Initialise l'état des filtres si non existants
+if not df.empty:
+    min_gla_default = df['Surface GLA'].min()
+    max_gla_default = df['Surface GLA'].max()
+    all_typos = sorted(df['Typologie'].unique().tolist())
+    
+    if 's_gla' not in st.session_state:
+        st.session_state.s_gla = (min_gla_default, max_gla_default)
+    if 's_typo' not in st.session_state:
+        # Par défaut, toutes les typologies sont sélectionnées
+        st.session_state.s_typo = all_typos
+    if 's_regions_checked' not in st.session_state:
+        # Par défaut, toutes les régions sont sélectionnées si l'on veut afficher tous les points
+        st.session_state.s_regions_checked = sorted(df['Région'].unique().tolist())
+    if 's_departments_checked' not in st.session_state:
+        # Par défaut, tous les départements sont sélectionnés
+        st.session_state.s_departments_checked = sorted(df['Département'].unique().tolist())
+else:
+    # Cas où le DataFrame est vide
+    if 's_gla' not in st.session_state:
+        st.session_state.s_gla = (0, 1000)
+    if 's_typo' not in st.session_state:
+        st.session_state.s_typo = []
+    if 's_regions_checked' not in st.session_state:
+        st.session_state.s_regions_checked = []
+    if 's_departments_checked' not in st.session_state:
+        st.session_state.s_departments_checked = []
+
+
+# --- 3. INJECTION CSS (STYLE & APPARENCE) ---
+
 def inject_css(css_code):
-    """Injecte le code CSS dans l'application Streamlit."""
+    """Injecte le code CSS dans l'application Streamlit pour le style complet."""
     st.markdown(f'<style>{css_code}</style>', unsafe_allow_html=True)
 
-# Contenu du fichier style.css (pour l'injection)
+# Définition complète des styles CSS pour l'esthétique et la mise en page
 CSS_CONTENT = """
 :root {
-    --logo-blue: #05263d; 
-    --copper: #b87333;   
-    --light-gray: #f7f7f7; 
-    --dark-gray: #333333; 
+    /* Couleurs de la charte SMBG (à adapter) */
+    --logo-blue: #05263d; /* Bleu foncé */
+    --copper: #b87333;   /* Couleur accent (cuivre/orange) */
+    --light-gray: #f7f7f7; /* Fond clair pour le panneau droit */
+    --dark-gray: #333333; /* Texte et accents sombres */
+    /* Dimensions des panneaux */
     --left-panel-width: 275px;
     --right-panel-width: 275px;
     --region-indent: 15px; /* Décalage pour les départements imbriqués */
 }
 /* IMPORTANT: Masque la barre Streamlit par défaut */
-/* .stApp > header { visibility: hidden; } */ 
-/* .css-18e3th9 { padding-top: 1rem; } */ /* Ajuste le padding si nécessaire */
+/* Masque le header de Streamlit */
+.stApp > header { visibility: hidden; } 
+/* Masque les indicateurs de pages Streamlit dans la sidebar */
+/* .css-18e3th9 { padding-top: 1rem; } */ 
 
-body { overflow: hidden; }
+/* Style général de la police */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
     font-family: 'Futura', sans-serif !important;
     color: #000;
     font-size: 13px;
     line-height: 1.4;
 }
+
+/* --- Style du Panneau Gauche (Filtres) --- */
 .left-panel {
     background-color: var(--logo-blue);
     color: #fff !important;
@@ -69,28 +125,11 @@ body { overflow: hidden; }
     position: fixed;
     top: 16px; 
     left: 16px;
-    overflow-y: auto; 
-    z-index: 1000;
+    overflow-y: auto; /* Scroll si trop de filtres */
+    z-index: 1000; /* Assure que le panneau est au-dessus de tout */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
-.left-panel label {
-    color: #fff !important;
-    font-size: 14px;
-    font-weight: bold;
-    margin-bottom: 4px;
-    display: block;
-}
-/* Style spécifique pour les labels de cases à cocher */
-.left-panel .stCheckbox label {
-    font-weight: normal; 
-    color: #fff;
-    font-size: 13px;
-}
-/* Style pour les départements imbriqués */
-.left-panel .department-checkbox label {
-    margin-left: var(--region-indent);
-    font-size: 13px;
-    font-weight: normal;
-}
+/* Titres de section dans le panneau de gauche */
 .left-panel .stMarkdown h3 {
     color: var(--copper) !important;
     font-size: 16px;
@@ -100,13 +139,47 @@ body { overflow: hidden; }
     margin-top: 15px;
     margin-bottom: 10px;
 }
+/* Labels principaux (Slider, etc.) */
+.left-panel label {
+    color: #fff !important;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    display: block;
+}
+/* Style pour les labels des cases à cocher */
+.left-panel .stCheckbox label {
+    font-weight: normal; 
+    color: #fff;
+    font-size: 13px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+/* Style pour les départements imbriqués (le décalage) */
+.left-panel .department-checkbox {
+    padding-left: var(--region-indent);
+}
+.left-panel .department-checkbox .stCheckbox label {
+    font-weight: normal;
+    color: #ccc; /* Couleur légèrement différente pour les départements */
+    font-size: 13px;
+}
+
+/* Compteur de résultats */
 #result-count-message {
     text-align: center;
     color: #fff;
     font-size: 16px;
     font-weight: bold;
     margin-top: 10px;
+    padding: 8px;
+    background-color: rgba(184, 115, 51, 0.2); /* Fond léger pour accentuer */
+    border-radius: 8px;
 }
+
+/* Slider (Surface GLA) */
 .left-panel .stSlider > div:first-child {
     background-color: var(--dark-gray); 
     border-radius: 8px;
@@ -115,6 +188,8 @@ body { overflow: hidden; }
 .left-panel .stSlider .st-emotion-cache-1r6p3m5 {
     background-color: var(--copper);
 }
+
+/* Bouton de Réinitialisation */
 .left-panel .stButton button {
     background-color: var(--copper);
     color: #fff !important;
@@ -129,16 +204,8 @@ body { overflow: hidden; }
 .left-panel .stButton button:hover {
     background-color: #e09849;
 }
-/* Les Multiselect pour Typologie redeviennent des cases à cocher visuellement */
-.left-panel .stMultiSelect div[data-baseweb="select"] {
-    background-color: #fff;
-    border-radius: 8px;
-    color: #000;
-}
-.left-panel .stMultiSelect [data-baseweb="tag"] {
-    background-color: var(--copper);
-    color: #fff;
-}
+
+/* --- Mise en page principale (Carte) --- */
 .main-content-wrapper {
     /* Marge pour le panneau gauche */
     margin-left: calc(var(--left-panel-width) + 32px); 
@@ -161,6 +228,8 @@ body { overflow: hidden; }
     height: 100% !important; /* Force la hauteur à 100% du conteneur */
     width: 100% !important; /* Force la largeur à 100% du conteneur */
 }
+
+/* --- Style des Marqueurs Folium --- */
 .folium-div-icon {
     background-color: var(--logo-blue) !important;
     color: white !important;
@@ -178,20 +247,23 @@ body { overflow: hidden; }
 }
 .folium-div-icon.selected-marker {
     background-color: var(--copper) !important;
-    border: 2px solid var(--logo-blue) !important;
-    transform: scale(1.2);
+    border: 3px solid var(--logo-blue) !important; /* Bordure plus épaisse */
+    transform: scale(1.3); /* Zoom léger sur le marqueur sélectionné */
     width: 32px !important;
     height: 32px !important;
     line-height: 32px !important;
     font-size: 13px !important;
 }
+
+/* --- Style du Panneau Droit (Détails) --- */
 .right-panel {
     min-width: var(--right-panel-width);
     max-width: var(--right-panel-width);
-    background-color: var(--light-gray); 
+    background-color: #fff; /* Fond blanc pur pour les détails */
+    border: 1px solid #e0e0e0;
     padding: 16px;
     border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     position: fixed; 
     top: 16px;
     right: 16px;
@@ -199,17 +271,41 @@ body { overflow: hidden; }
     overflow-y: auto;
     z-index: 1000;
 }
+.right-panel h4 {
+    color: var(--logo-blue);
+    font-size: 18px;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 10px;
+}
 .ref-number {
-    font-size: 18px; 
+    font-size: 20px; 
     font-weight: 800; 
     color: var(--copper); 
     display: block;
     text-align: center;
     margin-bottom: 15px;
-    padding: 5px;
-    border: 1px solid #ddd;
+    padding: 8px;
+    border: 2px solid var(--copper);
     border-radius: 6px;
+    background-color: rgba(184, 115, 51, 0.05);
 }
+/* Ligne d'adresse */
+.addr-line {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+    line-height: 1.2;
+}
+/* Ligne de ville/région */
+.city-line {
+    font-size: 18px; 
+    font-weight: bold;
+    color: var(--logo-blue);
+    margin-bottom: 15px;
+    margin-top: 5px;
+}
+/* Lignes de détails (Surface, Loyer, Typo) */
 .detail-row {
     display: flex;
     justify-content: space-between;
@@ -224,20 +320,9 @@ body { overflow: hidden; }
 .detail-value {
     color: #111;
     text-align: right;
+    font-weight: 600;
 }
-.addr-line {
-    font-size: 14px;
-    font-weight: 500;
-    color: #333;
-    line-height: 1.2;
-}
-.city-line {
-    font-size: 18px; 
-    font-weight: bold;
-    color: var(--logo-blue);
-    margin-bottom: 15px;
-    margin-top: 5px;
-}
+/* Boutons du panneau de droite */
 .right-panel .stButton button {
     background-color: var(--logo-blue);
     color: #fff !important;
@@ -252,10 +337,12 @@ body { overflow: hidden; }
 .right-panel .stButton button:hover {
     background-color: var(--copper);
 }
+
+/* Message d'absence de sélection */
 .no-selection-message {
-    background-color: #fff3cd; 
-    color: #856404;
-    border: 1px solid #ffeeba;
+    background-color: #f0f0ff; /* Bleu très clair */
+    color: var(--logo-blue);
+    border: 1px solid #c0c0ff;
     padding: 15px;
     border-radius: 8px;
     margin-top: 20px;
@@ -264,201 +351,249 @@ body { overflow: hidden; }
 }
 """
 
-# Script JavaScript pour injecter un gestionnaire de clic dans l'iFrame Folium
+
+# --- 4. GESTION DU CLIC SUR LE MARQUEUR (JS INJECTÉ) ---
+
+# Script JavaScript pour injecter un gestionnaire de clic DANS l'iFrame Folium.
+# Ce script envoie la référence cliquée à Streamlit via postMessage.
 JS_CLICK_HANDLER = """
 <script>
     function setupMarkerClicks() {
+        // Tente de trouver l'iFrame Folium
         const iframe = document.querySelector('.streamlit-folium > iframe');
         if (!iframe) {
-            console.warn("Folium iframe not found.");
+            // console.warn("Folium iframe not found.");
             return;
         }
 
+        // Exécute le code une fois que le contenu de l'iFrame est chargé
         iframe.onload = function() {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            // Sélectionne tous les marqueurs personnalisés (DivIcon)
             const markers = iframeDoc.querySelectorAll('.folium-div-icon');
 
             markers.forEach(marker => {
                 marker.style.cursor = 'pointer'; 
+                // Ajoute l'événement de clic
                 marker.onclick = function(event) {
                     event.stopPropagation();
-                    const ref = marker.getAttribute('data-ref');
+                    const ref = marker.getAttribute('data-ref'); // Récupère la référence de l'annonce
+                    
                     if (ref) {
-                        // Envoyer la référence à Streamlit (via le parent)
+                        // 1. Envoyer la référence sélectionnée à Streamlit (via le parent)
                         window.parent.postMessage({
                             type: 'streamlit:setSessionState',
-                            state: { selected_ref: ref }
+                            state: { selected_ref: ref } // Met à jour st.session_state.selected_ref
                         }, '*');
                         
-                        // Déclencher un rechargement de Streamlit pour appliquer l'état
+                        // 2. Déclencher un rechargement de Streamlit pour appliquer l'état et afficher le panneau de droite
                         window.parent.postMessage({
                             type: 'streamlit:rerun'
                         }, '*');
+                        
+                        // Enlève la classe 'selected-marker' de tous les autres marqueurs dans l'iFrame
+                        iframeDoc.querySelectorAll('.selected-marker').forEach(m => {
+                            m.classList.remove('selected-marker');
+                        });
+                        // Ajoute la classe 'selected-marker' à l'élément cliqué
+                        marker.classList.add('selected-marker');
                     }
                 };
             });
         };
     }
     
+    // Tente de configurer les clics au chargement de la fenêtre
     window.addEventListener('load', setupMarkerClicks);
+
+    // Écoute les messages du parent (Streamlit) pour effacer la sélection si nécessaire
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'clear_selection') {
+            const iframe = document.querySelector('.streamlit-folium > iframe');
+            if (iframe && iframe.contentDocument) {
+                 iframe.contentDocument.querySelectorAll('.selected-marker').forEach(m => {
+                    m.classList.remove('selected-marker');
+                });
+            }
+        }
+    });
 
 </script>
 """
+
 def inject_js_handler():
     """Injecte le script de gestionnaire de clic JS."""
     st.markdown(JS_CLICK_HANDLER, unsafe_allow_html=True)
 
 
-# --- 3. CONFIGURATION ET INJECTION ---
-# Configure la page en mode large et injecte le CSS et le JS
-st.set_page_config(layout="wide", page_title="SMBG Carte Immo") 
+# --- 5. LOGIQUE DE FILTRAGE PRINCIPALE ---
+
+def apply_filters(df_input):
+    """Applique tous les filtres actifs à partir de st.session_state."""
+    df_filtered = df_input.copy()
+    
+    # Récupération des filtres de la session state
+    gla_range = st.session_state.s_gla
+    selected_typos = st.session_state.s_typo
+    selected_departments = st.session_state.s_departments_checked
+    selected_regions = st.session_state.s_regions_checked # Utile pour le cas où aucun département n'est sélectionné
+
+    # 1. Filtrage par Surface GLA
+    if gla_range:
+        df_filtered = df_filtered[
+            (df_filtered['Surface GLA'] >= gla_range[0]) & 
+            (df_filtered['Surface GLA'] <= gla_range[1])
+        ]
+
+    # 2. Filtrage par Typologie
+    if selected_typos:
+        df_filtered = df_filtered[df_filtered['Typologie'].isin(selected_typos)]
+    else:
+        # Si aucune typologie n'est cochée, n'afficher aucune annonce (filtre exclusif)
+        return df_input[0:0] 
+
+    # 3. Filtrage par Région/Département
+    if selected_departments:
+        # Si au moins un département est coché, filtrer UNIQUEMENT par les départements cochés
+        df_filtered = df_filtered[df_filtered['Département'].isin(selected_departments)]
+    elif selected_regions:
+        # Si aucun département n'est coché, mais des régions sont cochées, filtrer par ces régions
+        df_filtered = df_filtered[df_filtered['Région'].isin(selected_regions)]
+    else:
+        # Si ni région ni département n'est coché (mais d'autres filtres sont actifs), n'afficher aucun point.
+        return df_input[0:0]
+    
+    return df_filtered
+
+def reset_filters():
+    """Réinitialise tous les filtres à leur état initial."""
+    if not df.empty:
+        st.session_state.s_gla = (df['Surface GLA'].min(), df['Surface GLA'].max())
+        st.session_state.s_typo = sorted(df['Typologie'].unique().tolist())
+        st.session_state.s_regions_checked = sorted(df['Région'].unique().tolist())
+        st.session_state.s_departments_checked = sorted(df['Département'].unique().tolist())
+        st.session_state.selected_ref = None # Désélectionne le marqueur
+    # Ne pas oublier de forcer le rerun
+    st.rerun()
+
+# --- 6. EXÉCUTION DE L'APPLICATION ---
+
+# Injection du CSS et du JS au début
 inject_css(CSS_CONTENT)
-inject_js_handler() # Injection du script JS
-
-
-# --- 4. GESTION DES CLICS DE CARTE (SIMPLIFIÉE) ---
-# Initialise l'état de la référence sélectionnée
-if 'selected_ref' not in st.session_state:
-    st.session_state.selected_ref = None 
-
-# Fonction pour mettre à jour l'état de la référence sélectionnée
-def select_marker(ref):
-    st.session_state.selected_ref = ref
-
-# --- 5. LOGIQUE DE FILTRAGE ---
-
-# Définition des options de filtres
-all_regions = sorted(df['Région'].unique().tolist())
-all_typos = sorted(df['Typologie'].unique().tolist())
-
-# Créer un dictionnaire Région -> Liste des Départements
-REGION_DEPARTMENTS = df.groupby('Région')['Département'].unique().apply(list).to_dict()
-
-# Initialisation de l'état des filtres si non existants
-if 's_gla' not in st.session_state:
-    st.session_state.s_gla = (df['Surface GLA'].min(), df['Surface GLA'].max())
-if 's_typo' not in st.session_state:
-    st.session_state.s_typo = all_typos
-if 's_regions_checked' not in st.session_state:
-    st.session_state.s_regions_checked = [] # Liste des régions cochées
-if 's_departments_checked' not in st.session_state:
-    st.session_state.s_departments_checked = [] # Liste des départements cochés
-
-# --- 6. COMPOSANTS DE L'INTERFACE ---
+inject_js_handler() 
 
 # --- A. PANNEAU GAUCHE (FILTRES) ---
+
 st.markdown('<div class="left-panel">', unsafe_allow_html=True)
-st.markdown("### Filtres de recherche")
+st.markdown("<h3>Filtres de recherche</h3>")
 
-# 1. Slider Surface GLA
-min_gla_default = df['Surface GLA'].min()
-max_gla_default = df['Surface GLA'].max()
+# 1. SLIDER Surface GLA
+if not df.empty:
+    min_gla_default = df['Surface GLA'].min()
+    max_gla_default = df['Surface GLA'].max()
 
-gla_range = st.slider(
-    "Surface GLA (m²)", 
-    int(min_gla_default), 
-    int(max_gla_default), 
-    st.session_state.s_gla, 
-    key="s_gla_slider" # Clé unique pour le widget
-)
-# Mise à jour de la session state pour le reinit
-st.session_state.s_gla = gla_range
+    gla_range_ui = st.slider(
+        "Surface GLA (m²)", 
+        int(min_gla_default), 
+        int(max_gla_default), 
+        st.session_state.s_gla, 
+        key="s_gla_slider", 
+        on_change=lambda: st.session_state.__setitem__('s_gla', st.session_state.s_gla_slider)
+    )
+    # L'état est maintenant géré par la session state via on_change
 
-# 2. Cases à cocher Typologie (Utilisation de st.checkbox)
+
+# 2. Cases à cocher Typologie
 st.markdown("<h3>Typologie</h3>", unsafe_allow_html=True)
-selected_typos = []
-for typo in all_typos:
-    # Utilise une clé unique pour chaque checkbox
-    if st.checkbox(typo, value=typo in st.session_state.s_typo, key=f"typo_check_{typo}"):
-        selected_typos.append(typo)
+all_typos = sorted(df['Typologie'].unique().tolist())
+current_typos = st.session_state.s_typo.copy()
+new_typos = []
 
-# Mise à jour de la session state des typologies
-st.session_state.s_typo = selected_typos
+# Utilisation d'un container pour regrouper les checkbox de la typologie
+with st.container():
+    for typo in all_typos:
+        # Si la checkbox est cochée, on l'ajoute à la liste des filtres
+        if st.checkbox(typo, value=typo in current_typos, key=f"typo_check_{typo}"):
+            new_typos.append(typo)
+
+# Mise à jour de la session state
+if set(new_typos) != set(current_typos):
+    st.session_state.s_typo = new_typos
+    st.session_state.selected_ref = None # Réinitialise la sélection à chaque changement de filtre
+    st.rerun()
+
 
 # 3. Cases à cocher Région et Département (Imbriqué)
 st.markdown("<h3>Localisation</h3>", unsafe_allow_html=True)
 
-# Boucle pour afficher les cases à cocher Région et Département
-selected_regions = []
-selected_departments = []
+all_regions = sorted(df['Région'].unique().tolist())
+current_regions_checked = st.session_state.s_regions_checked.copy()
+current_departments_checked = st.session_state.s_departments_checked.copy()
+new_regions_checked = []
+new_departments_checked = []
 
-for region in all_regions:
-    # Case à cocher pour la Région
-    is_region_checked = st.checkbox(region, value=region in st.session_state.s_regions_checked, key=f"region_check_{region}")
-    
-    if is_region_checked:
-        selected_regions.append(region)
+# Utilisation d'un container pour la localisation
+with st.container():
+    for region in all_regions:
+        is_region_checked = st.checkbox(region, value=region in current_regions_checked, key=f"region_check_{region}")
         
-        # Afficher les Départements si la Région est cochée
-        if region in REGION_DEPARTMENTS:
-            departments_in_region = REGION_DEPARTMENTS[region]
+        if is_region_checked:
+            new_regions_checked.append(region)
             
-            # Utilisation de st.container pour le décalage (avec CSS)
-            st.markdown('<div class="department-checkbox">', unsafe_allow_html=True)
-            
-            for dept in departments_in_region:
-                # Case à cocher pour le Département (utilisé st.checkbox car c'est un meilleur widget pour les listes non-multiselect)
-                if st.checkbox(dept, value=dept in st.session_state.s_departments_checked, key=f"dept_check_{region}_{dept}"):
-                    selected_departments.append(dept)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+            # Afficher les Départements si la Région est cochée
+            if region in REGION_DEPARTMENTS:
+                departments_in_region = REGION_DEPARTMENTS[region]
+                
+                # Container imbriqué pour le décalage CSS
+                st.markdown('<div class="department-checkbox">', unsafe_allow_html=True)
+                
+                for dept in departments_in_region:
+                    # Si la région était cochée précédemment, l'état initial des départements est celui de la session state
+                    is_dept_checked_default = dept in current_departments_checked
+                    
+                    if st.checkbox(dept, value=is_dept_checked_default, key=f"dept_check_{region}_{dept}"):
+                        new_departments_checked.append(dept)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
 
-# Mise à jour des sessions state
-st.session_state.s_regions_checked = selected_regions
-st.session_state.s_departments_checked = selected_departments
-
-
-# --- Application des filtres au DataFrame ---
-df_filtered = df.copy()
-
-# 1. Filtrage par Surface GLA
-df_filtered = df_filtered[
-    (df_filtered['Surface GLA'] >= gla_range[0]) & 
-    (df_filtered['Surface GLA'] <= gla_range[1])
-]
-
-# 2. Filtrage par Typologie
-if st.session_state.s_typo:
-    df_filtered = df_filtered[df_filtered['Typologie'].isin(st.session_state.s_typo)]
-else:
-    # Si aucune typologie n'est cochée, n'afficher aucune annonce
-    df_filtered = df_filtered[0:0] 
-
-# 3. Filtrage par Région/Département
-if st.session_state.s_regions_checked:
-    # Si des départements spécifiques sont cochés, filtrer par ceux-là
-    if st.session_state.s_departments_checked:
-        df_filtered = df_filtered[df_filtered['Département'].isin(st.session_state.s_departments_checked)]
-    else:
-        # Sinon, si des régions sont cochées mais aucun département n'est spécifié, filtrer par les régions cochées
-        df_filtered = df_filtered[df_filtered['Région'].isin(st.session_state.s_regions_checked)]
-
-
-# 4. Bouton de réinitialisation
-if st.button("Réinitialiser les filtres"):
-    st.session_state.s_gla = (min_gla_default, max_gla_default)
-    st.session_state.s_typo = all_typos
-    st.session_state.s_regions_checked = []
-    st.session_state.s_departments_checked = []
-    st.session_state.selected_ref = None
+# Mise à jour des sessions state pour la localisation
+# On utilise le set() pour une comparaison efficace et éviter un rerender inutile
+if set(new_regions_checked) != set(current_regions_checked) or set(new_departments_checked) != set(current_departments_checked):
+    st.session_state.s_regions_checked = new_regions_checked
+    st.session_state.s_departments_checked = new_departments_checked
+    st.session_state.selected_ref = None # Réinitialise la sélection à chaque changement de filtre
     st.rerun()
 
+
+# --- Application des filtres et affichage des résultats ---
+df_filtered = apply_filters(df)
+result_count = len(df_filtered)
+
+# Bouton de réinitialisation
+st.button("Réinitialiser les filtres", on_click=reset_filters)
+
 # Affichage du compte de résultats (injecté via CSS/HTML)
-st.markdown(f'<p id="result-count-message">{len(df_filtered)} résultats</p>', unsafe_allow_html=True)
+st.markdown(f'<p id="result-count-message">{result_count} résultats</p>', unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True) # Fin left-panel
 
 
 # --- B. CORPS PRINCIPAL (CARTE) ---
+
 st.markdown('<div class="main-content-wrapper">', unsafe_allow_html=True)
 st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
 
-# 1. Création de la carte Folium
+# 1. Configuration de la carte Folium
 # Centre fixe sur la France
-map_center = [46.603354, 1.888334] # Centre France
-zoom_level = 6 # Niveau de zoom fixe
+map_center = [46.603354, 1.888334] # Centre France métropolitaine
+zoom_level = 6 # Niveau de zoom fixe initial
 
-m = folium.Map(location=map_center, zoom_start=zoom_level, tiles="cartodbpositron")
+m = folium.Map(
+    location=map_center, 
+    zoom_start=zoom_level, 
+    tiles="cartodbpositron", 
+    control_scale=True # Permet d'avoir une échelle sur la carte
+)
 
 
 # 2. Ajout des marqueurs Folium
@@ -467,7 +602,7 @@ if not df_filtered.empty:
         ref = row['Référence annonce']
         lat = row['Latitude']
         lon = row['Longitude']
-        ref_num = row['ref_clean'] # Utiliser le numéro propre (ex: 23)
+        ref_num = row['ref_clean'] # Numéro propre (ex: 23)
 
         # Vérifie si ce marqueur est le marqueur sélectionné
         is_selected = (ref == st.session_state.selected_ref)
@@ -478,21 +613,21 @@ if not df_filtered.empty:
             icon_class += " selected-marker"
         
         # Le HTML contient le numéro de référence. 
-        # On utilise l'attribut data-ref pour le JS de l'iFrame.
+        # On utilise l'attribut data-ref pour le script JS de l'iFrame.
         html = f'<div class="{icon_class}" data-ref="{ref}">{ref_num}</div>'
         
         icon = folium.DivIcon(
             html=html,
-            icon_size=(28, 28)
+            icon_size=(32, 32) if is_selected else (28, 28)
         )
         
         folium.Marker(
             [lat, lon], 
             icon=icon,
-            tooltip=f"Réf: {ref}<br>{row['Ville']}",
+            tooltip=f"Réf: {ref}<br>{row['Ville']} ({row['Département']})",
         ).add_to(m)
 else:
-    # Message si aucun résultat n'est trouvé
+    # Affiche un message sur la carte s'il n'y a pas de résultats
     st.markdown('<div class="no-results-message">Aucun résultat trouvé pour les filtres sélectionnés. Veuillez ajuster vos critères.</div>', unsafe_allow_html=True)
 
 # 3. Affichage de la carte
@@ -521,34 +656,53 @@ if st.session_state.selected_ref:
         st.markdown(f'<p class="addr-line">{selected_data["Adresse"]}</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="city-line">{selected_data["Ville"]} ({selected_data["Région"]})</p>', unsafe_allow_html=True)
         
-        st.markdown('---')
+        st.markdown('<div style="border-bottom: 2px solid #eee; margin-bottom: 15px;"></div>', unsafe_allow_html=True)
 
         # Détails du bien
-        st.markdown(f'<div class="detail-row"><span class="detail-label">Surface GLA</span><span class="detail-value">{selected_data["Surface GLA"]} m²</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="detail-row"><span class="detail-label">Surface GLA</span><span class="detail-value">{selected_data["Surface GLA"]:,} m²</span></div>', unsafe_allow_html=True)
+        
         # Formatage du loyer
-        loyer_formatte = f'{selected_data["Loyer annuel"]:,}'.replace(',', ' ').replace('.', ',')
+        try:
+            loyer_formatte = f'{selected_data["Loyer annuel"]:,}'.replace(',', ' ').replace('.', ',')
+        except Exception:
+            loyer_formatte = str(selected_data["Loyer annuel"])
+            
         st.markdown(f'<div class="detail-row"><span class="detail-label">Loyer annuel</span><span class="detail-value">{loyer_formatte} €</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="detail-row"><span class="detail-label">Typologie</span><span class="detail-value">{selected_data["Typologie"]}</span></div>', unsafe_allow_html=True)
         
         st.button("Voir la fiche complète", key="fiche_btn")
         
+        # Bouton pour désélectionner
         if st.button("Fermer les détails", key="close_btn"):
             st.session_state.selected_ref = None
+            
+            # Tente d'envoyer un message au script JS pour enlever la classe de sélection sur la carte
+            st.markdown("""
+                <script>
+                    window.parent.postMessage({ type: 'clear_selection' }, '*');
+                </script>
+            """, unsafe_allow_html=True)
+            
             st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        # Si la référence sélectionnée n'existe plus (données originales modifiées)
+        # Si la référence sélectionnée n'existe plus (ex: elle a été filtrée)
         st.session_state.selected_ref = None
         st.rerun()
 else:
-    # Affiche le message d'absence de sélection + bouton de démo
+    # Affiche le message d'absence de sélection
     st.markdown('<div class="right-panel">', unsafe_allow_html=True)
     st.markdown('<div class="no-selection-message">Cliquez sur un marqueur (numéro) sur la carte pour afficher les détails de l\'annonce.</div>', unsafe_allow_html=True)
     
-    # Bouton de démonstration
-    if st.button("Simuler Clic sur Réf 00023"):
-        select_marker('00023')
-        st.rerun()
+    # Bouton de démonstration si les données existent
+    if not df.empty:
+        # Fonction simple pour simuler la sélection sans passer par la carte
+        def select_demo_marker(ref_to_select):
+            st.session_state.selected_ref = ref_to_select
+
+        if st.button("Simuler Clic sur Réf 00023"):
+            select_demo_marker('00023')
+            st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
