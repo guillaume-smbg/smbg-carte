@@ -47,8 +47,8 @@ CUSTOM_CSS = """
     transform: translateX(0);
 }
 
-/* 🟢 AJOUT CRITIQUE: Force tous les marqueurs Leaflet à laisser passer les événements de clic. */
-/* Cela devrait résoudre le problème du curseur "main cliquable" et de l'interception. */
+/* 🟢 CONSERVÉ : Force tous les marqueurs Leaflet à laisser passer les événements de clic. */
+/* Ceci est CRITIQUE pour que la carte capture les coordonnées même si le clic est sur le pin. */
 .leaflet-marker-icon {
     pointer-events: none !important; 
 }
@@ -196,37 +196,40 @@ if not data_df.empty:
         
         # Nettoyage de la référence : enlève les zéros non significatifs
         try:
-            # Tente de convertir en entier pour supprimer les zéros à gauche (ex: '00005' -> '5')
             clean_ref = str(int(ref_annonce)) 
         except ValueError:
-            # Si ce n'est pas un nombre, utilise la référence telle quelle
             clean_ref = ref_annonce
 
-        # Création de l'icône personnalisée (texte stylisé)
-        icon = DivIcon(
-            icon_size=(20, 20),
-            icon_anchor=(10, 10),
+        # 1. Ajout du Pin Classique (Visuel)
+        # Il est rendu non cliquable par la règle CSS globale (Section 0)
+        folium.Marker(
+            location=[lat, lon],
+            # Pin bleu classique avec une icône de 'tag'
+            icon=folium.Icon(color='blue', icon='tag', prefix='fa') 
+        ).add_to(m)
+
+        # 2. Ajout du numéro (DivIcon)
+        # Positionnement ajusté pour centrer le texte sur l'icône standard du pin
+        text_icon = DivIcon(
+            icon_size=(30, 20), 
+            icon_anchor=(0, 0), # Ancrage de base
             html=f"""
                 <div style="
                     font-size: 10px;
-                    color: white;
-                    background-color: #0072B2; /* Fond bleu */
-                    border-radius: 50%;
-                    width: 20px; 
-                    height: 20px;
-                    text-align: center;
-                    line-height: 20px; /* Centrage vertical du texte */
-                    border: 1px solid #005A8D;
+                    color: white; 
                     font-weight: bold;
-                    /* pointer-events: none; Retiré, remplacé par CSS global */
+                    text-align: center;
+                    width: 30px; 
+                    line-height: 12px;
+                    /* Décalage pour centrer le texte sur l'icône standard */
+                    transform: translate(-15px, -35px);
                 ">{clean_ref}</div>
             """
         )
 
-        # Ajout du Marqueur standard avec l'icône personnalisée
         folium.Marker(
             location=[lat, lon],
-            icon=icon
+            icon=text_icon
         ).add_to(m)
 
 
@@ -243,7 +246,7 @@ if not data_df.empty:
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # Seuil très tolérant pour les clics dézoomés
+        # Seuil très tolérant pour les clics dézoomés (conservé à 0.05)
         DISTANCE_THRESHOLD = 0.05 
 
         if current_coords != st.session_state['last_clicked_coords']:
@@ -360,7 +363,7 @@ else:
     # Message par défaut quand aucun lot n'est sélectionné
     html_content += """
     <p style="font-weight: bold; margin-top: 10px; color: #0072B2;">
-        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.
+        Cliquez sur un marqueur (pin) sur la carte pour afficher ses détails ici.
     </p>
     """
 
