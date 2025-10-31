@@ -3,6 +3,8 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
+# Importation pour l'icône de texte sur le marqueur
+from folium.features import DivIcon # ⚠️ Assurez-vous que cette ligne est présente
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -184,6 +186,15 @@ if not data_df.empty:
         lat = row['Latitude']
         lon = row['Longitude']
         
+        ref_annonce = row[REF_COL]
+        
+        # Nettoyage de la référence : enlève les zéros non significatifs
+        try:
+            clean_ref = str(int(ref_annonce)) 
+        except ValueError:
+            clean_ref = ref_annonce
+
+        # 1. Ajout du Marqueur Circulaire (Visuel)
         folium.CircleMarker(
             location=[lat, lon],
             radius=10,
@@ -191,6 +202,31 @@ if not data_df.empty:
             fill=True,
             fill_color="#0072B2",
             fill_opacity=0.8,
+        ).add_to(m)
+
+        # 2. Ajout du Numéro de Référence (Texte)
+        # Positionnement ajusté pour centrer le texte sur le CircleMarker
+        text_icon = DivIcon(
+            icon_size=(20, 20),
+            icon_anchor=(10, 10), # Ancrage au centre du DivIcon (20x20)
+            html=f"""
+                <div style="
+                    font-size: 10px;
+                    color: white; 
+                    font-weight: bold;
+                    text-align: center;
+                    width: 20px; 
+                    line-height: 20px;
+                    /* Laisser passer les clics à travers le texte */
+                    pointer-events: none; 
+                ">{clean_ref}</div>
+            """
+        )
+
+        # On utilise folium.Marker pour le DivIcon (qui est traité comme un marqueur personnalisé)
+        folium.Marker(
+            location=[lat, lon],
+            icon=text_icon
         ).add_to(m)
 
     # Affichage et capture des événements de clic
@@ -201,10 +237,12 @@ if not data_df.empty:
         clicked_coords = map_output["last_clicked"]
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
+        # Calcul de la distance au carré
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
+        # Seuil très tolérant pour les clics (conservé à 0.0005 de votre version précédente)
         DISTANCE_THRESHOLD = 0.0005 
 
         if current_coords != st.session_state['last_clicked_coords']:
@@ -357,7 +395,7 @@ with dataframe_container:
                         type="secondary", 
                         use_container_width=True
                     )
-                    st.markdown("<hr style='margin-top: 10px; margin-bottom: 5px;'>", unsafe_allow_html=True) 
+                    st.markdown("<hr style='margin-top: 10px; gl: 5px;'>", unsafe_allow_html=True) 
             # ---------------------------------------------------------------------------------
 
             # Suppression des colonnes temporaires pour l'affichage
@@ -397,9 +435,9 @@ with dataframe_container:
             transposed_df = display_df.T.reset_index()
             transposed_df.columns = ['Champ', 'Valeur']
             
-            # --- CODE AJOUTÉ : SUPPRIMER LA LIGNE 'Lien Google Maps' ---
+            # --- SUPPRIMER LA LIGNE 'Lien Google Maps' ---
             transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps']
-            # ---------------------------------------------------------
+            # ---------------------------------------------
             
             # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
             
