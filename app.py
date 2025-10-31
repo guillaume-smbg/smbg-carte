@@ -3,8 +3,6 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
-# Importation pour l'icône de texte sur le marqueur
-from folium.features import DivIcon 
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -45,12 +43,6 @@ CUSTOM_CSS = """
 /* 3. Classe pour l'état OUVERT (visible) */
 .details-panel-open {
     transform: translateX(0);
-}
-
-/* 🟢 CONSERVÉ : Force tous les marqueurs Leaflet à laisser passer les événements de clic. */
-/* Ceci est CRITIQUE pour que la carte capture les coordonnées même si le clic est sur le pin. */
-.leaflet-marker-icon {
-    pointer-events: none !important; 
 }
 
 /* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
@@ -187,51 +179,19 @@ if not data_df.empty:
     
     m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-    # --- Création des marqueurs personnalisés (référence inscrite) ---
+    # --- Création des marqueurs ---
     for index, row in data_df.iterrows():
         lat = row['Latitude']
         lon = row['Longitude']
         
-        ref_annonce = row[REF_COL]
-        
-        # Nettoyage de la référence : enlève les zéros non significatifs
-        try:
-            clean_ref = str(int(ref_annonce)) 
-        except ValueError:
-            clean_ref = ref_annonce
-
-        # 1. Ajout du Pin Classique (Visuel)
-        # Il est rendu non cliquable par la règle CSS globale (Section 0)
-        folium.Marker(
+        folium.CircleMarker(
             location=[lat, lon],
-            # Pin bleu classique avec une icône de 'tag'
-            icon=folium.Icon(color='blue', icon='tag', prefix='fa') 
+            radius=10,
+            color="#0072B2",
+            fill=True,
+            fill_color="#0072B2",
+            fill_opacity=0.8,
         ).add_to(m)
-
-        # 2. Ajout du numéro (DivIcon)
-        # Positionnement ajusté pour centrer le texte sur l'icône standard du pin
-        text_icon = DivIcon(
-            icon_size=(30, 20), 
-            icon_anchor=(0, 0), # Ancrage de base
-            html=f"""
-                <div style="
-                    font-size: 10px;
-                    color: white; 
-                    font-weight: bold;
-                    text-align: center;
-                    width: 30px; 
-                    line-height: 12px;
-                    /* Décalage pour centrer le texte sur l'icône standard */
-                    transform: translate(-15px, -35px);
-                ">{clean_ref}</div>
-            """
-        )
-
-        folium.Marker(
-            location=[lat, lon],
-            icon=text_icon
-        ).add_to(m)
-
 
     # Affichage et capture des événements de clic
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
@@ -241,13 +201,11 @@ if not data_df.empty:
         clicked_coords = map_output["last_clicked"]
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
-        # Calcul de la distance au carré
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
         min_distance_sq = data_df['distance_sq'].min()
         
-        # Seuil très tolérant pour les clics dézoomés (conservé à 0.05)
-        DISTANCE_THRESHOLD = 0.05 
+        DISTANCE_THRESHOLD = 0.0005 
 
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
@@ -363,7 +321,7 @@ else:
     # Message par défaut quand aucun lot n'est sélectionné
     html_content += """
     <p style="font-weight: bold; margin-top: 10px; color: #0072B2;">
-        Cliquez sur un marqueur (pin) sur la carte pour afficher ses détails ici.
+        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.
     </p>
     """
 
@@ -439,9 +397,9 @@ with dataframe_container:
             transposed_df = display_df.T.reset_index()
             transposed_df.columns = ['Champ', 'Valeur']
             
-            # --- SUPPRIMER LA LIGNE 'Lien Google Maps' ---
+            # --- CODE AJOUTÉ : SUPPRIMER LA LIGNE 'Lien Google Maps' ---
             transposed_df = transposed_df[transposed_df['Champ'] != 'Lien Google Maps']
-            # ---------------------------------------------
+            # ---------------------------------------------------------
             
             # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
             
