@@ -27,7 +27,8 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-DEFAULT_LOCAL_PATH = "data/Liste_des_lots.xlsx"
+# CORRECTION DÉFINITIVE DU NOM DE FICHIER UTILISÉ
+DEFAULT_LOCAL_PATH = "Liste des lots.xlsx - Tableau recherche.csv"
 
 
 # -------------------------------------------------
@@ -444,7 +445,12 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
         return
 
     # S'assurer que la colonne de référence est la bonne
-    row = df[df[col_ref] == selected_ref].iloc[0]
+    # Utiliser .head(1) au cas où il y aurait des doublons de référence (et prendre le premier)
+    try:
+        row = df[df[col_ref] == selected_ref].iloc[0]
+    except IndexError:
+        st.error(f"Détails introuvables pour la référence : {selected_ref}")
+        return
 
     # Début du panneau
     st.markdown('<h4>Annonce sélectionnée</h4>', unsafe_allow_html=True)
@@ -459,22 +465,11 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
     gmaps_url = format_value(row.get(col_gmaps), default="#")
     st.link_button("Voir sur Google Maps", gmaps_url, type="primary")
 
-    # st.button(
-    #     "Voir l'annonce complète",
-    #     on_click=lambda: st.toast(f"Fonctionnalité en développement pour la référence {selected_ref}"),
-    #     key=f"btn_annonce_{selected_ref}"
-    # )
-
     st.markdown("---")
 
     # Détails
     st.markdown('<h4>Détails de l\'Offre</h4>', unsafe_allow_html=True)
 
-    # Récupérer la liste des colonnes du fichier "Liste des lots Version 2.xlsx - Tableau recherche.csv"
-    # et afficher les détails pertinents ici.
-    # Pour l'instant, on utilise des colonnes standard.
-
-    # Ces colonnes sont basées sur le "Tableau recherche.csv"
     columns_to_display = {
         "Surface GLA": COL_SURFACE_GLA,
         "Surface utile": "Surface utile",
@@ -509,9 +504,9 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
             # Pour certains champs (Oui/Non), on veut un affichage simple
             if col_name in [COL_EXTRACTION, COL_RESTAURATION, COL_ACTIF]:
                 display_value = row[col_name]
-                if isinstance(display_value, str) and display_value.lower() == 'oui':
+                if isinstance(display_value, str) and display_value.lower().strip() == 'oui':
                     display_value = "Oui"
-                elif isinstance(display_value, str) and display_value.lower() == 'non':
+                elif isinstance(display_value, str) and display_value.lower().strip() == 'non':
                     display_value = "Non"
                 render_detail_row(label, display_value)
             else:
@@ -545,17 +540,17 @@ def main():
         st.session_state["reset_filters"] = 0
 
     # Charger les données (utiliser le fichier Tableau recherche.csv)
-    file_path = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
+    file_path = DEFAULT_LOCAL_PATH # Utilisation de la constante corrigée
     df = load_data(file_path)
 
     if df.empty:
-        st.error("Impossible de charger les données ou le DataFrame est vide.")
+        st.error(f"Impossible de charger les données. Vérifiez que le fichier '{file_path}' existe et est correctement formaté.")
         return
 
     # Renommage des colonnes pour la compatibilité (si nécessaire)
     # Assurez-vous que les colonnes attendues existent
     if COL_LAT not in df.columns or COL_LON not in df.columns or COL_REF not in df.columns:
-        st.error("Les colonnes Latitude, Longitude ou Référence annonce sont manquantes dans le fichier de données.")
+        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans le fichier de données.")
         return
 
     # ======== PANNEAU GAUCHE (filtres) ========
@@ -563,7 +558,8 @@ def main():
     with st.container():
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
 
-        st.image("https://placehold.co/200x50/05263d/b87333?text=LOGO+SMBG")
+        # Je mets un placeholder pour le logo, si vous en avez un, vous pouvez le remplacer
+        st.markdown(f'<p style="text-align:center; font-size: 24px; color: {COPPER}; font-weight: bold;">SMBG Carte</p>', unsafe_allow_html=True)
         st.markdown('---')
 
         st.markdown('<h3>Filtres de recherche</h3>', unsafe_allow_html=True)
@@ -586,7 +582,6 @@ def main():
         )
 
         # 2. Filtre Département (doit être dynamique basé sur la Région sélectionnée)
-        # On filtre d'abord le DF complet pour obtenir les départements possibles
         df_for_dept = df
         if selected_regions:
              df_for_dept = df[df[COL_REGION].isin(selected_regions)]
@@ -612,7 +607,6 @@ def main():
         st.markdown('<h3>Critères Numériques</h3>', unsafe_allow_html=True)
 
         # Préparation des valeurs min/max pour les sliders
-        # Les valeurs min/max globales pour tous les filtres
         surface_min_all = int(df[COL_SURFACE_GLA].min()) if not df[COL_SURFACE_GLA].empty else 0
         surface_max_all = int(df[COL_SURFACE_GLA].max()) if not df[COL_SURFACE_GLA].empty else 10000
 
@@ -627,29 +621,29 @@ def main():
         }
         df_temp_filtered = filter_dataframe(df, temp_filters)
 
-        # Déterminer les min/max actuels pour les sliders (basés sur les filtres appliqués)
-        # C'est ici que l'erreur se produit si df_temp_filtered est vide
+        # Déterminer les min/max actuels pour les sliders (Correction pour éviter ValueError sur NaN)
         
-        # --- LIGNE 618 CORRIGÉE ---
+        # 4. Filtre Surface GLA
         if not df_temp_filtered.empty and COL_SURFACE_GLA in df_temp_filtered.columns:
-            current_surface_min = int(df_temp_filtered[COL_SURFACE_GLA].min())
-            current_surface_max = int(df_temp_filtered[COL_SURFACE_GLA].max())
+            # Ne pas utiliser min/max si la colonne n'est pas remplie après filtre, utiliser les valeurs globales
+            if df_temp_filtered[COL_SURFACE_GLA].dropna().empty:
+                 current_surface_min = surface_min_all
+                 current_surface_max = surface_max_all
+            else:
+                current_surface_min = int(df_temp_filtered[COL_SURFACE_GLA].min())
+                current_surface_max = int(df_temp_filtered[COL_SURFACE_GLA].max())
         else:
             current_surface_min = surface_min_all
             current_surface_max = surface_max_all
-        # -------------------------
         
         # S'assurer que les valeurs min/max actuelles sont dans les bornes globales
-        current_surface_min = max(current_surface_min, surface_min_all)
-        current_surface_max = min(current_surface_max, surface_max_all)
+        current_surface_min = max(min(current_surface_min, surface_max_all), surface_min_all)
+        current_surface_max = min(max(current_surface_max, surface_min_all), surface_max_all)
         
-        # Ajuster les valeurs min/max pour que le slider ait des bornes valides
         if current_surface_min > current_surface_max:
              current_surface_min = surface_min_all
              current_surface_max = surface_max_all
         
-        
-        # 4. Filtre Surface GLA
         selected_surface_range = st.slider(
             "Surface GLA (m²)",
             min_value=surface_min_all,
@@ -660,26 +654,27 @@ def main():
         )
         
         
-        # --- LIGNE 648 CORRIGÉE ---
+        # 5. Filtre Loyer €/m²
         if not df_temp_filtered.empty and COL_LOYER_M2 in df_temp_filtered.columns:
-            current_loyer_min = int(df_temp_filtered[COL_LOYER_M2].min())
-            current_loyer_max = int(df_temp_filtered[COL_LOYER_M2].max())
+             if df_temp_filtered[COL_LOYER_M2].dropna().empty:
+                 current_loyer_min = loyer_min_all
+                 current_loyer_max = loyer_max_all
+             else:
+                current_loyer_min = int(df_temp_filtered[COL_LOYER_M2].min())
+                current_loyer_max = int(df_temp_filtered[COL_LOYER_M2].max())
         else:
             current_loyer_min = loyer_min_all
             current_loyer_max = loyer_max_all
-        # -------------------------
 
         # S'assurer que les valeurs min/max actuelles sont dans les bornes globales
-        current_loyer_min = max(current_loyer_min, loyer_min_all)
-        current_loyer_max = min(current_loyer_max, loyer_max_all)
+        current_loyer_min = max(min(current_loyer_min, loyer_max_all), loyer_min_all)
+        current_loyer_max = min(max(current_loyer_max, loyer_min_all), loyer_max_all)
 
-        # Ajuster les valeurs min/max pour que le slider ait des bornes valides
         if current_loyer_min > current_loyer_max:
             current_loyer_min = loyer_min_all
             current_loyer_max = loyer_max_all
 
 
-        # 5. Filtre Loyer €/m²
         selected_loyer_range = st.slider(
             "Loyer (€/m²)",
             min_value=loyer_min_all,
@@ -752,11 +747,14 @@ def main():
     with col_map:
         st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
 
+        # Initialisation de la référence cliquée
+        clicked_ref = None
+
         if num_results == 0:
              st.markdown('<div class="no-results-message">Aucun résultat ne correspond aux filtres appliqués. Veuillez ajuster vos critères.</div>', unsafe_allow_html=True)
              # Afficher une carte centrée sur la France (avec 0 résultat)
              m = folium.Map(location=[46.603354, 1.888334], zoom_start=5, control_scale=True)
-             st_folium(m, height=800, width=None)
+             out = st_folium(m, height=800, width=None, key="folium_empty_map")
 
         else:
             # Calculer le centre de la carte et le niveau de zoom
@@ -786,7 +784,7 @@ def main():
                 )
 
                 # Si le marqueur est sélectionné, appliquer le style "selected-marker"
-                if r['ref_label'] == st.session_state.get('selected_ref'):
+                if r.get('ref_label') == st.session_state.get('selected_ref'):
                     css_marker = (
                         "background-color: #b87333 !important; color: #05263d !important; "
                         "border-radius: 50% !important; width: 32px !important; "
@@ -801,7 +799,7 @@ def main():
                 lon = float(r[COL_LON])
                 raw_label = str(r["ref_label"]).strip()
 
-                icon = folium.DivIcon(html=f'<div style="{css_marker}">{raw_label}</div>')
+                icon = folium.DivIcon(html=f'<div class="folium-div-icon" style="{css_marker}">{raw_label}</div>')
 
                 layer.add_child(
                     folium.Marker(
@@ -810,11 +808,11 @@ def main():
                     )
                 )
 
+                # Clé pour le registre (arrondie)
                 click_registry[(round(lat, 6), round(lon, 6))] = raw_label
 
-            out = st_folium(m, height=800, width=None)
+            out = st_folium(m, height=800, width=None, key="folium_filtered_map")
 
-            clicked_ref = None
             if isinstance(out, dict):
                 loc_info = out.get("last_object_clicked")
                 if isinstance(loc_info, dict) and "lat" in loc_info and "lng" in loc_info:
@@ -831,6 +829,7 @@ def main():
 
     # ======== COLONNE DROITE (panneau annonce) ========
     with col_right:
+        st.markdown('<div class="right-panel">', unsafe_allow_html=True)
         render_right_panel(
             st.session_state["selected_ref"],
             df,
@@ -840,6 +839,9 @@ def main():
             COL_GMAPS,
             COL_DATE_PUB,
         )
+        st.markdown('</div>', unsafe_allow_html=True) # fin .right-panel
+
+    st.markdown('</div>', unsafe_allow_html=True) # fin .main-content-wrapper
 
 
 # -------------------------------------------------
