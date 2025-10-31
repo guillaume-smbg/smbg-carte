@@ -24,16 +24,14 @@ CUSTOM_CSS = """
 .details-panel {
     position: fixed;
     top: 0;
-    right: 0; /* Position par défaut (ouverte), sera ajustée par transform */
-    width: 300px; /* Largeur du panneau de détails */
+    right: 0; 
+    width: 300px; 
     height: 100vh;
     background-color: white; 
     z-index: 999; 
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
-    
-    /* PROPRIÉTÉ CLÉ : Ajoute la transition au mouvement (transform) */
     transition: transform 0.4s ease-in-out; 
 }
 
@@ -56,22 +54,41 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
-# --- Fonction utilitaire de formatage ---
+# --- Fonction utilitaire de formatage (MISE À JOUR) ---
 def format_value(value, unit=""):
-    """Formate la valeur: supprime les unités si la valeur est un texte."""
+    """
+    Formate la valeur: 
+    - Supprime les unités si la valeur est un texte descriptif.
+    - Ajoute les unités si la valeur est numérique et les arrondit si nécessaire.
+    """
     val_str = str(value).strip()
     
-    # Valeurs vides ou non pertinentes
-    if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²'):
+    # 1. Gestion des valeurs vides ou non pertinentes
+    if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'):
         return "Non renseigné"
         
-    # Vérifie si la valeur est une chaîne contenant des lettres (ex: "Selon surface")
-    if any(c.isalpha() for c in val_str):
+    # 2. Gestion des valeurs textuelles
+    # On vérifie si la valeur est une chaîne contenant des lettres (ex: "Selon surface")
+    if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str):
         return val_str
     
-    # Si c'est un nombre, on ajoute l'unité
-    if unit and not val_str.lower().endswith(unit.lower().strip()):
-        return f"{val_str} {unit}"
+    # 3. Gestion des valeurs numériques (y compris les chaînes contenant des nombres/plages)
+    try:
+        # Tente de convertir en float pour vérifier si c'est un nombre
+        num_value = float(value)
+        
+        # Arrondit à 2 décimales si nécessaire et ajoute des séparateurs de milliers (non fait ici pour simplicité HTML)
+        if num_value != round(num_value, 2):
+            val_str = f"{num_value:.2f}"
+            
+        # Si c'est un nombre, on ajoute l'unité s'il n'y en a pas déjà
+        if unit and not val_str.lower().endswith(unit.lower().strip()):
+            return f"{val_str} {unit}"
+            
+    except (ValueError, TypeError):
+        # La valeur n'est pas un simple nombre (ex: "300 €/m² = 73 500 €", "36 à 265 m²")
+        # On suppose qu'elle est déjà correctement formatée par l'Excel.
+        pass
         
     return val_str
 
@@ -215,23 +232,20 @@ if show_details:
         
         # --- LOGIQUE D'AFFICHAGE DES COLONNES G à AH ---
         
-        # Colonnes à exclure de l'affichage détaillé pour éviter la redondance
+        # Colonnes à exclure (ne pas afficher dans la liste détaillée)
         cols_to_exclude = [
             REF_COL, 
             'Latitude', 'Longitude', 
-            'Adresse', 'Code Postal', 'Ville', 'Lien Google Maps' 
-            # Ajoutez ici les noms des colonnes que vous voulez exclure de la liste générale
-            # si vous les traitez ailleurs.
+            'Lien Google Maps' 
         ]
         
-        # Début de la colonne G. L'indice 0 est la première colonne (A). L'indice 6 est la colonne G.
-        # On prend toutes les colonnes à partir de l'indice 6
+        # Toutes les colonnes à partir de l'indice 6 (colonne G)
         all_cols = data_df.columns.tolist()
         detail_cols = all_cols[6:] 
 
         html_content += '<div style="margin-top: 15px;">'
         
-        # Première boucle : Affichage de l'adresse séparément (colonne H/I/J typiquement)
+        # Première boucle : Affichage de l'adresse séparément (Correction du formatage)
         adresse = selected_data.get('Adresse', 'N/A')
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
@@ -240,13 +254,16 @@ if show_details:
         adresse_str = str(adresse).strip()
         code_ville_str = f"{code_postal} - {ville}".strip()
         
+        html_content += f'<p style="margin: 0; font-size: 14px;">'
         if adresse_str not in ('N/A', 'nan', ''):
-             html_content += f'<p style="margin: 0; font-size: 14px;">{adresse_str}<br>'
-             if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
-                 html_content += f'{code_ville_str}'
-             html_content += '</p>'
-        else:
-             html_content += f'<p style="margin: 0; font-size: 14px;">Adresse non renseignée.</p>'
+             html_content += f'{adresse_str}<br>' # L'adresse est la première ligne
+        
+        # On n'affiche le Code Postal - Ville qu'une seule fois
+        if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
+             html_content += f'{code_ville_str}'
+        
+        html_content += '</p>' # Fermeture de la balise p de l'adresse (CORRIGÉ)
+
 
         html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
         
@@ -257,13 +274,14 @@ if show_details:
             if col_name not in cols_to_exclude:
                 value = selected_data.get(col_name, 'N/A')
                 
-                # Formatage de la valeur : on tente d'appliquer l'unité si la colonne la suggère
+                # Détermination de l'unité basée sur le nom de la colonne
                 unit = ''
-                if '€' in col_name or 'EUR' in col_name:
+                if any(k in col_name for k in ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel']) and '€' not in col_name:
                     unit = '€'
-                elif 'Surface' in col_name or 'GLA' in col_name or 'utile' in col_name:
+                elif any(k in col_name for k in ['Surface', 'GLA', 'utile']) and 'm²' not in col_name:
                     unit = 'm²'
                 
+                # Utilisation de la fonction de formatage
                 formatted_value = format_value(value, unit=unit)
                 
                 # Affichage des paires Nom : Valeur
@@ -276,7 +294,7 @@ if show_details:
 
         html_content += '</div>'
         
-        # --- Lien Google Maps (en bas du volet, comme demandé) ---
+        # --- Lien Google Maps (en bas du volet) ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
              html_content += f'''
@@ -296,3 +314,7 @@ html_content += '</div>'
 
 # Injection du panneau de détails flottant
 st.markdown(html_content, unsafe_allow_html=True)
+
+# Message dans le corps principal si aucun détail n'est affiché (pour la visibilité initiale)
+if not show_details and not data_df.empty:
+    st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
