@@ -50,13 +50,9 @@ CUSTOM_CSS = """
     z-index: 1000 !important; 
 }
 
-/* ---------------------------------------------------------------------- */
-/* ATTENTION: La limitation de taille du tableau sous la carte (div.stDataFrame) a été retirée. */
-/* ---------------------------------------------------------------------- */
-
-/* Assure que la section principale gère correctement le débordement horizontal si elle se produit */
+/* Assure que la section principale gère correctement le débordement horizontal */
 section.main {
-    overflow-x: auto; /* Changé de hidden à auto pour être plus sûr */
+    overflow-x: auto; 
 }
 
 </style>
@@ -249,4 +245,210 @@ if show_details:
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
         
-        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse
+        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse complète</p>'
+        adresse_str = str(adresse).strip()
+        code_ville_str = f"{code_postal} - {ville}".strip()
+        
+        html_content += f'<p style="margin: 0; font-size: 14px;">'
+        if adresse_str not in ('N/A', 'nan', ''):
+             html_content += f'{adresse_str}<br>'
+        
+        if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
+             html_content += f'{code_ville_str}'
+        
+        html_content += '</p>'
+
+
+        html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
+        
+        # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
+        html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
+        
+        # Colonnes à exclure 
+        cols_to_exclude = [
+            REF_COL, 
+            'Latitude', 'Longitude', 
+            'Lien Google Maps' ,
+            'Adresse', 'Code Postal', 'Ville',
+            'distance_sq' 
+        ]
+        
+        # Toutes les colonnes à partir de l'indice 6 (colonne G)
+        all_cols = data_df.columns.tolist()
+        detail_cols = all_cols[6:] 
+
+        for col_name in detail_cols:
+            if col_name not in cols_to_exclude:
+                value = selected_data.get(col_name, 'N/A')
+                
+                # Détermination de l'unité basée sur le nom de la colonne
+                unit = ''
+                if any(k in col_name for k in ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel']) and '€' not in col_name:
+                    unit = '€'
+                elif any(k in col_name for k in ['Surface', 'GLA', 'utile']) and 'm²' not in col_name:
+                    unit = 'm²'
+                
+                # Utilisation de la fonction de formatage
+                formatted_value = format_value(value, unit=unit)
+                
+                # Affichage des paires Nom : Valeur
+                html_content += f'''
+                <div style="margin-bottom: 8px; display: flex; justify-content: space-between;">
+                    <span style="font-weight: bold; color: #555; font-size: 14px; max-width: 50%; overflow-wrap: break-word;">{col_name} :</span> 
+                    <span style="font-size: 14px; text-align: right; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</span>
+                </div>
+                '''
+
+        # --- Lien Google Maps (TRANSFORMÉ EN BOUTON CLICABLE) ---
+        lien_maps = selected_data.get('Lien Google Maps', None)
+        if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
+             html_content += f'''
+             <hr style="border: 1px solid #eee; margin: 20px 0;">
+             <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
+                <button style="
+                    background-color: #4CAF50; 
+                    color: white; 
+                    border: none; 
+                    padding: 10px 0px; 
+                    text-align: center; 
+                    text-decoration: none; 
+                    display: block; 
+                    font-size: 14px; 
+                    margin-top: 10px; 
+                    cursor: pointer; 
+                    border-radius: 4px; 
+                    width: 100%;
+                    box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+                ">
+                    🌍 Voir sur Google Maps
+                </button>
+            </a>
+             '''
+        
+    else:
+        html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
+        
+else:
+    # Message par défaut quand aucun lot n'est sélectionné
+    html_content += """
+    <p style="font-weight: bold; margin-top: 10px; color: #0072B2;">
+        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.
+    </p>
+    """
+
+# Fermeture de la div flottante (FIN du panneau)
+html_content += '</div>' 
+st.markdown(html_content, unsafe_allow_html=True)
+
+
+# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte) ---
+st.markdown("---")
+st.header("📋 Annonce du Lot Sélectionné")
+
+dataframe_container = st.container()
+
+with dataframe_container:
+    if show_details:
+        # Filtre sur la référence sélectionnée
+        selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy()
+        
+        if not selected_row_df.empty:
+            # Suppression des colonnes temporaires pour l'affichage
+            if 'distance_sq' in selected_row_df.columns:
+                display_df = selected_row_df.drop(columns=['distance_sq'])
+            else:
+                display_df = selected_row_df
+                
+            # --- LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
+            all_cols = display_df.columns.tolist()
+            
+            try:
+                # 1. Trouver l'index de 'Adresse'
+                adresse_index = all_cols.index('Adresse')
+                
+                # 2. Trouver l'index de 'Commentaires'
+                commentaires_index = all_cols.index('Commentaires')
+                
+                # 3. Conserver les colonnes de 'Adresse' à 'Commentaires' inclus
+                cols_to_keep = all_cols[adresse_index : commentaires_index + 1]
+                display_df = display_df[cols_to_keep]
+            
+            except ValueError as e:
+                if 'Adresse' in str(e):
+                    st.warning("La colonne 'Adresse' est introuvable. Affichage de toutes les colonnes disponibles.")
+                elif 'Commentaires' in str(e):
+                     # Si 'Commentaires' n'existe pas, on commence à 'Adresse' et va jusqu'à la fin
+                     try:
+                         adresse_index = all_cols.index('Adresse')
+                         cols_to_keep = all_cols[adresse_index:]
+                         display_df = display_df[cols_to_keep]
+                         st.warning("La colonne 'Commentaires' est introuvable. Affichage des colonnes à partir de 'Adresse' jusqu'à la fin.")
+                     except ValueError:
+                        st.warning("Erreur de filtrage des colonnes. Affichage de toutes les colonnes disponibles.")
+
+            # Transposition du DataFrame
+            transposed_df = display_df.T.reset_index()
+            transposed_df.columns = ['Champ', 'Valeur']
+            
+            # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE (AVEC ESPACE) ---
+            
+            money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
+            
+            def format_monetary_value(row):
+                """Applique le formatage en utilisant un ESPACE comme séparateur de milliers."""
+                
+                champ = row['Champ']
+                value = row['Valeur']
+                
+                # Vérifie si la valeur est un nombre
+                is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value))
+                
+                # Colonne monétaire
+                is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords)
+                
+                if is_money_col and is_numeric:
+                    try:
+                        float_value = float(value)
+                        
+                        # 1. Formatage standard US sans décimales (ex: 85,723)
+                        formatted_value = f"{float_value:,.0f}" 
+                        
+                        # 2. Remplacer la virgule de milliers par un espace
+                        formatted_value = formatted_value.replace(",", " ")
+                        
+                        return f"€{formatted_value}"
+                        
+                    except (ValueError, TypeError):
+                        return value 
+                
+                # Colonne surface
+                is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
+                if is_surface_col and is_numeric:
+                     try:
+                        float_value = float(value)
+                        formatted_value = f"{float_value:,.0f}" # 12,345
+                        formatted_value = formatted_value.replace(",", " ") # 12 345
+                        
+                        return f"{formatted_value} m²"
+                     except (ValueError, TypeError):
+                        return value
+                        
+                # Coordonnées (à ne plus afficher dans ce tableau, mais la logique est là si on les réintroduit)
+                if champ in ['Latitude', 'Longitude'] and is_numeric:
+                     try:
+                        return f"{float(value):.4f}"
+                     except (ValueError, TypeError):
+                        return value
+
+                return value
+            
+            # Appliquer la fonction de formatage à la colonne 'Valeur'
+            transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1)
+            
+            # Affichage du tableau formaté
+            st.dataframe(transposed_df, hide_index=True, use_container_width=True)
+            
+        else:
+            st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
+    else:
+        st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
