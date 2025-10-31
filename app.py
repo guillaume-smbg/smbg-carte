@@ -24,11 +24,11 @@ st.set_page_config(
 # Configuration des couleurs et dimensions
 LOGO_BLUE = "#05263d"
 COPPER = "#b87333"
-LEFT_PANEL_WIDTH_PX = 275
-RIGHT_PANEL_WIDTH_PX = 275
+# On garde les largeurs en PX pour le panneau de gauche et droite pour un contrôle précis
+LEFT_PANEL_WIDTH_PX = 300 
+RIGHT_PANEL_WIDTH_PX = 320 
 
-# CORRECTION DU PROBLÈME DE CHARGEMENT D'IMAGE
-# Mise à jour pour utiliser le chemin local du logo fourni par l'utilisateur.
+# Le chemin du logo (qui est maintenant un chemin local)
 LOGO_URL = "assets/Logo bleu crop.png" 
 
 # Noms des colonnes pour les FILTRES et les COORDONNEES
@@ -49,10 +49,9 @@ COL_RESTAURATION = "Restauration"
 
 
 # LISTE COMPLÈTE DES COLONNES À AFFICHER DE G À AH
-# Les colonnes sont affichées dans l'ordre de cette liste
 DETAIL_COLUMNS = [
     "Emplacement", 
-    "Lien Google Maps", # H (sera traité comme bouton)
+    "Lien Google Maps", 
     "Typologie", 
     "Type", 
     "Cession / Droit au bail", 
@@ -77,13 +76,13 @@ DETAIL_COLUMNS = [
     "Extraction", 
     "Restauration", 
     "Environnement Commercial", 
-    "Commentaires" # AH (sera affiché avec un style spécial)
+    "Commentaires" 
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Chemin du fichier de données (Corrigé lors de la dernière étape)
+# Chemin du fichier de données
 DATA_FILE_PATH = "data/Liste des lots.xlsx" 
-DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée pour les données
+DATA_SHEET_NAME = "Tableau recherche"
 
 
 # -------------------------------------------------
@@ -161,7 +160,7 @@ GLOBAL_CSS = f"""
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {{
     font-family: 'Futura', sans-serif !important;
     color: #000;
-    font-size: 13px;
+    font-size: 14px; /* Augmenté légèrement la taille de police */
     line-height: 1.4;
 }}
 
@@ -189,6 +188,7 @@ GLOBAL_CSS = f"""
     border: none;
     padding: 8px 16px;
     transition: background-color 0.3s;
+    width: 100%; /* Important: Assurer que le bouton utilise toute la largeur dans le panneau de filtre */
 }}
 .stButton > button:hover {{
     background-color: #9e642d; /* Copper plus foncé */
@@ -202,6 +202,8 @@ GLOBAL_CSS = f"""
     padding: 8px 16px;
     text-decoration: none;
     transition: background-color 0.3s;
+    display: block; /* S'assurer qu'il prend toute la largeur */
+    text-align: center;
 }}
 .stLinkButton > a:hover {{
     background-color: #031a29; /* Bleu plus foncé */
@@ -214,14 +216,28 @@ h1, h2, h3 {{
     font-weight: 700;
     margin-top: 0;
 }}
+h1 {{
+    font-size: 26px; /* Ajuster la taille du titre principal */
+}}
 h3 {{
-    margin-bottom: 10px;
+    margin-bottom: 15px; /* Plus d'espace sous le titre des filtres */
     font-size: 18px;
 }}
 
 /* Conteneur de l'application Streamlit */
 .stApp {{
     padding: 0;
+}}
+
+/* Rendre le conteneur principal flexible et bien centré */
+/* Le conteneur principal Streamlit est 'data-testid="stAppViewContainer"' */
+div[data-testid="stAppViewContainer"] > .main {{
+    padding: 20px !important; /* Ajoute un padding général autour des colonnes */
+}}
+
+/* Pour gérer l'espacement des colonnes */
+div[data-testid="stVerticalBlock"] {{
+    gap: 20px; /* Ajoute de l'espace entre les éléments verticaux */
 }}
 
 /* Cadres des colonnes */
@@ -234,9 +250,23 @@ h3 {{
 .left-panel {{
     background-color: var(--logo-blue);
     color: #fff !important;
-    padding: 16px;
+    padding: 20px; /* Plus de padding */
     border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    /* S'assurer que le panneau prend la bonne hauteur */
+    min-height: 850px; 
 }}
+
+/* Style spécifique pour le logo */
+.logo-container {{
+    text-align: center;
+    margin-bottom: 25px; /* Espace sous le logo */
+}}
+.logo-container img {{
+    max-width: 80%; /* Assure que le logo n'est pas trop large */
+    height: auto;
+}}
+
 
 .left-panel h3, .left-panel label, .left-panel p, .left-panel .stCheckbox > label > div:first-child {{
     color: #fff !important;
@@ -251,6 +281,7 @@ h3 {{
 }}
 .left-panel .stSelectbox > label > div > p {{
     color: #fff !important;
+    font-size: 14px;
 }}
 .left-panel .stSelectbox .st-ag {{
     color: var(--logo-blue) !important;
@@ -260,12 +291,12 @@ h3 {{
 /* ===== CARTE (centre) ===== */
 .map-wrapper {{
     /* S'assurer que la carte utilise tout l'espace vertical disponible */
-    height: 800px; 
+    height: 850px; /* Aligné avec le min-height des panneaux latéraux */
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }}
-/* Style du marqueur Folium (pour remplacer l'icône standard) */
+/* Style du marqueur Folium */
 .custom-marker {{
     background-color: var(--logo-blue);
     color: white;
@@ -277,27 +308,30 @@ h3 {{
     text-align: center;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     cursor: pointer;
+    line-height: 1;
 }}
 
 /* ===== PANNEAU DROIT (détails) ===== */
 .right-panel {{
-    padding: 16px;
+    padding: 20px; /* Plus de padding */
     border: 1px solid #e0e0e0;
     border-radius: 12px;
     background-color: #f9f9f9;
-    min-height: 800px; /* Alignement avec la carte */
+    min-height: 850px; /* Aligné avec la carte */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }}
 
 .detail-address {{
     font-weight: 500;
     color: #555;
-    margin-bottom: 20px;
+    margin-bottom: 25px;
+    font-size: 16px;
 }}
 
 .detail-line {{
     display: flex;
     justify-content: space-between;
-    padding: 6px 0;
+    padding: 8px 0; /* Plus de padding vertical */
     border-bottom: 1px dotted #ccc;
     font-size: 14px;
 }}
@@ -306,12 +340,12 @@ h3 {{
     font-weight: bold;
     color: var(--logo-blue);
     flex-shrink: 0;
-    margin-right: 10px;
+    margin-right: 15px;
 }}
 
 .detail-value {{
     text-align: right;
-    word-break: break-word; /* Permet les longs textes dans le champ */
+    word-break: break-word;
     color: #333;
 }}
 
@@ -321,7 +355,7 @@ h3 {{
     border-left: 4px solid var(--copper);
     padding: 10px;
     border-radius: 4px;
-    margin-top: 5px;
+    margin-top: 15px;
     white-space: pre-wrap;
 }}
 
@@ -378,7 +412,7 @@ def render_right_panel(
         lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
 
         # --- TITRE ET ADRESSE ---
-        st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3>Lot Référence : {selected_ref}</h3>", unsafe_allow_html=True)
         st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
 
         # --- BOUTON GOOGLE MAPS (Traitement spécial pour Lien Google Maps) ---
@@ -441,21 +475,23 @@ def main():
     if df.empty:
         return
 
+    # Le titre est mieux placé au-dessus des colonnes pour une meilleure structure
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
     # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
-    # Les largeurs sont ajustées pour un meilleur rendu visuel
-    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="medium")
+    # Les largeurs sont ajustées: la première et la dernière sont fixes (PX), la centrale est flexible (1)
+    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1, RIGHT_PANEL_WIDTH_PX], gap="medium")
 
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
     with col_left:
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
         
-        # 0. Affichage du LOGO (Utilisation du chemin local corrigé)
-        # S'assurer que le chemin d'accès au fichier local est correct.
+        # 0. Affichage du LOGO (Utilisation du chemin local corrigé et centré)
+        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
         st.image(LOGO_URL, use_column_width=True)
-
+        st.markdown('</div>', unsafe_allow_html=True)
+        
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
         # --- FILTRES GÉOGRAPHIQUES (1, 2, 3) ---
@@ -467,11 +503,9 @@ def main():
         # Filtrage par Région
         df_filtered = df.copy()
         if selected_region != 'Toutes':
-            # Assure la comparaison même si 'Non spécifié' est inclus
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
         # 2. Filtre Département (dépend de la région sélectionnée)
-        # S'assurer que les valeurs ne sont pas vides avant de trier
         departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].dropna().unique().tolist())
         selected_departement = st.selectbox("Département", departements, key="departement_filter")
 
@@ -517,34 +551,33 @@ def main():
         st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
 
         # --- FILTRES BINAIRES (7, 8) ---
-        st.markdown("<p style='font-weight: bold; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-weight: bold; color: white; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
         
-        # 7. Filtre Extraction (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
+        # 7. Filtre Extraction
         filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
         if filter_extraction:
             df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
 
 
-        # 8. Filtre Restauration (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
+        # 8. Filtre Restauration
         filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
         if filter_restauration:
             df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
 
 
         # --- AFFICHAGE DU RÉSULTAT ET BOUTON ---
-        st.markdown(f"<p style='margin-top: 20px;'>**{len(df_filtered)}** lots trouvés.</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='margin-top: 20px; color: white;'>**{len(df_filtered)}** lots trouvés.</p>", unsafe_allow_html=True)
 
-        # Bouton de Réinitialisation 
+        # Bouton de Réinitialisation (qui utilise maintenant 100% de la largeur du panneau)
         if st.button("Réinitialiser les filtres", key="reset_button"):
             st.session_state["selected_ref"] = "NO_SELECTION"
-            # Réinitialiser les selectbox
+            # Réinitialiser tous les états de session des filtres
             st.session_state.region_filter = 'Toutes'
             st.session_state.departement_filter = 'Tous'
             st.session_state.ville_filter = 'Toutes'
             st.session_state.typologie_filter = 'Toutes'
             st.session_state.type_filter = 'Tous'
             st.session_state.cession_filter = 'Toutes'
-            # Réinitialiser les checkbox
             st.session_state.extraction_filter = False
             st.session_state.restauration_filter = False
             st.rerun()
@@ -556,25 +589,21 @@ def main():
         st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
 
         # Calculer le centre de la carte et le zoom
+        center_lat, center_lon = 46.603354, 1.888334 # Centre de la France (Par défaut)
+        zoom_start = 6 
+
         if not df_filtered.empty:
-            # S'assurer qu'il y a des données valides pour le calcul de la moyenne
             valid_lat = df_filtered["_lat_plot"].dropna()
             valid_lon = df_filtered["_lon_plot"].dropna()
             
             if not valid_lat.empty and not valid_lon.empty:
                 center_lat = valid_lat.mean()
                 center_lon = valid_lon.mean()
-            else:
-                 # Si les données filtrées sont vides de coordonnées, revenir au centre de la France
-                center_lat, center_lon = 46.603354, 1.888334 
-        else:
-            center_lat, center_lon = 46.603354, 1.888334 # Centre de la France (Par défaut)
-        
-        zoom_start = 6 
-        if selected_region != 'Toutes': zoom_start = 8
-        if selected_departement != 'Tous': zoom_start = 10
-        if selected_ville != 'Toutes': zoom_start = 12
-
+                
+                # Ajustement dynamique du zoom
+                if selected_region != 'Toutes': zoom_start = 8
+                if selected_departement != 'Tous': zoom_start = 10
+                if selected_ville != 'Toutes': zoom_start = 12
 
         # Création de la carte Folium
         m = folium.Map(
@@ -590,11 +619,9 @@ def main():
         
         # Ajout des marqueurs à la carte
         for index, r in df_filtered.iterrows():
-            # Vérifier que les coordonnées sont bien des nombres avant de tenter le tracé
             if pd.isna(r["_lat_plot"]) or pd.isna(r["_lon_plot"]):
                 continue
 
-            # Conversion en float nécessaire pour folium
             lat = float(r["_lat_plot"]) 
             lon = float(r["_lon_plot"])
             raw_label = str(r[COL_REF]).strip()
@@ -610,11 +637,10 @@ def main():
             )
 
             # Enregistre la référence pour la détection du clic
-            # Arrondir les coordonnées permet de s'assurer que le clic Streamlit correspond au marqueur Folium
             click_registry[(round(lat, 6), round(lon, 6))] = raw_label
 
         # Affichage de la carte Streamlit
-        out = st_folium(m, height=800, width=None) 
+        out = st_folium(m, height=850, width=None) # Ajusté la hauteur
 
         clicked_ref = None
         if isinstance(out, dict):
@@ -636,7 +662,7 @@ def main():
         render_right_panel(
             st.session_state["selected_ref"],
             df,
-            DETAIL_COLUMNS, # Liste des colonnes de G à AH
+            DETAIL_COLUMNS, 
             COL_REF,
             COL_ADDR_FULL,
             COL_GMAPS,
