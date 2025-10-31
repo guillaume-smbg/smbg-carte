@@ -48,6 +48,8 @@ COL_TYPE = "Type"
 COL_CESSION = "Cession / Droit au bail"
 COL_EXTRACTION = "Extraction"
 COL_RESTAURATION = "Restauration"
+COL_LOYER = "Loyer annuel" # Nouvelle colonne pour le slider
+COL_SURFACE_GLA = "Surface GLA" # Nouvelle colonne pour le slider
 
 
 # LISTE COMPLÈTE DES COLONNES À AFFICHER DE G À AH
@@ -58,11 +60,11 @@ DETAIL_COLUMNS = [
     "Type", 
     "Cession / Droit au bail", 
     "Nombre de lots", 
-    "Surface GLA", 
+    COL_SURFACE_GLA, 
     "Répartition surface GLA", 
     "Surface utile", 
     "Répartition surface utile", 
-    "Loyer annuel", 
+    COL_LOYER, 
     "Loyer Mensuel", 
     "Loyer €/m²", 
     "Loyer variable", 
@@ -75,8 +77,8 @@ DETAIL_COLUMNS = [
     "Marketing", 
     "Gestion", 
     "Etat de livraison", 
-    "Extraction", 
-    "Restauration", 
+    COL_EXTRACTION, 
+    COL_RESTAURATION, 
     "Environnement Commercial", 
     "Commentaires" 
 ]
@@ -95,13 +97,12 @@ DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille Excel à lire
 def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """
     Charge le DataFrame et effectue le nettoyage/formatage initial.
-    Le chemin est désormais défini par DATA_FILE_PATH.
     """
     try:
         # UTILISATION DE pd.read_excel AVEC LE CHEMIN ET LE NOM DE FEUILLE CORRECTS
         df = pd.read_excel(file_path, sheet_name=sheet_name)
         
-        required_cols = [COL_LAT, COL_LON, COL_REF]
+        required_cols = [COL_LAT, COL_LON, COL_REF, COL_LOYER, COL_SURFACE_GLA]
         for col in required_cols:
             if col not in df.columns:
                 st.error(f"La colonne requise '{col}' est manquante dans la feuille '{sheet_name}'. Veuillez vérifier le fichier Excel.")
@@ -118,6 +119,15 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     df[COL_LAT] = pd.to_numeric(df[COL_LAT], errors='coerce')
     df[COL_LON] = pd.to_numeric(df[COL_LON], errors='coerce')
     
+    # Nettoyage et conversion des colonnes numériques utilisées pour les sliders
+    # Utiliser un regex pour nettoyer les chaînes (supprimer les espaces, convertir en string, puis remplacer les virgules par des points)
+    # Remplacer les valeurs non numériques (ex: '/', '-') par NaN avant la conversion
+    for col in [COL_LOYER, COL_SURFACE_GLA]:
+         # Convertir en string, enlever les espaces, remplacer , par .
+        df.loc[:, col] = df[col].astype(str).str.replace(' ', '').str.replace(',', '.', regex=False)
+        # Convertir en numérique, forçant les erreurs (comme '/' ou 'Néant') à NaN
+        df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
+
     df_clean = df.dropna(subset=[COL_LAT, COL_LON]).copy()
     
     df_clean.loc[:, COL_REF] = df_clean[COL_REF].astype(str).str.strip()
@@ -242,6 +252,42 @@ h1 {{
 }}
 
 
+/* --- Styles spécifiques aux marqueurs --- */
+.custom-marker {{
+    /* Utilise une épingle/pin stylisée pour plus de visibilité */
+    width: 20px;
+    height: 20px;
+    background-color: {COPPER};
+    border-radius: 50%;
+    border: 3px solid {LOGO_BLUE};
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+    position: relative;
+    cursor: pointer;
+    line-height: 14px;
+    font-size: 10px;
+    color: white;
+    font-weight: bold;
+    text-align: center;
+    transform: translate(-50%, -50%); /* Centrage du pin */
+}}
+
+/* Petite étiquette de référence à côté du pin */
+.ref-label {{
+    position: absolute;
+    top: 50%;
+    left: 100%;
+    padding: 2px 5px;
+    background-color: rgba(255, 255, 255, 0.9);
+    border: 1px solid {LOGO_BLUE};
+    border-radius: 4px;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    font-size: 10px;
+    color: {LOGO_BLUE};
+    font-weight: normal;
+}}
+
+
 /* --- Autres Styles conservés --- */
 :root {{
     --logo-blue: {LOGO_BLUE};
@@ -276,20 +322,6 @@ h1 {{
     background-color: #ccc;
 }}
 
-.custom-marker {{
-    background-color: var(--logo-blue);
-    color: white;
-    border: 3px solid var(--copper);
-    padding: 4px 8px;
-    border-radius: 10px;
-    font-weight: bold;
-    font-size: 12px;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-    cursor: pointer;
-    line-height: 1;
-}}
-
 .detail-line {{
     display: flex;
     justify-content: space-between;
@@ -319,6 +351,20 @@ h1 {{
     border-radius: 8px;
     color: #888;
 }}
+
+/* Styles pour les Sliders dans le panneau bleu */
+/* Les labels de slider par défaut sont noirs, on les force en blanc */
+.stSlider label {{
+    color: white !important;
+}}
+/* Les tooltips et valeurs affichées sur les sliders */
+div[data-testid="stTickBarMinMax"] {{
+    color: #fff !important;
+    font-weight: bold;
+}}
+div[data-testid="stTooltipContent"] {{
+    color: #333 !important; /* Couleur du texte dans le tooltip */
+}}
 </style>
 """
 
@@ -339,6 +385,20 @@ def format_value(value):
     if value_str in ["/", "-"]:
         return "Non spécifié"
     
+    # Tentative de formatage pour les nombres/devise
+    try:
+        num_val = float(value_str.replace(' ', '').replace(',', '.'))
+        # Si c'est un loyer ou une surface, on tente un formatage spécifique
+        if num_val > 1000 and num_val == round(num_val): # C'est probablement un grand nombre entier
+             return f"{int(num_val):,}".replace(',', ' ')
+        elif num_val == round(num_val):
+             return f"{int(num_val)}"
+        else:
+             return f"{num_val:,.2f}".replace(',', ' ').replace('.', ',')
+
+    except ValueError:
+        pass # La valeur n'est pas un nombre, on la laisse telle quelle
+        
     return value_str
 
 
@@ -353,8 +413,6 @@ def render_right_panel(
 ):
     """Affiche le panneau de droite avec les détails du lot sélectionné."""
     
-    # Correction: Le bouton doit forcer le rerun pour modifier la structure des colonnes dans main()
-    # On utilise un conteneur pour garantir que le bouton est rendu avant le panneau
     with st.container():
         
         # Bouton pour masquer le panneau (utilise float:right dans le CSS)
@@ -432,11 +490,25 @@ def main():
 
 
     # Chargement des données
-    # Utilisation de la constante DATA_FILE_PATH (maintenant 'data/Liste des lots.xlsx')
     df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME) 
     if df.empty:
         return
 
+    # Calcul des min/max pour les sliders (ignorer les NaN/valeurs non-numériques)
+    df_valid_loyer = df[COL_LOYER].dropna()
+    loyer_min_all = int(df_valid_loyer.min()) if not df_valid_loyer.empty else 0
+    loyer_max_all = int(df_valid_loyer.max()) if not df_valid_loyer.empty else 1000000
+    
+    df_valid_surface = df[COL_SURFACE_GLA].dropna()
+    surface_min_all = int(df_valid_surface.min()) if not df_valid_surface.empty else 0
+    surface_max_all = int(df_valid_surface.max()) if not df_valid_surface.empty else 10000
+
+    # Initialisation des états de filtre pour les sliders
+    if "loyer_range" not in st.session_state:
+        st.session_state["loyer_range"] = (loyer_min_all, loyer_max_all)
+    if "surface_range" not in st.session_state:
+        st.session_state["surface_range"] = (surface_min_all, surface_max_all)
+        
     # Le titre est mieux placé au-dessus des colonnes
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
@@ -451,6 +523,9 @@ def main():
         # On utilise None pour le placeholder de la colonne de droite masquée
         col_right = None 
 
+    # Pré-filtrage pour les zones géographiques (à l'intérieur de la colonne gauche)
+    df_filtered = df.copy()
+
     # ======== COLONNE GAUCHE (panneau de filtres) ========
     # Le panneau gauche contient le filtre et les contrôles
     with col_left:
@@ -458,13 +533,10 @@ def main():
         
         # 0. Affichage du LOGO
         st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-        # On utilise la fonction 'image' de Streamlit avec le chemin d'accès local
         try:
-             # Utiliser un chemin local simple. Si l'image n'est pas trouvable, l'utilisateur
-             # devra la fournir dans un dossier 'assets'.
+             # Assurez-vous que le chemin est correct si vous fournissez l'image
              st.image(os.path.join(os.path.dirname(__file__), "assets", "Logo bleu crop.png"), use_column_width=True)
         except Exception:
-             # Afficher un placeholder si l'image n'est pas trouvée
              st.markdown('<p style="color:white; font-size:20px; font-weight:bold;">LOGO SMBG</p>', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -472,11 +544,9 @@ def main():
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
         # 1. Filtre Région
-        # Utiliser uniquement les régions présentes dans le DF filtré pour les listes déroulantes suivantes
         regions = ['Toutes'] + sorted(df[COL_REGION].unique().tolist())
         selected_region = st.selectbox("Région", regions, key="region_filter")
 
-        df_filtered = df.copy()
         if selected_region != 'Toutes':
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
@@ -518,23 +588,71 @@ def main():
             df_filtered = df_filtered[df_filtered[COL_CESSION] == selected_cession]
             
         st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
+        
+        # --- FILTRES SLIDERS NUMÉRIQUES ---
+        st.markdown("<p style='font-weight: bold; color: white; margin-bottom: 5px;'>Filtres Numériques :</p>", unsafe_allow_html=True)
 
-        # 7. Filtre Extraction
+        # 7. Slider Loyer Annuel
+        # Utiliser les valeurs min/max du DF PRÉ-FILTRÉ pour l'affichage de la borne réelle,
+        # mais les valeurs TOUT DF pour le curseur initial
+        current_loyer_min = int(df_filtered[COL_LOYER].min()) if not df_filtered[COL_LOYER].empty else loyer_min_all
+        current_loyer_max = int(df_filtered[COL_LOYER].max()) if not df_filtered[COL_LOYER].empty else loyer_max_all
+        
+        if loyer_max_all > loyer_min_all:
+            loyer_range_tuple = st.slider(
+                "Loyer Annuel (€)", 
+                min_value=loyer_min_all, 
+                max_value=loyer_max_all,
+                value=st.session_state["loyer_range"],
+                step=1000,
+                key="loyer_slider"
+            )
+            # Appliquer le filtre sur les valeurs non-NaN
+            df_filtered = df_filtered[
+                (df_filtered[COL_LOYER].isna()) | # Conserver les lots sans loyer spécifié
+                ((df_filtered[COL_LOYER] >= loyer_range_tuple[0]) & (df_filtered[COL_LOYER] <= loyer_range_tuple[1]))
+            ]
+            st.session_state["loyer_range"] = loyer_range_tuple # Sauver le nouvel état
+
+        # 8. Slider Surface GLA
+        current_surface_min = int(df_filtered[COL_SURFACE_GLA].min()) if not df_filtered[COL_SURFACE_GLA].empty else surface_min_all
+        current_surface_max = int(df_filtered[COL_SURFACE_GLA].max()) if not df_filtered[COL_SURFACE_GLA].empty else surface_max_all
+
+        if surface_max_all > surface_min_all:
+            surface_range_tuple = st.slider(
+                "Surface GLA (m²)", 
+                min_value=surface_min_all, 
+                max_value=surface_max_all,
+                value=st.session_state["surface_range"],
+                step=10,
+                key="surface_slider"
+            )
+            # Appliquer le filtre sur les valeurs non-NaN
+            df_filtered = df_filtered[
+                (df_filtered[COL_SURFACE_GLA].isna()) | # Conserver les lots sans surface spécifiée
+                ((df_filtered[COL_SURFACE_GLA] >= surface_range_tuple[0]) & (df_filtered[COL_SURFACE_GLA] <= surface_range_tuple[1]))
+            ]
+            st.session_state["surface_range"] = surface_range_tuple # Sauver le nouvel état
+            
+        st.markdown("<hr style='border-top: 1px solid var(--copper); margin: 15px 0;'>", unsafe_allow_html=True)
+        
+        # 9. Filtre Extraction
         st.markdown("<p style='font-weight: bold; color: white; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
         
-        # Vérifie si la colonne existe avant d'appliquer le filtre
         if COL_EXTRACTION in df_filtered.columns:
-            filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
+            filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=st.session_state.get("extraction_filter", False))
             if filter_extraction:
                 df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
+            st.session_state["extraction_filter"] = filter_extraction
         else:
              st.markdown('<p style="color:#aaa; font-size:12px;">(Extraction non disponible)</p>', unsafe_allow_html=True)
 
-        # 8. Filtre Restauration
+        # 10. Filtre Restauration
         if COL_RESTAURATION in df_filtered.columns:
-            filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
+            filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=st.session_state.get("restauration_filter", False))
             if filter_restauration:
                 df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
+            st.session_state["restauration_filter"] = filter_restauration
         else:
             st.markdown('<p style="color:#aaa; font-size:12px;">(Restauration non disponible)</p>', unsafe_allow_html=True)
 
@@ -554,7 +672,9 @@ def main():
             st.session_state.typologie_filter = 'Toutes'
             st.session_state.type_filter = 'Tous'
             st.session_state.cession_filter = 'Toutes'
-            # Les checkboxes peuvent ne pas exister si les colonnes sont manquantes, on gère l'exception
+            st.session_state.loyer_range = (loyer_min_all, loyer_max_all)
+            st.session_state.surface_range = (surface_min_all, surface_max_all)
+            
             try:
                 st.session_state.extraction_filter = False
             except AttributeError:
@@ -585,6 +705,7 @@ def main():
                 center_lat = valid_lat.mean()
                 center_lon = valid_lon.mean()
                 
+                # Ajuster le zoom selon la sélection géographique
                 if selected_region != 'Toutes': zoom_start = 8
                 if selected_departement != 'Tous': zoom_start = 10
                 if selected_ville != 'Toutes': zoom_start = 12
@@ -611,7 +732,14 @@ def main():
             lon = round(float(r["_lon_plot"]), 6)
             raw_label = str(r[COL_REF]).strip()
 
-            icon = folium.DivIcon(html=f'<div class="custom-marker" style="white-space:nowrap;">{raw_label}</div>')
+            # Création de l'icône personnalisée avec un pin et l'étiquette de référence
+            # Pin (rond cuivré) + Référence (label blanc à côté)
+            icon_html = f"""
+            <div class="custom-marker">
+                <div class="ref-label">{raw_label}</div>
+            </div>
+            """
+            icon = folium.DivIcon(html=icon_html)
 
             layer.add_child(
                 folium.Marker(
@@ -627,8 +755,6 @@ def main():
         st.session_state["click_registry"] = click_registry
 
         # Affichage de la carte Streamlit
-        # La hauteur de 100% est gérée par le CSS .map-wrapper
-        # On utilise une clé unique pour la carte à chaque exécution pour éviter des problèmes de cache
         map_key = f"folium_map_{len(df_filtered)}_{st.session_state['selected_ref']}"
         out = st_folium(m, height="100%", width="100%", key=map_key)
 
@@ -663,8 +789,6 @@ def main():
             is_rerun_needed = True # Nécessaire pour afficher le panneau de droite immédiatement
             
         # CAS B: Clic sur le FOND de carte (pas sur le marqueur)
-        # last_clicked_location est présent (il y a eu un clic)
-        # MAIS clicked_ref n'est PAS dans le registre (le clic n'était PAS sur un marqueur)
         elif last_clicked_location and not clicked_ref and st.session_state["show_right_panel"]:
             # Rétracter le panneau si on clique en dehors d'un pins ET que le panneau était affiché
             st.session_state["selected_ref"] = "NO_SELECTION"
@@ -678,8 +802,6 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)  # fin .map-wrapper
 
     # ======== COLONNE DROITE (panneau annonce) ========
-    # N'afficher la colonne droite que si l'état le permet
-    # NOTE: col_right est None si show_right_panel est False
     if st.session_state["show_right_panel"] and col_right is not None:
         with col_right:
             render_right_panel(
