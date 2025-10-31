@@ -28,7 +28,8 @@ LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
 # URL du logo (Utilisation du fichier uploadé par l'utilisateur)
-LOGO_URL = "image_7f0ed6.png" 
+# J'utilise le dernier logo que vous avez téléversé
+LOGO_URL = "image_7f28be.png" 
 
 # Noms des colonnes pour les FILTRES et les COORDONNEES
 COL_REGION = "Région"
@@ -81,9 +82,11 @@ DETAIL_COLUMNS = [
 COL_GMAPS = "Lien Google Maps"
 
 # Chemin du fichier (nom du CSV généré par la plateforme à partir de la feuille "Tableau recherche")
+# CECI EST LE CHEMIN EXACT À UTILISER DANS CET ENVIRONNEMENT
 DATA_SNIPPET_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
 DATA_EXCEL_NAME = "Liste des lots Version 2.xlsx" # Nom du fichier Excel original
 DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée
+
 
 # -------------------------------------------------
 # CHARGEMENT ET PREPARATION DES DONNEES
@@ -92,12 +95,20 @@ DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée
 @st.cache_data
 def load_data(file_path: str) -> pd.DataFrame:
     """
-    Charge le DataFrame depuis le fichier de données. 
-    Utilise le chemin du snippet CSV généré à partir du fichier Excel.
+    Charge le DataFrame depuis le fichier de données en utilisant le chemin du snippet CSV.
+    Utilisation de l'encodage UTF-8 pour gérer les caractères accentués.
     """
     try:
-        # Lecture du fichier CSV snippet généré à partir de la feuille "Tableau recherche"
-        df = pd.read_csv(file_path)
+        # Lecture du fichier CSV snippet avec encodage UTF-8 pour garantir les accents
+        df = pd.read_csv(file_path, encoding='utf-8')
+        
+        # Vérification minimale des colonnes critiques
+        required_cols = [COL_LAT, COL_LON, COL_REF]
+        for col in required_cols:
+            if col not in df.columns:
+                st.error(f"La colonne requise '{col}' est manquante dans le fichier de données. Veuillez vérifier le contenu de la feuille '{DATA_SHEET_NAME}'.")
+                return pd.DataFrame()
+
     except FileNotFoundError:
         st.error(f"Fichier de données non trouvé. Veuillez vous assurer que le fichier Excel '{DATA_EXCEL_NAME}' contenant la feuille '{DATA_SHEET_NAME}' a été correctement chargé.")
         return pd.DataFrame()
@@ -111,52 +122,39 @@ def load_data(file_path: str) -> pd.DataFrame:
     df[COL_LON] = pd.to_numeric(df[COL_LON], errors='coerce')
     
     # Suppression des lignes avec des coordonnées manquantes ou invalides pour la carte
-    df.dropna(subset=[COL_LAT, COL_LON], inplace=True)
+    # Nous utilisons une copie pour les modifications pour éviter SettingWithCopyWarning
+    df_clean = df.dropna(subset=[COL_LAT, COL_LON]).copy()
     
     # Assurer que la colonne de référence est une chaîne de caractères
-    df[COL_REF] = df[COL_REF].astype(str).str.strip()
+    df_clean.loc[:, COL_REF] = df_clean[COL_REF].astype(str).str.strip()
 
     # Créer les colonnes de coordonnées utilisées pour le tracé (avec des noms uniques)
-    df["_lat_plot"] = df[COL_LAT]
-    df["_lon_plot"] = df[COL_LON]
+    df_clean.loc[:, "_lat_plot"] = df_clean[COL_LAT]
+    df_clean.loc[:, "_lon_plot"] = df_clean[COL_LON]
 
     # Remplacer NaN dans les colonnes de filtre spécifiques pour le fonctionnement des selectbox
-    df[COL_TYPOLOGIE] = df[COL_TYPOLOGIE].fillna('Non spécifié')
-    df[COL_TYPE] = df[COL_TYPE].fillna('Non spécifié')
-    df[COL_CESSION] = df[COL_CESSION].fillna('Non spécifié')
+    df_clean.loc[:, COL_TYPOLOGIE] = df_clean[COL_TYPOLOGIE].fillna('Non spécifié')
+    df_clean.loc[:, COL_TYPE] = df_clean[COL_TYPE].fillna('Non spécifié')
+    df_clean.loc[:, COL_CESSION] = df_clean[COL_CESSION].fillna('Non spécifié')
     
     # Gestion des valeurs pour Extraction et Restauration
     # On normalise les valeurs binaires pour n'avoir que 'Oui', 'Non' ou 'Non spécifié'
-    df[COL_EXTRACTION] = df[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
-    df[COL_RESTAURATION] = df[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+    df_clean.loc[:, COL_EXTRACTION] = df_clean[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+    df_clean.loc[:, COL_RESTAURATION] = df_clean[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
     
     # Nettoyage des chaînes de caractères pour les filtres (éviter les espaces indésirables)
     for col in [COL_REGION, COL_DEPARTEMENT, COL_VILLE, COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
-         df[col] = df[col].astype(str).str.strip()
+         df_clean.loc[:, col] = df_clean[col].astype(str).str.strip()
 
-    return df
+    return df_clean
 
 # -------------------------------------------------
-# FONCTIONS DE RENDU
+# CSS GLOBAL (Injecté directement)
 # -------------------------------------------------
 
-def get_global_css_style(css_file_path: str) -> str:
-    """Lit le contenu du fichier CSS et l'encapsule dans des balises <style>."""
-    try:
-        # Le fichier style.css doit être à la racine
-        # NOTE: Dans cet environnement, l'accès direct aux fichiers CSS n'est pas garanti. 
-        # Je vais injecter le CSS directement dans la fonction main() comme nous l'avions précédemment.
-        # Pour le moment, cette fonction reste pour la robustesse future.
-        return "" # Suppression temporaire de l'appel pour ne pas créer d'erreur FileNotFoundError
-    except Exception as e:
-        st.warning(f"Erreur lors de la lecture du CSS : {e}. Le style de l'application sera minimal.")
-        return "<style>/* Problème de chargement des styles. Styles par défaut appliqués. */</style>"
-
-
-# CSS injecté directement dans le code Python (pour l'environnement Canvas)
 GLOBAL_CSS = f"""
 <style>
-/* Police et couleur globale (Futura comme demandé) */
+/* Police et couleur globale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {{
     font-family: 'Futura', sans-serif !important;
     color: #000;
@@ -165,8 +163,8 @@ GLOBAL_CSS = f"""
 }}
 
 :root {{
-    --logo-blue: #05263d;
-    --copper: #b87333;
+    --logo-blue: {LOGO_BLUE};
+    --copper: {COPPER};
 }}
 
 /* ===== GÉNÉRALITÉ STREAMLIT ===== */
@@ -235,9 +233,6 @@ h3 {{
     color: #fff !important;
     padding: 16px;
     border-radius: 12px;
-    /* On retire les max/min width pour laisser Streamlit gérer le layout responsive */
-    /* min-width: {LEFT_PANEL_WIDTH_PX}px;
-    max-width: {LEFT_PANEL_WIDTH_PX}px; */
 }}
 
 .left-panel h3, .left-panel label, .left-panel p, .left-panel .stCheckbox > label > div:first-child {{
@@ -339,6 +334,10 @@ h3 {{
 """
 
 
+# -------------------------------------------------
+# FONCTIONS DE RENDU
+# -------------------------------------------------
+
 def format_value(value):
     """
     Applique les règles de formatage pour l'affichage dans le panneau de détails.
@@ -377,7 +376,7 @@ def render_right_panel(
 
         # --- TITRE ET ADRESSE ---
         st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
-        st.markdown(f'<p class="detail-address">{lot_data[col_addr_full]} ({lot_data[col_city]})</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
 
         # --- BOUTON GOOGLE MAPS (Traitement spécial pour Lien Google Maps) ---
         gmaps_link = format_value(lot_data.get(col_gmaps))
@@ -442,6 +441,7 @@ def main():
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
     # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
+    # Les largeurs sont ajustées pour un meilleur rendu visuel
     col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="medium")
 
 
@@ -450,7 +450,6 @@ def main():
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
         
         # 0. Affichage du LOGO (Utilisation du fichier uploadé)
-        # S'assurer que l'image s'affiche bien dans la colonne
         st.image(LOGO_URL, use_column_width=True)
 
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
@@ -467,6 +466,7 @@ def main():
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
         # 2. Filtre Département (dépend de la région sélectionnée)
+        # S'assurer que les valeurs ne sont pas vides avant de trier
         departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].dropna().unique().tolist())
         selected_departement = st.selectbox("Département", departements, key="departement_filter")
 
@@ -517,14 +517,12 @@ def main():
         # 7. Filtre Extraction (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
         filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
         if filter_extraction:
-            # Si coché, on filtre pour n'afficher que les lots où la valeur est STRICTEMENT 'Oui'
             df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
 
 
         # 8. Filtre Restauration (CORRIGÉ : n'affiche que 'Oui' si la case est cochée)
         filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
         if filter_restauration:
-            # Si coché, on filtre pour n'afficher que les lots où la valeur est STRICTEMENT 'Oui'
             df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
 
 
