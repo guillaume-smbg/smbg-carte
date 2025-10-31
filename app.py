@@ -1,5 +1,4 @@
 import os
-import io
 import re
 import math
 import unicodedata
@@ -10,7 +9,7 @@ import requests
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-
+import openpyxl # Ajout de la dépendance pour lire les fichiers Excel
 
 # -------------------------------------------------
 # CONFIG DE BASE
@@ -27,10 +26,11 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-# CORRECTION DÉFINITIVE DU CHEMIN ET DU NOM DU FICHIER EXCEL/CSV
-# Le fichier CSV extrait de l'onglet "Tableau recherche" est utilisé ici.
-# Le chemin d'accès au fichier est défini par l'utilisateur comme étant dans le dossier 'data/'
-DEFAULT_LOCAL_PATH = "data/Liste des lots.xlsx - Tableau recherche.csv"
+# CORRECTION DÉFINITIVE DU CHEMIN ET DU NOM DU FICHIER EXCEL
+# Chemin d'accès au fichier Excel tel que défini par l'utilisateur
+DEFAULT_LOCAL_PATH = "data/Liste des lots.xlsx"
+# IMPORTANT: Spécifiez le nom de la feuille à lire (à ajuster si différent)
+EXCEL_SHEET_NAME = "Tableau recherche"
 
 
 # -------------------------------------------------
@@ -300,29 +300,23 @@ COL_ACTIF = "Actif"
 # -------------------------------------------------
 
 @st.cache_data
-def load_data(url_or_path: str) -> pd.DataFrame:
-    """Charge le DataFrame depuis un fichier local ou une URL."""
+def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
+    """Charge le DataFrame depuis un fichier Excel local."""
     try:
-        # Tente de charger le fichier en considérant l'encodage comme 'latin-1' (souvent pour les CSV français)
-        # Utilise l'index de ligne 0 pour les entêtes
-        df = pd.read_csv(
-            url_or_path,
-            sep=',',
-            header=0,
-            skipinitialspace=True,
-            encoding='utf-8' # Test initial en utf-8
+        # Tente de charger la feuille spécifiée du fichier Excel
+        df = pd.read_excel(
+            file_path,
+            sheet_name=sheet_name,
+            engine='openpyxl' # Utilisation explicite du moteur openpyxl
         )
-    except UnicodeDecodeError:
-        # Si utf-8 échoue, tente latin-1
-         df = pd.read_csv(
-            url_or_path,
-            sep=',',
-            header=0,
-            skipinitialspace=True,
-            encoding='latin-1'
-        )
+    except FileNotFoundError:
+        st.error(f"Erreur de chargement : Le fichier n'a pas été trouvé au chemin : '{file_path}'")
+        return pd.DataFrame()
+    except ValueError:
+        st.error(f"Erreur de lecture : La feuille '{sheet_name}' est introuvable dans le fichier Excel.")
+        return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur de chargement du fichier : {e}")
+        st.error(f"Erreur de chargement du fichier Excel : {e}")
         return pd.DataFrame()
 
     # Nettoyage et préparation
@@ -348,14 +342,17 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     if COL_REF in df.columns:
         df[COL_REF] = df[COL_REF].astype(str).str.strip()
         # Créer une étiquette pour le marqueur (par ex. enlever les zéros non significatifs)
-        df['ref_label'] = df[COL_REF].apply(lambda x: re.sub(r'^0+', '', x))
+        df['ref_label'] = df[COL_REF].apply(lambda x: re.sub(r'^0+', '', str(x)))
 
     # Récupérer uniquement les colonnes nécessaires (pour optimiser)
     cols_to_keep = list(set([
         COL_LAT, COL_LON, COL_REF, 'ref_label', COL_ADDR_FULL, COL_CITY,
         COL_GMAPS, COL_DATE_PUB, COL_REGION, COL_DEPT, COL_TYPOLOGIE,
         COL_SURFACE_GLA, COL_LOYER_M2, COL_ETAT_LIVR, COL_EXTRACTION,
-        COL_RESTAURATION, COL_ACTIF
+        COL_RESTAURATION, COL_ACTIF,
+        # Ajout des colonnes de détail du panneau droit pour garantir leur présence si elles existent
+        "Surface utile", "Loyer annuel", "Loyer Mensuel", "Charges anuelles",
+        "Charges Mensuelles", "Charges €/m²", "Emplacement", "Valeur BP", "Contact", "Commentaires"
     ]) & set(df.columns))
 
     return df[cols_to_keep].copy()
@@ -366,15 +363,15 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
     df_filtered = df.copy()
 
     # Filtre Région
-    if filters.get(COL_REGION):
+    if filters.get(COL_REGION) and COL_REGION in df_filtered.columns:
         df_filtered = df_filtered[df_filtered[COL_REGION].isin(filters[COL_REGION])]
 
     # Filtre Département
-    if filters.get(COL_DEPT):
+    if filters.get(COL_DEPT) and COL_DEPT in df_filtered.columns:
         df_filtered = df_filtered[df_filtered[COL_DEPT].isin(filters[COL_DEPT])]
 
     # Filtre Typologie
-    if filters.get(COL_TYPOLOGIE):
+    if filters.get(COL_TYPOLOGIE) and COL_TYPOLOGIE in df_filtered.columns:
         df_filtered = df_filtered[df_filtered[COL_TYPOLOGIE].isin(filters[COL_TYPOLOGIE])]
 
     # Filtre Surface GLA (Range Slider)
@@ -394,26 +391,19 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
             (df_filtered[COL_LOYER_M2] <= max_val)
         ]
 
-    # Filtre Extraction/Restauration/Actif (Checkbox)
-    if filters.get(COL_EXTRACTION):
-        # Filtrer sur les valeurs sélectionnées, en gérant les NaN
-        df_filtered = df_filtered[
-            df_filtered[COL_EXTRACTION].astype(str).isin(filters[COL_EXTRACTION]) |
-            df_filtered[COL_EXTRACTION].isna()
-        ]
+    # Filtres Checkbox (Extraction/Restauration/Actif)
+    checkbox_cols = {COL_EXTRACTION: COL_EXTRACTION, COL_RESTAURATION: COL_RESTAURATION, COL_ACTIF: COL_ACTIF}
 
-    if filters.get(COL_RESTAURATION):
-        df_filtered = df_filtered[
-            df_filtered[COL_RESTAURATION].astype(str).isin(filters[COL_RESTAURATION]) |
-            df_filtered[COL_RESTAURATION].isna()
-        ]
+    for col_key, col_name in checkbox_cols.items():
+        if col_name in df.columns and filters.get(col_key):
+             # Les valeurs du filtre (filters[col_key]) sont les options sélectionnées (ex: ['Oui'])
+             selected_options = [str(x).strip().lower() for x in filters[col_key] if x is not None]
 
-    if filters.get(COL_ACTIF):
-        df_filtered = df_filtered[
-            df_filtered[COL_ACTIF].astype(str).isin(filters[COL_ACTIF]) |
-            df_filtered[COL_ACTIF].isna()
-        ]
-
+             # On filtre la colonne `col_name` si sa valeur (convertie en str et minuscule) est dans `selected_options`
+             # OU si la valeur est manquante (pd.isna) et que le filtre est activé (ce qui est le cas s'il y a des options sélectionnées)
+             df_filtered = df_filtered[
+                 df_filtered[col_name].astype(str).str.strip().str.lower().isin(selected_options)
+             ]
 
     return df_filtered
 
@@ -423,16 +413,17 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
 
 def format_value(value: Optional[any], unit: str = "", default: str = "-") -> str:
     """Formate une valeur pour l'affichage."""
-    if pd.isna(value) or value is None or value == '' or str(value).strip() == '/':
+    if pd.isna(value) or value is None or str(value).strip() in ['', 'None', '/']:
         return default
     if isinstance(value, (int, float)):
         # Formatage avec séparateur de milliers et gestion des décimales
-        if unit in ["€", "€/m²"]:
+        if unit in ["€", "€/m²", "€/m² an"]:
             # Pour l'argent, afficher deux décimales si l'unité est présente
-            return f"{value:,.2f}".replace(",", " ").replace(".", ",") + f" {unit}".strip()
+            formatted = f"{value:,.2f}".replace(",", " ").replace(".", ",")
         else:
              # Pour les autres nombres, utiliser un entier si possible
-            return f"{int(value):,}".replace(",", " ") + f" {unit}".strip()
+            formatted = f"{int(value):,}".replace(",", " ")
+        return formatted + f" {unit}".strip()
     return str(value)
 
 def render_detail_row(label: str, value: Optional[any], unit: str = ""):
@@ -457,7 +448,7 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
     # S'assurer que la colonne de référence est la bonne
     # Utiliser .head(1) au cas où il y aurait des doublons de référence (et prendre le premier)
     try:
-        row = df[df[col_ref] == selected_ref].iloc[0]
+        row = df[df[col_ref].astype(str).str.strip() == selected_ref].iloc[0]
     except IndexError:
         st.error(f"Détails introuvables pour la référence : {selected_ref}")
         return
@@ -480,53 +471,31 @@ def render_right_panel(selected_ref: str, df: pd.DataFrame, col_ref: str, col_ad
     # Détails
     st.markdown('<h4>Détails de l\'Offre</h4>', unsafe_allow_html=True)
 
-    # Note: J'utilise les noms de colonnes du CSV pour l'affichage,
-    # même s'ils ne correspondent pas aux constantes de filtrage pour les autres détails.
-    columns_to_display = {
-        "Surface GLA": COL_SURFACE_GLA,
-        "Surface utile": "Surface utile",
-        "Loyer annuel": "Loyer annuel",
-        "Loyer Mensuel": "Loyer Mensuel",
-        "Loyer €/m²": COL_LOYER_M2,
-        "Charges anuelles": "Charges anuelles",
-        "Charges Mensuelles": "Charges Mensuelles",
-        "Charges €/m²": "Charges €/m²",
-        "Typologie": COL_TYPOLOGIE,
-        "Emplacement": "Emplacement",
-        "Etat de livraison": COL_ETAT_LIVR,
-        "Extraction": COL_EXTRACTION,
-        "Restauration": COL_RESTAURATION,
-        "Actif": COL_ACTIF,
-        "Valeur BP": "Valeur BP",
-        "Contact": "Contact",
-    }
-
-    # Unités et formatage spécifiques
-    units = {
-        COL_SURFACE_GLA: "m²",
-        "Surface utile": "m²",
-        "Loyer annuel": "€",
-        "Loyer Mensuel": "€",
-        COL_LOYER_M2: "€/m²",
-        "Charges anuelles": "€",
-        "Charges Mensuelles": "€",
-        "Charges €/m²": "€/m²",
-    }
+    # Définition des colonnes à afficher avec leurs labels et unités
+    columns_to_display: List[Tuple[str, str, str]] = [
+        ("Surface GLA", COL_SURFACE_GLA, "m²"),
+        ("Surface utile", "Surface utile", "m²"),
+        ("Loyer annuel", "Loyer annuel", "€"),
+        ("Loyer Mensuel", "Loyer Mensuel", "€"),
+        ("Loyer €/m²", COL_LOYER_M2, "€/m² an"),
+        ("Charges anuelles", "Charges anuelles", "€"),
+        ("Charges Mensuelles", "Charges Mensuelles", "€"),
+        ("Charges €/m²", "Charges €/m²", "€/m²"),
+        ("Typologie", COL_TYPOLOGIE, ""),
+        ("Emplacement", "Emplacement", ""),
+        ("Etat de livraison", COL_ETAT_LIVR, ""),
+        ("Extraction", COL_EXTRACTION, ""),
+        ("Restauration", COL_RESTAURATION, ""),
+        ("Actif", COL_ACTIF, ""),
+        ("Valeur BP", "Valeur BP", ""),
+        ("Contact", "Contact", ""),
+    ]
 
     # Affichage dynamique des détails
-    for label, col_name in columns_to_display.items():
+    for label, col_name, unit in columns_to_display:
         if col_name in row.index:
-            unit = units.get(col_name, "")
-            # Pour certains champs (Oui/Non), on veut un affichage simple
-            if col_name in [COL_EXTRACTION, COL_RESTAURATION, COL_ACTIF]:
-                display_value = row[col_name]
-                if isinstance(display_value, str) and display_value.lower().strip() == 'oui':
-                    display_value = "Oui"
-                elif isinstance(display_value, str) and display_value.lower().strip() == 'non':
-                    display_value = "Non"
-                render_detail_row(label, display_value)
-            else:
-                render_detail_row(label, row[col_name], unit)
+            # Pour les champs Oui/Non/Inconnu, on affiche la valeur telle quelle (après format_value)
+            render_detail_row(label, row.get(col_name), unit)
 
 
     # Commentaires
@@ -555,18 +524,18 @@ def main():
     if "reset_filters" not in st.session_state:
         st.session_state["reset_filters"] = 0
 
-    # Charger les données (utiliser le fichier Tableau recherche.csv)
-    file_path = DEFAULT_LOCAL_PATH # Utilisation de la constante corrigée
-    df = load_data(file_path)
+    # Charger les données depuis le fichier Excel
+    file_path = DEFAULT_LOCAL_PATH
+    sheet_name = EXCEL_SHEET_NAME
+    df = load_data(file_path, sheet_name)
 
     if df.empty:
-        st.error(f"Impossible de charger les données. Vérifiez que le chemin d'accès '{file_path}' est correct et que le fichier est correctement formaté (séparateur: virgule, encodage: utf-8 ou latin-1).")
+        # Le message d'erreur est déjà géré dans load_data
         return
 
-    # Renommage des colonnes pour la compatibilité (si nécessaire)
-    # Assurez-vous que les colonnes attendues existent
+    # Vérification des colonnes essentielles
     if COL_LAT not in df.columns or COL_LON not in df.columns or COL_REF not in df.columns:
-        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans le fichier de données. Colonnes trouvées: {df.columns.tolist()}")
+        st.error(f"Les colonnes '{COL_LAT}', '{COL_LON}' ou '{COL_REF}' sont manquantes dans la feuille '{sheet_name}'. Colonnes trouvées: {df.columns.tolist()}")
         return
 
     # ======== PANNEAU GAUCHE (filtres) ========
@@ -574,7 +543,6 @@ def main():
     with st.container():
         st.markdown('<div class="left-panel">', unsafe_allow_html=True)
 
-        # Je mets un placeholder pour le logo, si vous en avez un, vous pouvez le remplacer
         st.markdown(f'<p style="text-align:center; font-size: 24px; color: {COPPER}; font-weight: bold;">SMBG Carte</p>', unsafe_allow_html=True)
         st.markdown('---')
 
@@ -588,48 +556,55 @@ def main():
 
         st.markdown("---")
 
+        # Initialisation des filtres à vide
+        selected_regions = []
+        selected_depts = []
+        selected_typos = []
+        selected_surface_range = None
+        selected_loyer_range = None
+        selected_extraction = []
+        selected_restau = []
+        selected_actif = []
+
+
         # 1. Filtre Région
-        all_regions = sorted(df[COL_REGION].dropna().unique().tolist())
-        selected_regions = st.multiselect(
-            "Région(s)",
-            options=all_regions,
-            default=[],
-            key=f"region_filter_{st.session_state['reset_filters']}"
-        )
+        if COL_REGION in df.columns:
+            all_regions = sorted(df[COL_REGION].astype(str).dropna().unique().tolist())
+            selected_regions = st.multiselect(
+                "Région(s)",
+                options=[r for r in all_regions if str(r).strip() != 'nan'],
+                default=[],
+                key=f"region_filter_{st.session_state['reset_filters']}"
+            )
 
         # 2. Filtre Département (doit être dynamique basé sur la Région sélectionnée)
-        df_for_dept = df
-        if selected_regions:
-             df_for_dept = df[df[COL_REGION].isin(selected_regions)]
+        if COL_DEPT in df.columns:
+            df_for_dept = df
+            if selected_regions:
+                 df_for_dept = df[df[COL_REGION].astype(str).isin(selected_regions)]
 
-        all_depts = sorted(df_for_dept[COL_DEPT].dropna().unique().tolist())
-        selected_depts = st.multiselect(
-            "Département(s)",
-            options=all_depts,
-            default=[],
-            key=f"dept_filter_{st.session_state['reset_filters']}"
-        )
+            all_depts = sorted(df_for_dept[COL_DEPT].astype(str).dropna().unique().tolist())
+            selected_depts = st.multiselect(
+                "Département(s)",
+                options=[d for d in all_depts if str(d).strip() != 'nan'],
+                default=[],
+                key=f"dept_filter_{st.session_state['reset_filters']}"
+            )
 
         # 3. Filtre Typologie
-        all_typos = sorted(df[COL_TYPOLOGIE].dropna().unique().tolist())
-        selected_typos = st.multiselect(
-            "Typologie",
-            options=all_typos,
-            default=[],
-            key=f"typo_filter_{st.session_state['reset_filters']}"
-        )
+        if COL_TYPOLOGIE in df.columns:
+            all_typos = sorted(df[COL_TYPOLOGIE].astype(str).dropna().unique().tolist())
+            selected_typos = st.multiselect(
+                "Typologie",
+                options=[t for t in all_typos if str(t).strip() != 'nan'],
+                default=[],
+                key=f"typo_filter_{st.session_state['reset_filters']}"
+            )
 
         st.markdown('---')
         st.markdown('<h3>Critères Numériques</h3>', unsafe_allow_html=True)
 
-        # Préparation des valeurs min/max pour les sliders
-        surface_min_all = int(df[COL_SURFACE_GLA].min()) if not df[COL_SURFACE_GLA].empty and df[COL_SURFACE_GLA].min() is not None and not pd.isna(df[COL_SURFACE_GLA].min()) else 0
-        surface_max_all = int(df[COL_SURFACE_GLA].max()) if not df[COL_SURFACE_GLA].empty and df[COL_SURFACE_GLA].max() is not None and not pd.isna(df[COL_SURFACE_GLA].max()) else 10000
-
-        loyer_min_all = int(df[COL_LOYER_M2].min()) if not df[COL_LOYER_M2].empty and df[COL_LOYER_M2].min() is not None and not pd.isna(df[COL_LOYER_M2].min()) else 0
-        loyer_max_all = int(df[COL_LOYER_M2].max()) if not df[COL_LOYER_M2].empty and df[COL_LOYER_M2].max() is not None and not pd.isna(df[COL_LOYER_M2].max()) else 1000
-
-        # Filtres appliqués jusqu'à présent (sauf les sliders de surface/loyer)
+        # Collecte des filtres appliqués jusqu'à présent (pour mettre à jour les bornes des sliders)
         temp_filters = {
             COL_REGION: selected_regions,
             COL_DEPT: selected_depts,
@@ -637,99 +612,106 @@ def main():
         }
         df_temp_filtered = filter_dataframe(df, temp_filters)
 
+
         # 4. Filtre Surface GLA
-        if not df_temp_filtered.empty and COL_SURFACE_GLA in df_temp_filtered.columns:
-            # S'assurer que les valeurs min/max des filtres appliqués sont valides et dans les bornes
-            valid_surfaces = df_temp_filtered[COL_SURFACE_GLA].dropna()
-            if not valid_surfaces.empty:
-                current_surface_min = int(valid_surfaces.min())
-                current_surface_max = int(valid_surfaces.max())
+        if COL_SURFACE_GLA in df.columns and not df[COL_SURFACE_GLA].dropna().empty:
+            surface_min_all = int(df[COL_SURFACE_GLA].min())
+            surface_max_all = int(df[COL_SURFACE_GLA].max())
+
+            if not df_temp_filtered.empty:
+                valid_surfaces = df_temp_filtered[COL_SURFACE_GLA].dropna()
+                if not valid_surfaces.empty:
+                    current_surface_min = int(valid_surfaces.min())
+                    current_surface_max = int(valid_surfaces.max())
+                else:
+                    current_surface_min = surface_min_all
+                    current_surface_max = surface_max_all
             else:
+                current_surface_min = surface_min_all
+                current_surface_max = surface_max_all
+
+            # S'assurer que les bornes de la valeur du slider sont valides
+            if current_surface_min > current_surface_max:
                  current_surface_min = surface_min_all
                  current_surface_max = surface_max_all
+
+            selected_surface_range = st.slider(
+                "Surface GLA (m²)",
+                min_value=surface_min_all,
+                max_value=surface_max_all,
+                value=(current_surface_min, current_surface_max),
+                step=50,
+                key=f"surface_filter_{st.session_state['reset_filters']}"
+            )
         else:
-            current_surface_min = surface_min_all
-            current_surface_max = surface_max_all
-
-        # S'assurer que les valeurs min/max actuelles sont dans les bornes globales
-        current_surface_min = max(min(current_surface_min, surface_max_all), surface_min_all)
-        current_surface_max = min(max(current_surface_max, surface_min_all), surface_max_all)
-
-        if current_surface_min > current_surface_max:
-             current_surface_min = surface_min_all
-             current_surface_max = surface_max_all
-
-        selected_surface_range = st.slider(
-            "Surface GLA (m²)",
-            min_value=surface_min_all,
-            max_value=surface_max_all,
-            value=(current_surface_min, current_surface_max),
-            step=50,
-            key=f"surface_filter_{st.session_state['reset_filters']}"
-        )
+             st.markdown('<p style="color: #ccc;">Surface GLA non disponible</p>', unsafe_allow_html=True)
 
 
         # 5. Filtre Loyer €/m²
-        if not df_temp_filtered.empty and COL_LOYER_M2 in df_temp_filtered.columns:
-            valid_loyers = df_temp_filtered[COL_LOYER_M2].dropna()
-            if not valid_loyers.empty:
-                current_loyer_min = int(valid_loyers.min())
-                current_loyer_max = int(valid_loyers.max())
+        if COL_LOYER_M2 in df.columns and not df[COL_LOYER_M2].dropna().empty:
+            loyer_min_all = int(df[COL_LOYER_M2].min())
+            loyer_max_all = int(df[COL_LOYER_M2].max())
+
+            if not df_temp_filtered.empty:
+                valid_loyers = df_temp_filtered[COL_LOYER_M2].dropna()
+                if not valid_loyers.empty:
+                    current_loyer_min = int(valid_loyers.min())
+                    current_loyer_max = int(valid_loyers.max())
+                else:
+                    current_loyer_min = loyer_min_all
+                    current_loyer_max = loyer_max_all
             else:
                 current_loyer_min = loyer_min_all
                 current_loyer_max = loyer_max_all
+
+            # S'assurer que les bornes de la valeur du slider sont valides
+            if current_loyer_min > current_loyer_max:
+                current_loyer_min = loyer_min_all
+                current_loyer_max = loyer_max_all
+
+            selected_loyer_range = st.slider(
+                "Loyer (€/m² an)",
+                min_value=loyer_min_all,
+                max_value=loyer_max_all,
+                value=(current_loyer_min, current_loyer_max),
+                step=10,
+                key=f"loyer_filter_{st.session_state['reset_filters']}"
+            )
         else:
-            current_loyer_min = loyer_min_all
-            current_loyer_max = loyer_max_all
+             st.markdown('<p style="color: #ccc;">Loyer €/m² non disponible</p>', unsafe_allow_html=True)
 
-        # S'assurer que les valeurs min/max actuelles sont dans les bornes globales
-        current_loyer_min = max(min(current_loyer_min, loyer_max_all), loyer_min_all)
-        current_loyer_max = min(max(current_loyer_max, loyer_min_all), loyer_max_all)
-
-        if current_loyer_min > current_loyer_max:
-            current_loyer_min = loyer_min_all
-            current_loyer_max = loyer_max_all
-
-
-        selected_loyer_range = st.slider(
-            "Loyer (€/m²)",
-            min_value=loyer_min_all,
-            max_value=loyer_max_all,
-            value=(current_loyer_min, current_loyer_max),
-            step=10,
-            key=f"loyer_filter_{st.session_state['reset_filters']}"
-        )
 
         st.markdown('---')
         st.markdown('<h3>Autres Critères</h3>', unsafe_allow_html=True)
 
         # 6. Filtres Checkbox
         # Extraction
-        extraction_opts = sorted(df[COL_EXTRACTION].astype(str).dropna().unique().tolist())
-        selected_extraction = st.multiselect(
-            "Extraction (Cheminée)",
-            options=extraction_opts,
-            default=[],
-            key=f"extraction_filter_{st.session_state['reset_filters']}"
-        )
-
+        if COL_EXTRACTION in df.columns:
+            extraction_opts = sorted(df[COL_EXTRACTION].astype(str).str.strip().dropna().unique().tolist())
+            selected_extraction = st.multiselect(
+                "Extraction (Cheminée)",
+                options=[o for o in extraction_opts if o.lower() != 'nan'],
+                default=[],
+                key=f"extraction_filter_{st.session_state['reset_filters']}"
+            )
         # Restauration
-        restau_opts = sorted(df[COL_RESTAURATION].astype(str).dropna().unique().tolist())
-        selected_restau = st.multiselect(
-            "Restauration",
-            options=restau_opts,
-            default=[],
-            key=f"restau_filter_{st.session_state['reset_filters']}"
-        )
-
+        if COL_RESTAURATION in df.columns:
+            restau_opts = sorted(df[COL_RESTAURATION].astype(str).str.strip().dropna().unique().tolist())
+            selected_restau = st.multiselect(
+                "Restauration",
+                options=[o for o in restau_opts if o.lower() != 'nan'],
+                default=[],
+                key=f"restau_filter_{st.session_state['reset_filters']}"
+            )
         # Actif
-        actif_opts = sorted(df[COL_ACTIF].astype(str).dropna().unique().tolist())
-        selected_actif = st.multiselect(
-            "Statut d'Actif",
-            options=actif_opts,
-            default=[],
-            key=f"actif_filter_{st.session_state['reset_filters']}"
-        )
+        if COL_ACTIF in df.columns:
+            actif_opts = sorted(df[COL_ACTIF].astype(str).str.strip().dropna().unique().tolist())
+            selected_actif = st.multiselect(
+                "Statut d'Actif",
+                options=[o for o in actif_opts if o.lower() != 'nan'],
+                default=[],
+                key=f"actif_filter_{st.session_state['reset_filters']}"
+            )
 
         st.markdown('</div>', unsafe_allow_html=True) # fin .left-panel
 
@@ -755,9 +737,32 @@ def main():
 
     # Affichage du nombre de résultats
     num_results = len(df_filtered)
-    with st.sidebar:
-         st.markdown(f'<p style="text-align: center; color: #fff; font-size: 16px; font-weight: bold; margin-top: 10px;">{num_results} annonce(s) trouvée(s)</p>', unsafe_allow_html=True)
+    # Afficher le compteur dans le panneau de gauche
+    st.markdown(f"""
+        <script>
+            // Cherche le conteneur du panneau de gauche (fixé)
+            const leftPanel = document.querySelector('.left-panel');
+            if (leftPanel) {{
+                // Crée le message de résultat
+                const resultMessage = document.createElement('p');
+                resultMessage.style.textAlign = 'center';
+                resultMessage.style.color = '#fff';
+                resultMessage.style.fontSize = '16px';
+                resultMessage.style.fontWeight = 'bold';
+                resultMessage.style.marginTop = '10px';
+                resultMessage.textContent = "{num_results} annonce(s) trouvée(s)";
 
+                // Si le message de résultat existe déjà (pour mise à jour)
+                const existingMessage = leftPanel.querySelector('#result-count-message');
+                if (existingMessage) {{
+                    existingMessage.textContent = resultMessage.textContent;
+                }} else {{
+                    resultMessage.id = 'result-count-message';
+                    leftPanel.appendChild(resultMessage);
+                }}
+            }}
+        </script>
+        """, unsafe_allow_html=True)
 
     # ======== COLONNE GAUCHE (carte) ========
     with col_map:
@@ -789,6 +794,9 @@ def main():
 
             # Ajouter un marqueur pour chaque ligne
             for _, r in df_filtered.iterrows():
+                raw_ref = str(r[COL_REF]).strip()
+                ref_label = str(r["ref_label"]).strip()
+
                 # CSS du marqueur standard
                 css_marker = (
                     "background-color: #05263d !important; color: white !important; "
@@ -800,7 +808,7 @@ def main():
                 )
 
                 # Si le marqueur est sélectionné, appliquer le style "selected-marker"
-                if r.get('ref_label') == st.session_state.get('selected_ref'):
+                if raw_ref == st.session_state.get('selected_ref'):
                     css_marker = (
                         "background-color: #b87333 !important; color: #05263d !important; "
                         "border-radius: 50% !important; width: 32px !important; "
@@ -808,14 +816,13 @@ def main():
                         "text-align: center !important; font-size: 13px !important; "
                         "font-weight: bold !important; border: 2px solid #05263d !important; "
                         "box-shadow: 0 2px 5px rgba(0,0,0,0.7); cursor: pointer; "
-                        "transform: scale(1.1);" # Léger zoom pour mieux voir
+                        "transform: scale(1.1);"
                     )
 
                 lat = float(r[COL_LAT])
                 lon = float(r[COL_LON])
-                raw_label = str(r["ref_label"]).strip()
 
-                icon = folium.DivIcon(html=f'<div class="folium-div-icon" style="{css_marker}">{raw_label}</div>')
+                icon = folium.DivIcon(html=f'<div class="folium-div-icon" style="{css_marker}">{ref_label}</div>')
 
                 layer.add_child(
                     folium.Marker(
@@ -825,7 +832,8 @@ def main():
                 )
 
                 # Clé pour le registre (arrondie)
-                click_registry[(round(lat, 6), round(lon, 6))] = raw_label
+                # La référence complète (raw_ref) est stockée pour la recherche
+                click_registry[(round(lat, 6), round(lon, 6))] = raw_ref
 
             out = st_folium(m, height=800, width=None, key="folium_filtered_map")
 
