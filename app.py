@@ -24,9 +24,9 @@ st.set_page_config(
 # Configuration des couleurs et dimensions
 LOGO_BLUE = "#05263d"
 COPPER = "#b87333"
-# On garde les largeurs en PX pour le panneau de gauche et droite pour un contrôle précis
-LEFT_PANEL_WIDTH_PX = 300 
-RIGHT_PANEL_WIDTH_PX = 320 
+# Mise à jour des largeurs à 275px comme demandé
+LEFT_PANEL_WIDTH_PX = 275 
+RIGHT_PANEL_WIDTH_PX = 275 
 
 # Le chemin du logo (qui est maintenant un chemin local)
 LOGO_URL = "assets/Logo bleu crop.png" 
@@ -193,6 +193,22 @@ GLOBAL_CSS = f"""
 .stButton > button:hover {{
     background-color: #9e642d; /* Copper plus foncé */
 }}
+
+/* Bouton spécial pour fermer le panneau de détails (panneau droit) */
+.close-button {{
+    background-color: #e0e0e0;
+    color: #333;
+    width: auto; /* Ne prend pas toute la largeur */
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: normal;
+    float: right;
+    margin-top: 5px;
+}}
+.close-button:hover {{
+    background-color: #ccc;
+}}
+
 /* Bouton Link (Google Maps) */
 .stLinkButton > a {{
     background-color: var(--logo-blue);
@@ -253,6 +269,9 @@ div[data-testid="stVerticalBlock"] {{
     padding: 20px; /* Plus de padding */
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    /* Utilise la largeur fixe définie */
+    min-width: {LEFT_PANEL_WIDTH_PX}px;
+    max-width: {LEFT_PANEL_WIDTH_PX}px;
     /* S'assurer que le panneau prend la bonne hauteur */
     min-height: 850px; 
 }}
@@ -319,6 +338,9 @@ div[data-testid="stVerticalBlock"] {{
     background-color: #f9f9f9;
     min-height: 850px; /* Aligné avec la carte */
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    /* Utilise la largeur fixe définie */
+    min-width: {RIGHT_PANEL_WIDTH_PX}px;
+    max-width: {RIGHT_PANEL_WIDTH_PX}px;
 }}
 
 .detail-address {{
@@ -403,6 +425,12 @@ def render_right_panel(
 ):
     """Affiche le panneau de droite avec les détails du lot sélectionné."""
     
+    # Bouton pour masquer le panneau
+    if st.button("X Masquer les détails", key="hide_details_button", help="Cliquez pour masquer ce panneau de détails."):
+        st.session_state["show_right_panel"] = False
+        st.session_state["selected_ref"] = "NO_SELECTION"
+        st.rerun()
+
     st.markdown('<div class="right-panel">', unsafe_allow_html=True)
     
     if selected_ref and selected_ref != "NO_SELECTION":
@@ -466,9 +494,12 @@ def main():
     # Injection du CSS global
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
-    # Initialisation de l'état de la sélection
+    # Initialisation de l'état de la sélection et de la visibilité
     if "selected_ref" not in st.session_state:
         st.session_state["selected_ref"] = "NO_SELECTION"
+    if "show_right_panel" not in st.session_state:
+        # Masqué par défaut
+        st.session_state["show_right_panel"] = False
 
     # Chargement des données
     df = load_data(DATA_FILE_PATH, DATA_SHEET_NAME)
@@ -478,10 +509,14 @@ def main():
     # Le titre est mieux placé au-dessus des colonnes pour une meilleure structure
     st.title("Catalogue Immobilier : Visualisation Cartographique")
 
-    # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
-    # Les largeurs sont ajustées: la première et la dernière sont fixes (PX), la centrale est flexible (1)
-    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1, RIGHT_PANEL_WIDTH_PX], gap="medium")
-
+    # Détermination de la structure des colonnes
+    if st.session_state["show_right_panel"]:
+        # Panneau de droite visible: [275px, Flexible, 275px]
+        col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1, RIGHT_PANEL_WIDTH_PX], gap="medium")
+    else:
+        # Panneau de droite masqué: [275px, Flexible]
+        col_left, col_map = st.columns([LEFT_PANEL_WIDTH_PX, 1], gap="medium")
+        col_right = None # La colonne droite n'existe pas dans ce cas
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
     with col_left:
@@ -571,6 +606,7 @@ def main():
         # Bouton de Réinitialisation (qui utilise maintenant 100% de la largeur du panneau)
         if st.button("Réinitialiser les filtres", key="reset_button"):
             st.session_state["selected_ref"] = "NO_SELECTION"
+            st.session_state["show_right_panel"] = False # Masque le panneau au reset
             # Réinitialiser tous les états de session des filtres
             st.session_state.region_filter = 'Toutes'
             st.session_state.departement_filter = 'Tous'
@@ -654,20 +690,25 @@ def main():
         # Met à jour l'état de la session si une référence a été cliquée
         if clicked_ref:
             st.session_state["selected_ref"] = clicked_ref
+            # Rendre le panneau de droite visible
+            st.session_state["show_right_panel"] = True
+            st.rerun() # Re-exécuter pour afficher le panneau
 
         st.markdown('</div>', unsafe_allow_html=True)  # fin .map-wrapper
 
     # ======== COLONNE DROITE (panneau annonce) ========
-    with col_right:
-        render_right_panel(
-            st.session_state["selected_ref"],
-            df,
-            DETAIL_COLUMNS, 
-            COL_REF,
-            COL_ADDR_FULL,
-            COL_GMAPS,
-            COL_VILLE,
-        )
+    # N'afficher la colonne droite que si l'état le permet
+    if st.session_state["show_right_panel"] and col_right is not None:
+        with col_right:
+            render_right_panel(
+                st.session_state["selected_ref"],
+                df,
+                DETAIL_COLUMNS, 
+                COL_REF,
+                COL_ADDR_FULL,
+                COL_GMAPS,
+                COL_VILLE,
+            )
 
 
 # -------------------------------------------------
