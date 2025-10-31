@@ -80,11 +80,10 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Fichier de données (nom du snippet généré)
-# Nous conservons le nom du fichier CSV généré par la plateforme comme le plus fiable pour l'environnement d'exécution
-DATA_FILE_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
-DATA_SHEET_NAME = "Tableau recherche"
-
+# Chemin du fichier (nom du CSV généré par la plateforme à partir de la feuille "Tableau recherche")
+DATA_SNIPPET_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
+DATA_EXCEL_NAME = "Liste des lots Version 2.xlsx" # Nom du fichier Excel original
+DATA_SHEET_NAME = "Tableau recherche" # Nom de la feuille utilisée
 
 # -------------------------------------------------
 # CHARGEMENT ET PREPARATION DES DONNEES
@@ -94,18 +93,13 @@ DATA_SHEET_NAME = "Tableau recherche"
 def load_data(file_path: str) -> pd.DataFrame:
     """
     Charge le DataFrame depuis le fichier de données. 
-    Priorise la lecture du CSV snippet fourni par la plateforme.
+    Utilise le chemin du snippet CSV généré à partir du fichier Excel.
     """
     try:
-        # Tente de charger le fichier CSV correspondant à la feuille Excel
-        # Ceci est la méthode la plus fiable dans cet environnement
+        # Lecture du fichier CSV snippet généré à partir de la feuille "Tableau recherche"
         df = pd.read_csv(file_path)
     except FileNotFoundError:
-        # Si le CSV n'est pas trouvé (par exemple si nous étions dans un environnement local standard), 
-        # on essaierait le fichier Excel directement.
-        # Pour l'environnement Canvas, nous nous fions au CSV snippet,
-        # mais la vérification de l'erreur est maintenue pour la robustesse.
-        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que la feuille '{DATA_SHEET_NAME}' du fichier 'Liste des lots Version 2.xlsx' est bien disponible.")
+        st.error(f"Fichier de données non trouvé. Veuillez vous assurer que le fichier Excel '{DATA_EXCEL_NAME}' contenant la feuille '{DATA_SHEET_NAME}' a été correctement chargé.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
@@ -150,13 +144,199 @@ def get_global_css_style(css_file_path: str) -> str:
     """Lit le contenu du fichier CSS et l'encapsule dans des balises <style>."""
     try:
         # Le fichier style.css doit être à la racine
-        with open(css_file_path, 'r', encoding='utf-8') as f:
-            css_content = f.read()
-        return f"<style>{css_content}</style>"
-    except FileNotFoundError:
-        # En cas d'erreur, renvoie un style minimal
-        st.warning("Fichier style.css non trouvé. Le style de l'application sera minimal.")
-        return "<style>/* Fichier style.css non trouvé. Styles par défaut appliqués. */</style>"
+        # NOTE: Dans cet environnement, l'accès direct aux fichiers CSS n'est pas garanti. 
+        # Je vais injecter le CSS directement dans la fonction main() comme nous l'avions précédemment.
+        # Pour le moment, cette fonction reste pour la robustesse future.
+        return "" # Suppression temporaire de l'appel pour ne pas créer d'erreur FileNotFoundError
+    except Exception as e:
+        st.warning(f"Erreur lors de la lecture du CSS : {e}. Le style de l'application sera minimal.")
+        return "<style>/* Problème de chargement des styles. Styles par défaut appliqués. */</style>"
+
+
+# CSS injecté directement dans le code Python (pour l'environnement Canvas)
+GLOBAL_CSS = f"""
+<style>
+/* Police et couleur globale (Futura comme demandé) */
+.stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {{
+    font-family: 'Futura', sans-serif !important;
+    color: #000;
+    font-size: 13px;
+    line-height: 1.4;
+}}
+
+:root {{
+    --logo-blue: #05263d;
+    --copper: #b87333;
+}}
+
+/* ===== GÉNÉRALITÉ STREAMLIT ===== */
+/* Ajuster l'apparence des widgets pour correspondre au thème */
+.stSelectbox > div > div, .stTextInput > div > div, .stCheckbox > label {{
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+    background-color: #fff;
+    color: var(--logo-blue);
+}}
+
+/* Boutons */
+.stButton > button {{
+    background-color: var(--copper);
+    color: white;
+    font-weight: bold;
+    border-radius: 8px;
+    border: none;
+    padding: 8px 16px;
+    transition: background-color 0.3s;
+}}
+.stButton > button:hover {{
+    background-color: #9e642d; /* Copper plus foncé */
+}}
+/* Bouton Link (Google Maps) */
+.stLinkButton > a {{
+    background-color: var(--logo-blue);
+    color: white;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 8px 16px;
+    text-decoration: none;
+    transition: background-color 0.3s;
+}}
+.stLinkButton > a:hover {{
+    background-color: #031a29; /* Bleu plus foncé */
+}}
+
+
+/* ===== TITRES ET PANNEAUX ===== */
+h1, h2, h3 {{
+    color: var(--logo-blue);
+    font-weight: 700;
+    margin-top: 0;
+}}
+h3 {{
+    margin-bottom: 10px;
+    font-size: 18px;
+}}
+
+/* Conteneur de l'application Streamlit */
+.stApp {{
+    padding: 0;
+}}
+
+/* Cadres des colonnes */
+[data-testid="stColumn"] {{
+    padding: 0 10px;
+}}
+
+
+/* ===== PANNEAU GAUCHE (filtres) ===== */
+.left-panel {{
+    background-color: var(--logo-blue);
+    color: #fff !important;
+    padding: 16px;
+    border-radius: 12px;
+    /* On retire les max/min width pour laisser Streamlit gérer le layout responsive */
+    /* min-width: {LEFT_PANEL_WIDTH_PX}px;
+    max-width: {LEFT_PANEL_WIDTH_PX}px; */
+}}
+
+.left-panel h3, .left-panel label, .left-panel p, .left-panel .stCheckbox > label > div:first-child {{
+    color: #fff !important;
+}}
+.left-panel .stSelectbox > label, .left-panel .stCheckbox > label {{
+    font-weight: bold;
+}}
+/* Rendre le fond des selectbox blanc dans le panneau gauche pour la lisibilité */
+.left-panel .stSelectbox > div > div {{
+    background-color: #fff;
+    color: var(--logo-blue);
+}}
+.left-panel .stSelectbox > label > div > p {{
+    color: #fff !important;
+}}
+.left-panel .stSelectbox .st-ag {{
+    color: var(--logo-blue) !important;
+}}
+
+
+/* ===== CARTE (centre) ===== */
+.map-wrapper {{
+    /* S'assurer que la carte utilise tout l'espace vertical disponible */
+    height: 800px; 
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}}
+/* Style du marqueur Folium (pour remplacer l'icône standard) */
+.custom-marker {{
+    background-color: var(--logo-blue);
+    color: white;
+    border: 3px solid var(--copper);
+    padding: 4px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+    font-size: 12px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+}}
+
+/* ===== PANNEAU DROIT (détails) ===== */
+.right-panel {{
+    padding: 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    background-color: #f9f9f9;
+    min-height: 800px; /* Alignement avec la carte */
+}}
+
+.detail-address {{
+    font-weight: 500;
+    color: #555;
+    margin-bottom: 20px;
+}}
+
+.detail-line {{
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dotted #ccc;
+    font-size: 14px;
+}}
+
+.detail-label {{
+    font-weight: bold;
+    color: var(--logo-blue);
+    flex-shrink: 0;
+    margin-right: 10px;
+}}
+
+.detail-value {{
+    text-align: right;
+    word-break: break-word; /* Permet les longs textes dans le champ */
+    color: #333;
+}}
+
+.detail-comments {{
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-left: 4px solid var(--copper);
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 5px;
+    white-space: pre-wrap;
+}}
+
+.no-selection-msg {{
+    text-align: center;
+    margin-top: 50px;
+    padding: 20px;
+    border: 1px dashed #ccc;
+    border-radius: 8px;
+    color: #888;
+}}
+</style>
+"""
 
 
 def format_value(value):
@@ -247,15 +427,15 @@ def render_right_panel(
 # -------------------------------------------------
 
 def main():
-    # Injection du CSS global (à lire depuis le fichier style.css)
-    st.markdown(get_global_css_style("style.css"), unsafe_allow_html=True)
+    # Injection du CSS global
+    st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
     # Initialisation de l'état de la sélection
     if "selected_ref" not in st.session_state:
         st.session_state["selected_ref"] = "NO_SELECTION"
 
     # Chargement des données
-    df = load_data(DATA_FILE_PATH)
+    df = load_data(DATA_SNIPPET_PATH)
     if df.empty:
         return
 
