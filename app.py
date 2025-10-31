@@ -6,7 +6,7 @@ from streamlit_folium import st_folium
 import numpy as np
 
 # --- 0. Configuration et Initialisation ---
-st.set_page_config(layout="wide", page_title="Carte Interactive (Panneaux Fixes)") 
+st.set_page_config(layout="wide", page_title="Carte Interactive") 
 
 # Initialisation de la session state
 if 'selected_ref' not in st.session_state:
@@ -86,64 +86,42 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs ---
+        # --- Création des marqueurs (CircleMarker standard) ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
             reference = row.get(REF_COL, 'N/A')
             
-            display_ref = reference
-            if reference != 'N/A' and reference.isdigit():
-                try:
-                    display_ref = str(int(reference)) 
-                except ValueError:
-                    pass 
+            # Affichage de la référence sans les zéros en tête pour le popup
+            display_ref = str(int(reference)) if reference.isdigit() else reference
             
-            html = f"""
-                <div id='lot-{reference}' style='
-                    background-color: #0072B2; 
-                    color: white; 
-                    border-radius: 50%; 
-                    width: 30px; 
-                    height: 30px; 
-                    text-align: center; 
-                    line-height: 30px; 
-                    font-size: 10px;
-                    font-weight: bold;
-                    cursor: pointer;
-                    border: 2px solid white;'>
-                    {display_ref}
-                </div>
-                """
-            
-            icon = DivIcon(html=html)
-            
-            folium.Marker(
+            # Création du Popup
+            popup_html = f"<b>Réf. : {display_ref}</b><br>Cliquez à proximité pour les détails."
+
+            folium.CircleMarker(
                 location=[lat, lon],
-                icon=icon,
+                radius=10,
+                color="#0072B2",
+                fill=True,
+                fill_color="#0072B2",
+                fill_opacity=0.8,
+                tooltip=f"Réf. {display_ref}", # Info-bulle au survol
+                popup=folium.Popup(popup_html, max_width=300),
             ).add_to(m)
 
         # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- DIAGNOSTIC DU CLIC EN TEMPS RÉEL (CRITIQUE) ---
-        st.markdown("---")
-        if map_output and map_output.get("last_clicked"):
-            st.info(f"✅ **Clic Détecté** : Coordonnées {map_output['last_clicked']['lat']:.4f}, {map_output['last_clicked']['lng']:.4f}")
-        else:
-            st.warning("❌ **Clic non détecté** ou la carte n'a pas renvoyé de coordonnées. (Le signal n'arrive pas.)")
-        st.markdown("---")
-        # ----------------------------------------
-        
-        # --- Logique de détection de clic (Mise à jour de la session state) ---
+        # --- Logique de détection de clic ---
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
             
+            # Seulement si un nouveau point a été cliqué
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # Recherche du lot le plus proche 
+                # Recherche du lot le plus proche
                 data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
@@ -159,9 +137,10 @@ st.markdown("---")
 
 selected_ref = st.session_state['selected_ref']
 st.header("🔍 Détails du Lot Sélectionné")
-# DIAGNOSTIC CRITIQUE : Cette valeur doit changer après le clic
-st.text(f"DEBUG REF: {selected_ref if selected_ref else 'NOT SET'}") 
-st.markdown("---")
+
+# Ligne de diagnostic masquée, mais on utilise la logique
+# st.text(f"DEBUG REF: {selected_ref if selected_ref else 'NOT SET'}") 
+# st.markdown("---") 
 
 if selected_ref and selected_ref != 'None':
     selected_ref_clean = selected_ref.strip()
@@ -257,7 +236,6 @@ if selected_ref and selected_ref != 'None':
             
     else:
         st.error("❌ ÉCHEC : La référence a été capturée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
-        st.text(f"Référence cherchée : '{selected_ref}' (Long: {len(selected_ref)})")
         
 else:
     st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ci-dessous.")
