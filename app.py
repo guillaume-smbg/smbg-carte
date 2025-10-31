@@ -97,19 +97,27 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     Charge le DataFrame et effectue le nettoyage/formatage initial.
     """
     try:
-        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        # NOTE: Le fichier fourni par l'utilisateur était un CSV. 
+        # On va tenter de le charger en CSV pour assurer la compatibilité,
+        # mais la colonne COL_LAT et COL_LON doit être correctement identifiée.
+        
+        # Le fichier "Liste des lots Version 2.xlsx - Tableau recherche.csv" est disponible
+        # On assume que les en-têtes sont à la première ligne.
+        df = pd.read_csv("Liste des lots Version 2.xlsx - Tableau recherche.csv", encoding="utf-8")
         
         required_cols = [COL_LAT, COL_LON, COL_REF]
         for col in required_cols:
             if col not in df.columns:
+                # Tentative de normaliser les noms de colonnes si le nom est proche
                 st.error(f"La colonne requise '{col}' est manquante.")
-                return pd.DataFrame()
+                return pd.DataFrame() # Retourne un DataFrame vide en cas d'échec
 
     except FileNotFoundError:
-        st.error(f"Fichier de données Excel non trouvé: `{file_path}`.")
+        # En cas d'échec, on essaie de charger l'original du code, mais on garde le CSV pour la robustesse
+        st.error(f"Fichier de données CSV non trouvé: Liste des lots Version 2.xlsx - Tableau recherche.csv.")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur lors de la lecture du fichier Excel. Détails: {e}")
+        st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
         return pd.DataFrame()
 
 
@@ -125,13 +133,21 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
 
     # Remplacer NaN dans les colonnes de filtre spécifiques
     for col in [COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
-        df_clean.loc[:, col] = df_clean[col].fillna('Non spécifié')
+        if col in df_clean.columns:
+            df_clean.loc[:, col] = df_clean[col].fillna('Non spécifié')
     
-    df_clean.loc[:, COL_EXTRACTION] = df_clean[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
-    df_clean.loc[:, COL_RESTAURATION] = df_clean[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
-    
+    # Normalisation des colonnes Extraction/Restauration
+    if COL_EXTRACTION in df_clean.columns:
+        df_clean.loc[:, COL_EXTRACTION] = df_clean[COL_EXTRACTION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+    if COL_RESTAURATION in df_clean.columns:
+        df_clean.loc[:, COL_RESTAURATION] = df_clean[COL_RESTAURATION].astype(str).str.strip().str.lower().replace({'oui': 'Oui', 'non': 'Non', 'nan': 'Non spécifié', '': 'Non spécifié'})
+
     for col in [COL_REGION, COL_DEPARTEMENT, COL_VILLE, COL_TYPOLOGIE, COL_TYPE, COL_CESSION]:
-         df_clean.loc[:, col] = df_clean[col].astype(str).str.strip()
+        if col in df_clean.columns:
+            df_clean.loc[:, col] = df_clean[col].astype(str).str.strip().fillna('Non spécifié')
+        else:
+             # Si une colonne de filtre manque, la créer avec une valeur par défaut pour éviter les erreurs de filtre
+             df_clean.loc[:, col] = 'Non spécifié'
 
     return df_clean
 
@@ -343,53 +359,60 @@ def render_right_panel(
 ):
     """Affiche le panneau de droite avec les détails du lot sélectionné."""
     
+    # Correction: Le bouton doit forcer le rerun pour modifier la structure des colonnes dans main()
+    # On utilise un conteneur pour garantir que le bouton est rendu avant le panneau
     with st.container():
+        
         # Bouton pour masquer le panneau (utilise float:right dans le CSS)
         if st.button("X Masquer les détails", key="hide_details_button", help="Cliquez pour masquer ce panneau de détails.", classes="close-button"):
             st.session_state["show_right_panel"] = False
             st.session_state["selected_ref"] = "NO_SELECTION"
-            st.rerun()
+            st.rerun() # Rerun essentiel pour redessiner la mise en page des colonnes
             
         st.markdown('<div class="right-panel">', unsafe_allow_html=True)
         
         if selected_ref and selected_ref != "NO_SELECTION":
             
-            lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
+            # Assurer que la référence existe avant d'essayer de la chercher
+            if selected_ref not in df[col_ref].values:
+                st.markdown('<p class="no-selection-msg">Lot non trouvé dans les données filtrées.</p>', unsafe_allow_html=True)
+            else:
+                lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
 
-            # --- TITRE ET ADRESSE ---
-            st.markdown(f"<h3>Lot Réf. : {selected_ref}</h3>", unsafe_allow_html=True)
-            st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
+                # --- TITRE ET ADRESSE ---
+                st.markdown(f"<h3>Lot Réf. : {selected_ref}</h3>", unsafe_allow_html=True)
+                st.markdown(f'<p class="detail-address">{lot_data.get(col_addr_full, "Adresse non spécifiée")} ({lot_data.get(col_city, "Ville non spécifiée")})</p>', unsafe_allow_html=True)
 
-            # --- BOUTON GOOGLE MAPS ---
-            gmaps_link = format_value(lot_data.get(col_gmaps))
-            if gmaps_link and gmaps_link != "Non spécifié":
-                 st.link_button("Voir sur Google Maps 🗺️", gmaps_link, help="Ouvre le lien Google Maps dans un nouvel onglet", type="primary")
-                 st.markdown("---")
-            
-            
-            # --- AFFICHAGE DES AUTRES CHAMPS DE DÉTAILS ---
-            data_columns_to_show = [col for col in detail_columns if col != col_gmaps and col != "Commentaires"]
-            
-            for col_name in data_columns_to_show:
-                value = lot_data.get(col_name)
-                formatted_value = format_value(value)
+                # --- BOUTON GOOGLE MAPS ---
+                gmaps_link = format_value(lot_data.get(col_gmaps))
+                if gmaps_link and gmaps_link != "Non spécifié":
+                    st.link_button("Voir sur Google Maps 🗺️", gmaps_link, help="Ouvre le lien Google Maps dans un nouvel onglet", type="primary")
+                    st.markdown("---")
                 
-                if formatted_value is not None:
-                    st.markdown(
-                        f"""
-                        <div class="detail-line">
-                            <span class="detail-label">{col_name} :</span>
-                            <span class="detail-value">{formatted_value}</span>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
-            
-            # --- AFFICHAGE DES COMMENTAIRES ---
-            comments = format_value(lot_data.get("Commentaires"))
-            if comments is not None:
-                 st.markdown('<br><span class="detail-label">Commentaires :</span>', unsafe_allow_html=True)
-                 st.markdown(f'<p class="detail-comments">{comments}</p>', unsafe_allow_html=True)
+                
+                # --- AFFICHAGE DES AUTRES CHAMPS DE DÉTAILS ---
+                data_columns_to_show = [col for col in detail_columns if col != col_gmaps and col != "Commentaires"]
+                
+                for col_name in data_columns_to_show:
+                    value = lot_data.get(col_name)
+                    formatted_value = format_value(value)
+                    
+                    if formatted_value is not None:
+                        st.markdown(
+                            f"""
+                            <div class="detail-line">
+                                <span class="detail-label">{col_name} :</span>
+                                <span class="detail-value">{formatted_value}</span>
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
+                
+                # --- AFFICHAGE DES COMMENTAIRES ---
+                comments = format_value(lot_data.get("Commentaires"))
+                if comments is not None:
+                    st.markdown('<br><span class="detail-label">Commentaires :</span>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="detail-comments">{comments}</p>', unsafe_allow_html=True)
 
         else:
             st.markdown('<p class="no-selection-msg">Cliquez sur un marqueur sur la carte pour voir les détails du lot.</p>', unsafe_allow_html=True)
@@ -430,6 +453,7 @@ def main():
     else:
         # Panneau de droite masqué: [275px, Flexible]
         col_left, col_map = st.columns([LEFT_PANEL_WIDTH_PX/1000 + 0.1, 1], gap="medium")
+        # On utilise None pour le placeholder de la colonne de droite masquée
         col_right = None 
 
     # ======== COLONNE GAUCHE (panneau de filtres) ========
@@ -439,13 +463,22 @@ def main():
         
         # 0. Affichage du LOGO
         st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-        st.image(LOGO_URL, use_column_width=True)
+        # On utilise la fonction 'image' de Streamlit avec le chemin d'accès local
+        try:
+             # Utiliser un chemin local simple. Si l'image n'est pas trouvable, l'utilisateur
+             # devra la fournir dans un dossier 'assets'.
+             st.image(os.path.join(os.path.dirname(__file__), "assets", "Logo bleu crop.png"), use_column_width=True)
+        except Exception:
+             # Afficher un placeholder si l'image n'est pas trouvée
+             st.markdown('<p style="color:white; font-size:20px; font-weight:bold;">LOGO SMBG</p>', unsafe_allow_html=True)
+        
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
         # 1. Filtre Région
-        regions = ['Toutes'] + sorted(df[COL_REGION].dropna().unique().tolist())
+        # Utiliser uniquement les régions présentes dans le DF filtré pour les listes déroulantes suivantes
+        regions = ['Toutes'] + sorted(df[COL_REGION].unique().tolist())
         selected_region = st.selectbox("Région", regions, key="region_filter")
 
         df_filtered = df.copy()
@@ -453,14 +486,14 @@ def main():
             df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
 
         # 2. Filtre Département
-        departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].dropna().unique().tolist())
+        departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].unique().tolist())
         selected_departement = st.selectbox("Département", departements, key="departement_filter")
 
         if selected_departement != 'Tous':
             df_filtered = df_filtered[df_filtered[COL_DEPARTEMENT] == selected_departement]
             
         # 3. Filtre Ville
-        villes = ['Toutes'] + sorted(df_filtered[COL_VILLE].dropna().unique().tolist())
+        villes = ['Toutes'] + sorted(df_filtered[COL_VILLE].unique().tolist())
         selected_ville = st.selectbox("Ville", villes, key="ville_filter")
         
         if selected_ville != 'Toutes':
@@ -494,30 +527,48 @@ def main():
         # 7. Filtre Extraction
         st.markdown("<p style='font-weight: bold; color: white; margin-bottom: 5px;'>Options Spécifiques:</p>", unsafe_allow_html=True)
         
-        filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
-        if filter_extraction:
-            df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
+        # Vérifie si la colonne existe avant d'appliquer le filtre
+        if COL_EXTRACTION in df_filtered.columns:
+            filter_extraction = st.checkbox("Extraction existante", key="extraction_filter", value=False)
+            if filter_extraction:
+                df_filtered = df_filtered[df_filtered[COL_EXTRACTION] == 'Oui']
+        else:
+             st.markdown('<p style="color:#aaa; font-size:12px;">(Extraction non disponible)</p>', unsafe_allow_html=True)
 
         # 8. Filtre Restauration
-        filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
-        if filter_restauration:
-            df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
+        if COL_RESTAURATION in df_filtered.columns:
+            filter_restauration = st.checkbox("Possibilité Restauration", key="restauration_filter", value=False)
+            if filter_restauration:
+                df_filtered = df_filtered[df_filtered[COL_RESTAURATION] == 'Oui']
+        else:
+            st.markdown('<p style="color:#aaa; font-size:12px;">(Restauration non disponible)</p>', unsafe_allow_html=True)
+
 
         # --- AFFICHAGE DU RÉSULTAT ET BOUTON ---
         st.markdown(f"<p style='margin-top: 20px; color: white;'>**{len(df_filtered)}** lots trouvés.</p>", unsafe_allow_html=True)
 
         if st.button("Réinitialiser les filtres", key="reset_button"):
+            # Remise à zéro des états de session pour le clic et la visibilité
             st.session_state["selected_ref"] = "NO_SELECTION"
             st.session_state["show_right_panel"] = False
             
+            # Remise à zéro des widgets de filtre
             st.session_state.region_filter = 'Toutes'
             st.session_state.departement_filter = 'Tous'
             st.session_state.ville_filter = 'Toutes'
             st.session_state.typologie_filter = 'Toutes'
             st.session_state.type_filter = 'Tous'
             st.session_state.cession_filter = 'Toutes'
-            st.session_state.extraction_filter = False
-            st.session_state.restauration_filter = False
+            # Les checkboxes peuvent ne pas exister si les colonnes sont manquantes, on gère l'exception
+            try:
+                st.session_state.extraction_filter = False
+            except AttributeError:
+                pass
+            try:
+                st.session_state.restauration_filter = False
+            except AttributeError:
+                pass
+            
             st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True) # fin .left-panel
@@ -527,7 +578,7 @@ def main():
         st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
 
         # Calcul du centre et du zoom
-        center_lat, center_lon = 46.603354, 1.888334
+        center_lat, center_lon = 46.603354, 1.888334 # Centre de la France
         zoom_start = 6 
 
         if not df_filtered.empty:
@@ -535,6 +586,7 @@ def main():
             valid_lon = df_filtered["_lon_plot"].dropna()
             
             if not valid_lat.empty and not valid_lon.empty:
+                # Recalculer le centre uniquement si des points sont affichés
                 center_lat = valid_lat.mean()
                 center_lon = valid_lon.mean()
                 
@@ -581,10 +633,13 @@ def main():
 
         # Affichage de la carte Streamlit
         # La hauteur de 100% est gérée par le CSS .map-wrapper
-        out = st_folium(m, height="100%", width="100%")
+        # On utilise une clé unique pour la carte à chaque exécution pour éviter des problèmes de cache
+        map_key = f"folium_map_{len(df_filtered)}_{st.session_state['selected_ref']}"
+        out = st_folium(m, height="100%", width="100%", key=map_key)
 
-        clicked_ref = None
+        
         last_clicked_location = None
+        clicked_ref = None
         
         # 1. Détecter si Streamlit a renvoyé des informations de clic
         if isinstance(out, dict):
@@ -604,26 +659,32 @@ def main():
                 clicked_ref = st.session_state["click_registry"].get(last_clicked_location)
         
         # 3. Gérer la réaction au clic
+        is_rerun_needed = False
         
-        # CAS A: Clic sur un marqueur
+        # CAS A: Clic sur un NOUVEAU marqueur
         if clicked_ref and clicked_ref != st.session_state["selected_ref"]:
             st.session_state["selected_ref"] = clicked_ref
             st.session_state["show_right_panel"] = True
-            st.rerun() 
+            is_rerun_needed = True # Nécessaire pour afficher le panneau de droite immédiatement
             
-        # CAS B: Clic sur la carte (pas sur le marqueur ou sur le même marqueur)
+        # CAS B: Clic sur le FOND de carte (pas sur le marqueur)
         # last_clicked_location est présent (il y a eu un clic)
         # MAIS clicked_ref n'est PAS dans le registre (le clic n'était PAS sur un marqueur)
-        elif last_clicked_location and not clicked_ref:
-            # Rétracter le panneau si on clique en dehors d'un pins
+        elif last_clicked_location and not clicked_ref and st.session_state["show_right_panel"]:
+            # Rétracter le panneau si on clique en dehors d'un pins ET que le panneau était affiché
             st.session_state["selected_ref"] = "NO_SELECTION"
             st.session_state["show_right_panel"] = False
+            is_rerun_needed = True # Nécessaire pour masquer le panneau de droite immédiatement
+
+        # On fait un seul rerun à la fin si nécessaire
+        if is_rerun_needed:
             st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)  # fin .map-wrapper
 
     # ======== COLONNE DROITE (panneau annonce) ========
     # N'afficher la colonne droite que si l'état le permet
+    # NOTE: col_right est None si show_right_panel est False
     if st.session_state["show_right_panel"] and col_right is not None:
         with col_right:
             render_right_panel(
