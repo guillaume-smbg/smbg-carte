@@ -21,7 +21,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# 🚨 CORRECTION CRUCIALE 🚨
+# 🚨 CHEMIN DU FICHIER 🚨
 # Le chemin pointe vers le fichier EXCEL (.xlsx) dans le sous-dossier 'data'
 DATA_FILE_PATH = "data/Liste des lots Version 2.xlsx"
 EXCEL_SHEET_NAME = "Tableau recherche" # Nom de la feuille de calcul à charger
@@ -32,7 +32,7 @@ COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
 
-# Noms des colonnes pour les FILTRES et les COORDONNEES (À VÉRIFIER)
+# Noms des colonnes pour les FILTRES et les COORDONNEES
 COL_REGION = "Région"
 COL_DEPARTEMENT = "Département"
 COL_VILLE = "Ville"
@@ -84,7 +84,6 @@ def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
     """Charge le DataFrame depuis le fichier Excel et effectue le nettoyage."""
     try:
         # Tente de charger le fichier EXCEL (.xlsx)
-        # Nécessite que pandas puisse lire le format Excel (pas de librairie externe requise par défaut sur Streamlit)
         df = pd.read_excel(file_path, sheet_name=sheet_name)
     except FileNotFoundError:
         st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vérifier le chemin d'accès.")
