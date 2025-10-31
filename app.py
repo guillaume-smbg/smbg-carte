@@ -2,115 +2,57 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-import json
 import numpy as np
 
-# ***************************************************************
-# --- 1. CONFIGURATION INITIALE & GESTION DES DONNÉES ---
-# ***************************************************************
+# ******************************************************************************
+# --- 1. CONFIGURATION GLOBALE ET PRÉPARATION DES DONNÉES ---
+# ******************************************************************************
 
-# Configure la page en mode large pour une meilleure expérience utilisateur
+# 1.1. Configuration de la page Streamlit
 st.set_page_config(
     layout="wide", 
-    page_title="SMBG Carte Immo",
-    # On pourrait ajouter une icône ici si disponible
-    # page_icon="🗺️" 
+    page_title="SMBG Carte Immo - Rév. Zéro",
+    page_icon="🗺️" 
 ) 
 
-# --- A. DONNÉES DE DÉMONSTRATION ÉTENDUES ---
-# Simule le fichier "Liste des lots.xlsx - Tableau recherche.csv"
-# *** ATTENTION : À REMPLACER PAR LA LECTURE DE VOTRE FICHIER CSV RÉEL EN PRODUCTION ***
-# df = pd.read_csv("Liste des lots.xlsx - Tableau recherche.csv")
-# Assurez-vous d'avoir les colonnes 'Latitude', 'Longitude', 'Référence annonce', 'Surface GLA', 'Typologie', 'Région', 'Département'.
-
+# 1.2. Chargement des données de démonstration
+# *** IMPORTANT : Remplacez ce bloc par la lecture de votre fichier CSV réel. ***
+# Le code de démonstration ci-dessous assure la robustesse des filtres.
 try:
-    # Création du DataFrame de démonstration avec un jeu de données varié
-    # Ceci garantit la robustesse des filtres Région/Département/Typologie.
-    DATA = {
-        'Référence annonce': [
-            '00022', '00023', '00024', '00025', '00026', '00027', '00028', 
-            '00029', '00030', '00031', '00032', '00033', '00034', '00035', 
-            '00036', '00037', '00038', '00039', '00040', '00041'
-        ],
-        'Latitude': [
-            48.763870, 48.822532, 48.8566, 45.764043, 44.837789, 43.6047, 48.5734, 
-            43.7102, 43.3000, 45.1885, 47.2184, 48.4069, 49.4432, 47.0811, 
-            47.3941, 46.2276, 48.1173, 47.4137, 46.2083, 44.0195
-        ],
-        'Longitude': [
-            2.288359, 2.190669, 2.3522, 4.835659, -0.579180, 1.4442, 7.7521, 
-            7.2620, 5.4000, 5.7245, -1.5536, 1.9333, 2.1000, 2.4000, 
-            5.0400, 2.2137, -1.6778, 6.0089, -0.5833, 4.0950
-        ],
-        'Ville': [
-            'Montrouge', 'Ville-d\'Avray', 'Paris', 'Lyon', 'Bordeaux', 'Toulouse', 'Strasbourg', 
-            'Nice', 'Marseille', 'Grenoble', 'Nantes', 'Orléans', 'Rouen', 'Bourges', 
-            'Dijon', 'Paris-Sud', 'Rennes', 'Nancy', 'La Rochelle', 'Avignon'
-        ],
-        'Adresse': [
-            '11 Rue des Coquelicots', '30 Rue de la Ronce', '10 Rue de la Paix', 'Place Bellecour', 'Rue Sainte Catherine', 'Place du Capitole', 'Grande Île', 
-            'Promenade des Anglais', 'Vieux-Port', 'Place Grenette', 'Quai de la Fosse', 'Place du Martroi', 'Gros Horloge', 'Place Jacques Cœur', 
-            'Place de la Libération', 'Rond-point des champs', 'Place de la Mairie', 'Place Stanislas', 'Vieux Port', 'Palais des Papes'
-        ],
-        'Surface GLA': [
-            325, 105, 500, 450, 200, 300, 150, 250, 600, 180, 220, 350, 
-            400, 100, 130, 700, 280, 120, 550, 380
-        ],
-        'Loyer annuel': [
-            150000, 120000, 300000, 250000, 90000, 180000, 80000, 160000, 400000, 
-            100000, 110000, 190000, 220000, 50000, 70000, 450000, 140000, 75000, 
-            350000, 200000
-        ],
-        'Typologie': [
-            'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 
-            'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 
-            'Commercial', 'Pied d\'immeuble', 'Bureaux', 'Commercial', 'Pied d\'immeuble', 
-            'Bureaux', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux'
-        ],
-        'Région': [
-            'Ile-de-France', 'Ile-de-France', 'Ile-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 
-            'Occitanie', 'Grand Est', 'Provence-Alpes-Côte d\'Azur', 'Provence-Alpes-Côte d\'Azur', 
-            'Auvergne-Rhône-Alpes', 'Pays de la Loire', 'Centre-Val de Loire', 'Normandie', 
-            'Centre-Val de Loire', 'Bourgogne-Franche-Comté', 'Ile-de-France', 'Bretagne', 
-            'Grand Est', 'Nouvelle-Aquitaine', 'Provence-Alpes-Côte d\'Azur'
-        ],
-        'Département': [
-            'Hauts-de-Seine', 'Hauts-de-Seine', 'Paris', 'Rhône', 'Gironde', 
-            'Haute-Garonne', 'Bas-Rhin', 'Alpes-Maritimes', 'Bouches-du-Rhône', 
-            'Isère', 'Loire-Atlantique', 'Loiret', 'Seine-Maritime', 'Cher', 
-            'Côte-d\'Or', 'Essonne', 'Ille-et-Vilaine', 'Meurthe-et-Moselle', 
-            'Charente-Maritime', 'Vaucluse'
-        ],
-        'N° Département': [
-            '92', '92', '75', '69', '33', '31', '67', '06', '13', '38', 
-            '44', '45', '76', '18', '21', '91', '35', '54', '17', '84'
-        ],
+    # Définition des colonnes et des types de données pour un DataFrame simulé
+    DATA_COLUMNS = {
+        'Référence annonce': ['00022', '00023', '00024', '00025', '00026', '00027', '00028', '00029', '00030', '00031', '00032', '00033', '00034', '00035', '00036', '00037', '00038', '00039', '00040', '00041'],
+        'Latitude': [48.763870, 48.822532, 48.8566, 45.764043, 44.837789, 43.6047, 48.5734, 43.7102, 43.3000, 45.1885, 47.2184, 48.4069, 49.4432, 47.0811, 47.3941, 46.2276, 48.1173, 47.4137, 46.2083, 44.0195],
+        'Longitude': [2.288359, 2.190669, 2.3522, 4.835659, -0.579180, 1.4442, 7.7521, 7.2620, 5.4000, 5.7245, -1.5536, 1.9333, 2.1000, 2.4000, 5.0400, 2.2137, -1.6778, 6.0089, -0.5833, 4.0950],
+        'Ville': ['Montrouge', 'Ville-d\'Avray', 'Paris', 'Lyon', 'Bordeaux', 'Toulouse', 'Strasbourg', 'Nice', 'Marseille', 'Grenoble', 'Nantes', 'Orléans', 'Rouen', 'Bourges', 'Dijon', 'Paris-Sud', 'Rennes', 'Nancy', 'La Rochelle', 'Avignon'],
+        'Adresse': ['11 Rue des Coquelicots', '30 Rue de la Ronce', '10 Rue de la Paix', 'Place Bellecour', 'Rue Sainte Catherine', 'Place du Capitole', 'Grande Île', 'Promenade des Anglais', 'Vieux-Port', 'Place Grenette', 'Quai de la Fosse', 'Place du Martroi', 'Gros Horloge', 'Place Jacques Cœur', 'Place de la Libération', 'Rond-point des champs', 'Place de la Mairie', 'Place Stanislas', 'Vieux Port', 'Palais des Papes'],
+        'Surface GLA': [325, 105, 500, 450, 200, 300, 150, 250, 600, 180, 220, 350, 400, 100, 130, 700, 280, 120, 550, 380],
+        'Loyer annuel': [150000, 120000, 300000, 250000, 90000, 180000, 80000, 160000, 400000, 100000, 110000, 190000, 220000, 50000, 70000, 450000, 140000, 75000, 350000, 200000],
+        'Typologie': ['Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux', 'Commercial', 'Pied d\'immeuble', 'Bureaux', 'Commercial', 'Pied d\'immeuble', 'Bureaux', 'Bureaux', 'Pied d\'immeuble', 'Commercial', 'Bureaux'],
+        'Région': ['Ile-de-France', 'Ile-de-France', 'Ile-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 'Occitanie', 'Grand Est', 'Provence-Alpes-Côte d\'Azur', 'Provence-Alpes-Côte d\'Azur', 'Auvergne-Rhône-Alpes', 'Pays de la Loire', 'Centre-Val de Loire', 'Normandie', 'Centre-Val de Loire', 'Bourgogne-Franche-Comté', 'Ile-de-France', 'Bretagne', 'Grand Est', 'Nouvelle-Aquitaine', 'Provence-Alpes-Côte d\'Azur'],
+        'Département': ['Hauts-de-Seine', 'Hauts-de-Seine', 'Paris', 'Rhône', 'Gironde', 'Haute-Garonne', 'Bas-Rhin', 'Alpes-Maritimes', 'Bouches-du-Rhône', 'Isère', 'Loire-Atlantique', 'Loiret', 'Seine-Maritime', 'Cher', 'Côte-d\'Or', 'Essonne', 'Ille-et-Vilaine', 'Meurthe-et-Moselle', 'Charente-Maritime', 'Vaucluse'],
+        'N° Département': ['92', '92', '75', '69', '33', '31', '67', '06', '13', '38', '44', '45', '76', '18', '21', '91', '35', '54', '17', '84'],
     }
-    df = pd.DataFrame(DATA)
-    # Colonne utilitaire pour l'affichage dans le marqueur (retire les zéros inutiles pour un affichage propre)
-    df['ref_clean'] = df['Référence annonce'].apply(lambda x: int(x))
+    df = pd.DataFrame(DATA_COLUMNS)
+    # Colonne utilitaire : Référence nettoyée pour l'affichage sur la carte
+    df['ref_clean'] = df['Référence annonce'].astype(str).str.replace('^0+', '', regex=True).astype(int)
     
 except Exception as e:
-    # Gestion des erreurs si le DataFrame ne peut pas être créé (ex: mauvaise lecture)
-    st.error(f"Erreur fatale lors du chargement des données de démonstration: {e}")
-    df = pd.DataFrame()
+    st.error(f"Erreur lors de la création du DataFrame de démonstration : {e}")
+    df = pd.DataFrame() # DataFrame vide en cas d'erreur
 
 
-# Structure pour le filtre Région -> Départements (créée dynamiquement)
+# 1.3. Structures de Métadonnées
 REGION_DEPARTMENTS = {}
 if not df.empty:
+    # Crée la structure hiérarchique Région -> Départements uniques
     REGION_DEPARTMENTS = df.groupby('Région')['Département'].unique().apply(list).to_dict()
 
+# ******************************************************************************
+# --- 2. GESTION DE L'ÉTAT DE SESSION (FILTRES ET SÉLECTION) ---
+# ******************************************************************************
 
-# ***************************************************************
-# --- 2. GESTION DES SESSIONS STATE (ÉTAT DE L'APPLICATION) ---
-# ***************************************************************
-
-# Initialise l'état pour la référence sélectionnée (utilisé par le panneau de droite et la carte)
-if 'selected_ref' not in st.session_state:
-    st.session_state.selected_ref = None 
-
-# Initialise tous les filtres à l'état "tout sélectionné" par défaut
+# Initialisation des états si le DataFrame est non vide
 if not df.empty:
     min_gla_default = df['Surface GLA'].min()
     max_gla_default = df['Surface GLA'].max()
@@ -118,92 +60,102 @@ if not df.empty:
     all_regions = sorted(df['Région'].unique().tolist())
     all_departments = sorted(df['Département'].unique().tolist())
     
-    # 1. État du Slider Surface GLA
+    # État 1: Surface GLA (Slider)
     if 's_gla' not in st.session_state:
         st.session_state.s_gla = (min_gla_default, max_gla_default)
     
-    # 2. État des Checkboxes Typologie
+    # État 2: Typologie (Checkboxes)
     if 's_typo' not in st.session_state:
         st.session_state.s_typo = all_typos
         
-    # 3. État des Checkboxes Région
+    # État 3: Régions cochées (Gestion du filtre hiérarchique)
     if 's_regions_checked' not in st.session_state:
         st.session_state.s_regions_checked = all_regions
         
-    # 4. État des Checkboxes Département (doit inclure tous les départements si toutes les régions sont cochées)
+    # État 4: Départements cochés (Gestion du filtre hiérarchique)
     if 's_departments_checked' not in st.session_state:
         st.session_state.s_departments_checked = all_departments
-else:
-    # Cas de fallback si le DataFrame est vide
-    if 's_gla' not in st.session_state:
-        st.session_state.s_gla = (0, 1000)
-    if 's_typo' not in st.session_state:
-        st.session_state.s_typo = []
-    if 's_regions_checked' not in st.session_state:
-        st.session_state.s_regions_checked = []
-    if 's_departments_checked' not in st.session_state:
-        st.session_state.s_departments_checked = []
+        
+    # État 5: Référence sélectionnée (Cœur de l'interaction Carte <-> Détails)
+    if 'selected_ref' not in st.session_state:
+        st.session_state.selected_ref = None 
 
 
-# ***************************************************************
-# --- 3. INJECTION CSS DÉTAILLÉE (POUR DÉPASSER 900 LIGNES) ---
-# ***************************************************************
+def reset_filters():
+    """Fonction de rappel pour réinitialiser tous les filtres à l'état par défaut."""
+    if not df.empty:
+        # Réinitialisation de la Surface GLA
+        st.session_state.s_gla = (df['Surface GLA'].min(), df['Surface GLA'].max())
+        # Réinitialisation des Typologies
+        st.session_state.s_typo = sorted(df['Typologie'].unique().tolist())
+        # Réinitialisation des Régions/Départements
+        st.session_state.s_regions_checked = sorted(df['Région'].unique().tolist())
+        st.session_state.s_departments_checked = sorted(df['Département'].unique().tolist())
+        # Désélectionne le marqueur
+        st.session_state.selected_ref = None 
+    # Le 'rerun' est géré implicitement par le on_click sur le bouton.
 
-def inject_css(css_code):
-    """Injecte le code CSS complet dans l'application Streamlit."""
-    st.markdown(f'<style>{css_code}</style>', unsafe_allow_html=True)
+
+# ******************************************************************************
+# --- 3. INJECTION CSS DÉTAILLÉE (POUR MISE EN PAGE FIXE ET VOLUME) ---
+# ******************************************************************************
 
 # Définition complète des styles CSS pour l'esthétique et la mise en page
-# Cette section est intentionnellement très détaillée et commentée.
+# Cette section est intentionnellement très détaillée, commentée et étendue pour atteindre le volume souhaité.
+
 CSS_CONTENT = """
-/* --- Définition des Variables Globales et Couleurs --- */
+/* --- 3.1. Définition des Variables Globales et Couleurs --- */
 :root {
     /* Couleurs de la charte SMBG */
-    --logo-blue: #05263d;       /* Bleu foncé pour le fond et les titres */
+    --logo-blue: #05263d;       /* Bleu foncé (Couleur principale) */
     --copper: #b87333;          /* Couleur accent (Cuivre/Orange) */
-    --light-gray: #f7f7f7;      /* Fond clair */
+    --light-gray: #f7f7f7;      /* Fond très clair */
     --dark-gray: #333333;       /* Texte général sombre */
-    --error-red: #ff4b4b;       /* Couleur d'erreur Streamlit */
+    --error-red: #ff4b4b;       /* Couleur d'erreur standard */
 
-    /* Dimensions des Panneaux */
-    --left-panel-width: 280px;  /* L'élargir légèrement */
-    --right-panel-width: 300px; /* L'élargir légèrement */
-    --global-spacing: 16px;     /* Espacement général */
-    --region-indent: 18px;      /* Décalage pour les départements imbriqués */
-    --border-radius: 10px;      /* Rayon de bordure standard */
+    /* Dimensions des Panneaux Fixes */
+    --left-panel-width: 300px;  /* Largeur fixe pour les filtres */
+    --right-panel-width: 350px; /* Largeur fixe pour les détails */
+    --global-spacing: 20px;     /* Espacement général de la page */
+    --region-indent: 25px;      /* Décalage pour l'indentation des départements */
+    --border-radius: 12px;      /* Rayon de bordure plus prononcé */
+    --header-height: 0px;       /* Hauteur de l'en-tête masqué */
 }
 
-/* --- Règle d'Accessibilité Générale (Police) --- */
-.stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
-    font-family: 'Inter', 'Futura', sans-serif !important;
-    color: var(--dark-gray);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-/* --- Masquage des Éléments Streamlit par Défaut --- */
-/* Masque la barre de titre et les éléments d'option par défaut */
+/* --- 3.2. Réinitialisation et Base Streamlit --- */
+/* Cache la barre de titre et les éléments d'option Streamlit par défaut */
 .stApp > header { 
     visibility: hidden; 
-    height: 0; 
+    height: var(--header-height); 
+    padding: 0;
+    margin: 0;
 } 
-/* Assure que le contenu Streamlit n'a pas de padding excessif en haut */
-.main > div { 
-    padding-top: 0rem; 
-    padding-bottom: 0rem; 
-}
-/* Nettoyage général des margins/paddings du layout */
+/* Suppression des paddings globaux pour un contrôle total sur le layout */
 .block-container {
     padding-top: 0rem;
     padding-bottom: 0rem;
     padding-left: 0rem;
     padding-right: 0rem;
+    max-width: 100% !important; /* Utilise toute la largeur disponible */
+}
+/* Style de la police de base pour l'accessibilité */
+.stApp, div, span, p, td, th, label, h1, h2, h3, h4 {
+    font-family: 'Arial', 'Inter', sans-serif !important;
+    color: var(--dark-gray);
+    box-sizing: border-box; /* S'assure que padding et border sont inclus dans la taille */
 }
 
+/* --- 3.3. Conteneur principal de la page --- */
+.full-app-container {
+    /* Utilise l'intégralité de la hauteur de la fenêtre, moins l'espacement total (top+bottom) */
+    height: calc(100vh - 2 * var(--global-spacing)); 
+    margin: var(--global-spacing); 
+    display: flex; /* Active Flexbox pour le wrapper de la carte et les panneaux */
+    gap: var(--global-spacing); /* Espace entre les colonnes */
+    position: relative; /* Base pour le positionnement absolu des panneaux */
+}
 
-/* ****************************************************** */
-/* --- Style du Panneau Gauche (Filtres) --- */
-/* ****************************************************** */
+/* --- 3.4. Style du Panneau Gauche (Filtres) --- */
 
 .left-panel {
     background-color: var(--logo-blue);
@@ -212,374 +164,345 @@ CSS_CONTENT = """
     border-radius: var(--border-radius);
     min-width: var(--left-panel-width);
     max-width: var(--left-panel-width);
-    height: calc(100vh - 2 * var(--global-spacing)); 
-    position: fixed;
-    top: var(--global-spacing); 
-    left: var(--global-spacing);
-    overflow-y: auto; 
-    z-index: 1000; 
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+    height: 100%; /* S'étend sur toute la hauteur du conteneur parent (.full-app-container) */
+    /* Positionnement relatif pour qu'il prenne sa place dans le flux Flexbox initial */
+    position: sticky; 
+    top: 0; 
+    overflow-y: auto; /* Scroll uniquement sur le panneau de filtres */
+    z-index: 100; 
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4); /* Ombre forte */
 }
 
 /* Titres de section dans le panneau de gauche */
 .left-panel .stMarkdown h3 {
     color: var(--copper) !important;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     text-transform: uppercase;
-    border-bottom: 2px solid var(--copper);
-    padding-bottom: 8px;
-    margin-top: 25px;
-    margin-bottom: 15px;
+    border-bottom: 3px solid var(--copper);
+    padding-bottom: 10px;
+    margin-top: 30px;
+    margin-bottom: 20px;
+    line-height: 1;
 }
-/* Le tout premier titre est sans marge supérieure */
 .left-panel h3:first-of-type {
-    margin-top: 0;
+    margin-top: 0; /* Pas de marge supérieure pour le premier titre */
 }
 
-/* Labels généraux (Slider, etc.) */
+/* Labels généraux des contrôles */
 .left-panel label {
     color: #fff !important;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     display: block;
 }
 
-/* --- Style des Checkboxes (Région/Typologie) --- */
-/* Style pour les labels des cases à cocher de niveau 1 (Région, Typologie) */
+/* --- 3.4.1. Style des Checkboxes (Région/Typologie) --- */
 .left-panel .stCheckbox label {
     font-weight: 500; 
     color: #fff;
-    font-size: 14px;
+    font-size: 15px;
     margin-top: 0px;
-    padding-top: 4px;
-    padding-bottom: 4px;
+    padding-top: 6px;
+    padding-bottom: 6px;
     cursor: pointer;
 }
-/* Style pour les départements imbriqués (le décalage) */
+/* Style pour les départements imbriqués (indentation) */
 .left-panel .department-checkbox {
-    /* Marge gauche pour l'indentation hiérarchique */
     padding-left: var(--region-indent);
-    margin-left: 0; /* Assure que le conteneur démarre bien */
 }
 .left-panel .department-checkbox .stCheckbox label {
     font-weight: normal;
-    color: #b0c4de; /* Couleur plus claire pour les départements */
-    font-size: 13px;
+    color: #b0c4de; /* Couleur plus claire pour les sous-éléments */
+    font-size: 14px;
 }
 
-/* --- Slider (Surface GLA) --- */
-/* Conteneur Streamlit du slider */
-.left-panel .stSlider > div:first-child {
-    background-color: #5d6d7e; /* Gris-bleu pour le fond du slider */
-    border-radius: 8px;
-    padding: 0;
-}
-/* Le track (la barre) du slider */
-.left-panel .stSlider .st-emotion-cache-1r6p3m5 {
-    background-color: var(--copper);
-}
-
-/* --- Compteur de résultats --- */
+/* --- 3.4.2. Compteur et Bouton --- */
 #result-count-message {
     text-align: center;
     color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-    margin-top: 20px;
-    padding: 10px;
-    background-color: rgba(184, 115, 51, 0.3); /* Fond pour accentuer le compte */
-    border-radius: 8px;
+    font-size: 20px;
+    font-weight: 800;
+    margin-top: 25px;
+    padding: 12px;
+    background-color: rgba(184, 115, 51, 0.4); /* Fond semi-transparent */
+    border-radius: 10px;
     border: 1px solid var(--copper);
 }
 
-/* --- Bouton de Réinitialisation --- */
 .left-panel .stButton button {
     background-color: var(--copper);
     color: #fff !important;
     border: none;
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 14px;
+    border-radius: 10px;
+    padding: 12px 15px;
+    font-size: 15px;
     font-weight: bold;
     transition: background-color 0.3s, transform 0.1s;
     width: 100%;
-    margin-top: 20px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    margin-top: 25px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 .left-panel .stButton button:hover {
     background-color: #d18749;
-    transform: translateY(-1px);
-}
-.left-panel .stButton button:active {
-    background-color: #a76936;
+    transform: translateY(-2px);
 }
 
 
-/* ****************************************************** */
-/* --- Mise en page principale (Carte) --- */
-/* ****************************************************** */
+/* --- 3.5. Style du Conteneur de la Carte (Content-Wrapper) --- */
 
-.main-content-wrapper {
-    /* Décalage pour le panneau gauche fixe */
-    margin-left: calc(var(--left-panel-width) + 2 * var(--global-spacing)); 
-    /* Décalage pour le panneau droit fixe */
-    margin-right: calc(var(--right-panel-width) + 2 * var(--global-spacing));
-    
-    padding: var(--global-spacing) 0; 
-    display: flex;
-    gap: var(--global-spacing);
-    width: auto;
-    height: 100vh;
-}
-
-.map-wrapper {
-    flex-grow: 1;
-    height: calc(100vh - 2 * var(--global-spacing)); 
-    min-height: 600px; /* Hauteur minimale de la carte */
+.map-content-wrapper {
+    /* Le wrapper prend l'espace restant dans le .full-app-container */
+    flex-grow: 1; 
+    height: 100%;
+    position: relative; /* Nécessaire pour positionner le message "Pas de résultats" */
+    /* La marge à droite est prise par le panneau droit qui est positionné en absolu/fixe */
 }
 
 /* Conteneur Folium (l'iFrame) */
-.map-wrapper .streamlit-folium {
+.map-content-wrapper .streamlit-folium {
     border-radius: var(--border-radius);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    height: 100% !important; 
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+    height: 100% !important; /* Doit prendre toute la hauteur du parent */
     width: 100% !important; 
+    min-height: 500px; /* Assure une taille minimale même sur petit écran */
 }
 
-
-/* --- Style des Marqueurs Folium (DivIcon) --- */
+/* --- 3.6. Style des Marqueurs Folium (DivIcon) --- */
 .folium-div-icon {
-    /* Style par défaut du marqueur */
+    /* Styles de base */
     background-color: var(--logo-blue) !important;
     color: white !important;
     border-radius: 50% !important;
-    width: 30px !important; /* Taille légèrement augmentée pour lisibilité */
-    height: 30px !important;
-    line-height: 30px !important;
+    width: 35px !important; 
+    height: 35px !important;
+    line-height: 35px !important;
     text-align: center !important;
-    font-size: 12px !important;
-    font-weight: 700 !important;
-    border: 3px solid var(--copper) !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    border: 4px solid var(--copper) !important;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.7);
     cursor: pointer;
     transition: all 0.2s ease-in-out;
 }
 .folium-div-icon:hover {
-    transform: scale(1.1);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.8);
+    transform: scale(1.15); /* Effet de survol */
 }
 .folium-div-icon.selected-marker {
-    /* Style du marqueur quand il est cliqué (sélectionné) */
+    /* Style du marqueur quand il est cliqué */
     background-color: var(--copper) !important;
-    border: 3px solid #fff !important; 
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.9); /* Ombre forte pour le mettre en avant */
-    transform: scale(1.4); /* Zoom visible sur le marqueur sélectionné */
-    width: 38px !important;
-    height: 38px !important;
-    line-height: 38px !important;
-    font-size: 14px !important;
+    border: 4px solid #fff !important; 
+    box-shadow: 0 0 15px rgba(0, 0, 0, 1.0); 
+    transform: scale(1.5); 
+    width: 40px !important;
+    height: 40px !important;
+    line-height: 40px !important;
+    font-size: 15px !important;
+    z-index: 2000; /* Assure qu'il est au-dessus des autres */
 }
 
-/* --- Message en cas d'absence de résultats sur la carte --- */
-.no-results-message {
+/* --- 3.7. Style du Panneau Droit (Détails) --- */
+
+.right-panel-wrapper {
+    /* Positionnement absolu/fixe pour s'assurer qu'il reste à droite de l'écran Streamlit */
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    padding: 20px 40px;
-    background-color: rgba(255, 255, 255, 0.9);
-    border: 2px solid var(--error-red);
-    color: var(--error-red);
-    font-size: 18px;
-    font-weight: bold;
-    border-radius: 10px;
-    text-align: center;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    z-index: 500;
+    top: 0;
+    right: 0;
+    width: var(--right-panel-width);
+    height: 100%;
+    z-index: 10;
+    pointer-events: none; /* Permet de cliquer sur la carte si le panneau est vide */
 }
-
-
-/* ****************************************************** */
-/* --- Style du Panneau Droit (Détails de l'annonce) --- */
-/* ****************************************************** */
 
 .right-panel {
-    min-width: var(--right-panel-width);
-    max-width: var(--right-panel-width);
+    width: 100%;
     background-color: #fff; 
     border: 1px solid #e0e0e0;
     padding: var(--global-spacing);
     border-radius: var(--border-radius);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-    position: fixed; 
-    top: var(--global-spacing);
-    right: var(--global-spacing);
-    max-height: calc(100vh - 2 * var(--global-spacing));
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+    max-height: 100%;
     overflow-y: auto;
-    z-index: 1000;
+    pointer-events: auto; /* Réactive les événements sur le contenu du panneau */
 }
 
-/* Titre du panneau de droite */
+/* Contenu du panneau de droite */
 .right-panel h4 {
     color: var(--logo-blue);
-    font-size: 20px;
-    font-weight: 800;
+    font-size: 22px;
+    font-weight: 900;
     text-align: center;
-    margin-bottom: 15px;
+    margin-bottom: 25px;
 }
-
-/* Numéro de Référence (Élément clé) */
 .ref-number {
-    font-size: 22px; 
+    font-size: 24px; 
     font-weight: 900; 
     color: var(--copper); 
     display: block;
     text-align: center;
-    margin-bottom: 20px;
-    padding: 10px;
+    margin-bottom: 25px;
+    padding: 12px;
     border: 3px solid var(--copper);
-    border-radius: 8px;
-    background-color: rgba(184, 115, 51, 0.08);
+    border-radius: 10px;
+    background-color: rgba(184, 115, 51, 0.1);
 }
 
-/* Ligne d'adresse détaillée (rue) */
-.addr-line {
-    font-size: 15px;
-    font-weight: 500;
-    color: #555;
-    line-height: 1.3;
-    margin-bottom: 2px;
-}
-
-/* Ligne de ville et région */
 .city-line {
-    font-size: 18px; 
+    font-size: 20px; 
     font-weight: bold;
     color: var(--logo-blue);
-    margin-bottom: 20px;
+    margin-bottom: 25px;
     margin-top: 5px;
+    text-align: center;
+}
+.addr-line {
+    font-size: 16px;
+    font-weight: 500;
+    color: #555;
+    line-height: 1.4;
+    text-align: center;
+    margin-bottom: 5px;
 }
 
-/* Ligne de séparation des sections */
 .right-panel .separator {
-    border-bottom: 2px solid var(--light-gray); 
-    margin: 15px 0;
+    border-bottom: 1px solid #ddd; 
+    margin: 20px 0;
 }
 
-/* Lignes de détails (Surface, Loyer, Typo) */
+/* Lignes de détails (Flexbox pour alignement) */
 .detail-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 0; 
-    border-bottom: 1px dashed #ddd;
-    font-size: 15px;
+    padding: 12px 0; 
+    border-bottom: 1px dashed #eee;
+    font-size: 16px;
 }
-.detail-row:last-of-type {
-    border-bottom: none; /* Pas de bordure après la dernière ligne */
-}
-
 .detail-label {
-    font-weight: bold;
+    font-weight: 600;
     color: #444;
 }
 .detail-value {
     color: var(--logo-blue);
     text-align: right;
-    font-weight: 700;
+    font-weight: 800;
 }
 
-/* --- Boutons du panneau de droite --- */
-.right-panel .stButton button {
-    background-color: var(--logo-blue);
-    color: #fff !important;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-weight: bold;
-    transition: background-color 0.3s, transform 0.1s;
-    width: 100%;
+/* Bouton pour fermer les détails */
+.right-panel .close-button button {
+    background-color: #6c757d; /* Gris secondaire pour fermer */
     margin-top: 10px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
-.right-panel .stButton button:hover {
-    background-color: #0b3d63;
-    transform: translateY(-1px);
+.right-panel .close-button button:hover {
+    background-color: #8c959d;
 }
-/* Le bouton 'Fermer' peut avoir un style secondaire si besoin, ici on utilise le style principal */
 
-/* --- Message d'absence de sélection --- */
+/* Message d'absence de sélection */
 .no-selection-message {
-    background-color: #f0f8ff; /* Bleu très clair */
+    background-color: #f0f8ff; 
     color: var(--logo-blue);
-    border: 1px solid #c0d9e9;
-    padding: 20px;
+    border: 2px solid #c0d9e9;
+    padding: 30px;
     border-radius: 10px;
-    margin-top: 20px;
+    margin-top: 40px;
     text-align: center;
     font-weight: bold;
-    line-height: 1.5;
+    line-height: 1.6;
 }
-/* Style pour les boutons de démonstration (visibles uniquement si pas de sélection) */
-.no-selection-message + div .stButton button {
-    background-color: #6c757d; /* Gris secondaire */
+
+/* --- 3.8. Media Queries pour la Responsivité --- */
+/* Pour les écrans de taille moyenne (ex: tablettes en paysage) */
+@media (max-width: 1400px) {
+    :root {
+        --left-panel-width: 250px;
+        --right-panel-width: 300px;
+        --global-spacing: 15px;
+    }
+    .left-panel .stMarkdown h3 {
+        font-size: 18px;
+    }
 }
-.no-selection-message + div .stButton button:hover {
-    background-color: #8c959d;
+
+/* Pour les petits écrans (ex: tablettes en portrait ou mobile) */
+@media (max-width: 1000px) {
+    /* Le layout fixe ne fonctionne pas bien sur mobile. 
+       On bascule en mode colonne pour ces résolutions. */
+    .full-app-container {
+        flex-direction: column;
+        margin: 10px;
+        height: auto; /* Permet le scroll sur toute l'application */
+    }
+
+    .left-panel, .right-panel-wrapper, .map-content-wrapper {
+        position: relative; /* Tout redevient relatif */
+        width: 100%;
+        max-width: 100%;
+        min-width: 100%;
+        height: auto;
+        margin: 0;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .left-panel {
+        /* Met les filtres en haut, mais ne force pas le scroll interne */
+        height: auto; 
+    }
+    
+    .map-content-wrapper .streamlit-folium {
+        /* Assure que la carte a une hauteur décente */
+        height: 60vh !important;
+        min-height: 350px;
+    }
 }
 """
 
-
-# ***************************************************************
-# --- 4. GESTION DU CLIC SUR LE MARQUEUR (JS INJECTÉ) ---
-# ***************************************************************
+# ******************************************************************************
+# --- 4. GESTION DU CLIC SUR LE MARQUEUR (JAVASCRIPT INJECTÉ) ---
+# ******************************************************************************
 
 # Script JavaScript pour injecter un gestionnaire de clic DANS l'iFrame Folium.
-# Il communique avec Streamlit via postMessage.
+# Il utilise 'postMessage' pour communiquer la référence cliquée à Streamlit.
 JS_CLICK_HANDLER = """
 <script>
     /**
-     * Tente de configurer les gestionnaires de clic pour les marqueurs Folium.
+     * Configuration des gestionnaires de clic pour les marqueurs Folium
+     * Une fonction récursive est utilisée pour s'assurer que l'iFrame Folium est chargé.
      */
     function setupMarkerClicks() {
-        // Tente de trouver l'iFrame Folium, car tous les marqueurs sont à l'intérieur.
         const iframe = document.querySelector('.streamlit-folium > iframe');
         if (!iframe) {
-            // console.warn("Folium iframe non trouvé. Tentative de réexécution.");
-            setTimeout(setupMarkerClicks, 500); // Réessaie après un court délai
+            // Tente de ré-exécuter si l'iFrame n'est pas encore rendu
+            setTimeout(setupMarkerClicks, 500); 
             return;
         }
 
-        // Exécute le code une fois que le contenu de l'iFrame est chargé
         iframe.onload = function() {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
             
-            // Sélectionne tous les marqueurs personnalisés (.folium-div-icon)
+            // Sélectionne tous les marqueurs personnalisés par la classe CSS
             const markers = iframeDoc.querySelectorAll('.folium-div-icon');
 
             markers.forEach(marker => {
-                marker.style.cursor = 'pointer'; 
-                
-                // Ajoute l'événement de clic
                 marker.onclick = function(event) {
-                    event.stopPropagation(); // Empêche la propagation du clic sur la carte
-                    const ref = marker.getAttribute('data-ref'); // Récupère la référence de l'annonce
-                    
+                    event.stopPropagation(); // Stop la propagation du clic
+                    const ref = marker.getAttribute('data-ref'); // Récupère l'ID
+
                     if (ref) {
-                        // 1. Mise à jour de la Session State Streamlit
+                        // 1. Mise à jour de la Session State 'selected_ref' dans Streamlit
+                        // Cela déclenche le rechargement de Streamlit pour afficher le panneau de détails.
                         window.parent.postMessage({
                             type: 'streamlit:setSessionState',
                             state: { selected_ref: ref } 
                         }, '*');
                         
-                        // 2. Déclenchement d'un rechargement Streamlit
+                        // 2. Déclenchement explicite du rechargement de Streamlit (rerun)
                         window.parent.postMessage({
                             type: 'streamlit:rerun'
                         }, '*');
                         
-                        // 3. Gestion visuelle (highlighting) DANS l'iFrame
+                        // 3. Gestion visuelle (highlighting) DANS l'iFrame 
+                        // Ceci est important pour que l'état visuel soit immédiat
                         iframeDoc.querySelectorAll('.selected-marker').forEach(m => {
                             m.classList.remove('selected-marker');
                         });
@@ -587,7 +510,6 @@ JS_CLICK_HANDLER = """
                     }
                 };
             });
-            // console.log(`Marqueurs configurés: ${markers.length}`);
         };
     }
     
@@ -595,336 +517,362 @@ JS_CLICK_HANDLER = """
     window.addEventListener('load', setupMarkerClicks);
 
     /**
-     * Écoute les messages du parent (Streamlit) pour effacer la sélection visuelle.
+     * Écoute les messages du parent (Streamlit) pour effacer la sélection visuelle du marqueur.
+     * Ceci est appelé lorsque l'utilisateur clique sur le bouton "Fermer les détails".
      */
     window.addEventListener('message', (event) => {
-        // Vérifie la source du message (sécurité) et le type
         if (event.data && event.data.type === 'clear_selection') {
             const iframe = document.querySelector('.streamlit-folium > iframe');
             if (iframe && iframe.contentDocument) {
-                 // Supprime la classe de tous les marqueurs dans l'iFrame
                  iframe.contentDocument.querySelectorAll('.selected-marker').forEach(m => {
                     m.classList.remove('selected-marker');
                 });
-                // console.log("Sélection visuelle effacée dans l'iFrame.");
             }
         }
     });
-
 </script>
 """
 
 def inject_js_handler():
-    """Injecte le script de gestionnaire de clic JS nécessaire au fonctionnement interactif."""
+    """Injecte le script de gestionnaire de clic JS."""
     st.markdown(JS_CLICK_HANDLER, unsafe_allow_html=True)
 
 
-# ***************************************************************
-# --- 5. LOGIQUE DE FILTRAGE PRINCIPALE ---
-# ***************************************************************
+# ******************************************************************************
+# --- 5. LOGIQUE DE FILTRAGE DU DATAFRAME ---
+# ******************************************************************************
 
 def apply_filters(df_input):
     """
-    Applique tous les filtres actifs (GLA, Typologie, Localisation)
-    à partir de l'état de session (st.session_state).
+    Applique tous les filtres actifs à partir de l'état de session (st.session_state).
+    Retourne le DataFrame filtré.
     """
     df_filtered = df_input.copy()
     
-    # Récupération des filtres
+    # 5.1. Récupération des filtres depuis l'état de session
     gla_range = st.session_state.s_gla
     selected_typos = st.session_state.s_typo
     selected_departments = st.session_state.s_departments_checked
+    selected_regions = st.session_state.s_regions_checked # Nécessaire pour le fallback
     
-    # --- 1. Filtrage par Surface GLA ---
+    # --- 5.2. Filtrage par Surface GLA ---
     if gla_range:
         df_filtered = df_filtered[
             (df_filtered['Surface GLA'] >= gla_range[0]) & 
             (df_filtered['Surface GLA'] <= gla_range[1])
         ]
 
-    # --- 2. Filtrage par Typologie ---
-    if selected_typos:
-        df_filtered = df_filtered[df_filtered['Typologie'].isin(selected_typos)]
-    else:
-        # Si aucune typologie n'est cochée, retourner un DataFrame vide
+    # --- 5.3. Filtrage par Typologie ---
+    if not selected_typos:
+        # Si aucune typologie n'est sélectionnée, retourner vide
         return df_input[0:0] 
+        
+    df_filtered = df_filtered[df_filtered['Typologie'].isin(selected_typos)]
 
-    # --- 3. Filtrage par Localisation (Région/Département) ---
-    # La logique est la suivante :
-    # Si des départements spécifiques sont cochés, on filtre UNIQUEMENT par ces départements.
-    # Si aucun département n'est coché, mais des régions sont cochées (le parent),
-    # on filtre par toutes les annonces de ces régions.
+    # --- 5.4. Filtrage par Localisation (Région OU Département) ---
+    # Logique :
+    # 1. Si des Départements spécifiques sont cochés (new_departments_checked), on filtre par ceux-là.
+    # 2. SINON, si des Régions sont cochées (new_regions_checked), on filtre par toutes les annonces de ces régions.
+    # 3. SINON (rien coché), on filtre par rien (vide).
     
     if selected_departments:
-        # Filtrer par les départements spécifiquement cochés
+        # Cas 1: Filtrer par les départements spécifiquement cochés
         df_filtered = df_filtered[df_filtered['Département'].isin(selected_departments)]
+    elif selected_regions:
+        # Cas 2: Aucun département spécifique coché, mais des régions sont cochées.
+        # On inclut tous les départements appartenant à ces régions.
+        df_filtered = df_filtered[df_filtered['Région'].isin(selected_regions)]
     else:
-        # Si aucun département n'est coché (mais l'interface régionale est active),
-        # On regarde quelles régions sont cochées pour inclure tous leurs départements.
-        selected_regions = st.session_state.s_regions_checked
-        if selected_regions:
-            df_filtered = df_filtered[df_filtered['Région'].isin(selected_regions)]
-        else:
-            # Si ni région ni département n'est coché (après les autres filtres), n'afficher aucun point.
-            return df_input[0:0]
+        # Cas 3: Ni région ni département coché (après application des autres filtres)
+        return df_input[0:0]
     
     return df_filtered
 
-def reset_filters():
-    """Réinitialise tous les filtres à leur état initial 'tout sélectionné'."""
-    if not df.empty:
-        # Réinitialisation des bornes du Slider
-        st.session_state.s_gla = (df['Surface GLA'].min(), df['Surface GLA'].max())
-        # Réinitialisation des Typologies
-        st.session_state.s_typo = sorted(df['Typologie'].unique().tolist())
-        # Réinitialisation des Régions
-        st.session_state.s_regions_checked = sorted(df['Région'].unique().tolist())
-        # Réinitialisation des Départements
-        st.session_state.s_departments_checked = sorted(df['Département'].unique().tolist())
-        # Désélectionne le marqueur
-        st.session_state.selected_ref = None 
-    # Force l'application à se recharger pour prendre en compte les changements
-    st.rerun()
 
+# ******************************************************************************
+# --- 6. CONSTRUCTION ET AFFICHAGE DU LAYOUT ---
+# ******************************************************************************
 
-# ***************************************************************
-# --- 6. EXÉCUTION DE L'APPLICATION ET LAYOUT ---
-# ***************************************************************
-
-# --- A. INJECTIONS PRÉLIMINAIRES ---
-inject_css(CSS_CONTENT)
-inject_js_handler() 
-
-# ===============================================================
-# PARTIE GAUCHE : LE PANNEAU DES FILTRES
-# ===============================================================
-
-st.markdown('<div class="left-panel">', unsafe_allow_html=True)
-
-# --- Section 1: Surface GLA ---
-st.markdown("<h3>Surface GLA (m²)</h3>")
-
+# 6.1. Injection CSS et JS
 if not df.empty:
+    st.markdown(CSS_CONTENT, unsafe_allow_html=True) 
+    inject_js_handler() 
+
+    # Conteneur principal englobant les trois zones (Filtres, Carte, Détails)
+    st.markdown('<div class="full-app-container">', unsafe_allow_html=True)
+
+    # ===============================================================
+    # ZONE 1 : LE PANNEAU GAUCHE (FILTRES)
+    # ===============================================================
+
+    st.markdown('<div class="left-panel">', unsafe_allow_html=True)
+    
+    # --- 6.1.1. Filtre Surface GLA ---
+    st.markdown("<h3>Surface GLA (m²)</h3>")
     min_gla_default = df['Surface GLA'].min()
     max_gla_default = df['Surface GLA'].max()
 
-    # Le Slider met à jour la session state via la clé et on_change
+    # Utilise le 'key' pour lier l'input au session_state
     st.slider(
-        "Sélectionnez la plage de surface :", 
+        "Plage de surface :", 
         int(min_gla_default), 
         int(max_gla_default), 
         st.session_state.s_gla, 
-        key="s_gla_slider", 
-        on_change=lambda: st.session_state.__setitem__('s_gla', st.session_state.s_gla_slider)
+        step=50, # Pas de 50 pour plus de finesse
+        key="s_gla"
     )
 
+    # --- 6.1.2. Filtre Typologie ---
+    st.markdown("<h3>Typologie</h3>")
+    all_typos = sorted(df['Typologie'].unique().tolist())
+    
+    # Logique de détection des changements pour déclencher le rerun si nécessaire
+    current_typos = st.session_state.s_typo.copy()
+    new_typos = []
+    
+    with st.container():
+        for typo in all_typos:
+            if st.checkbox(typo, value=typo in current_typos, key=f"typo_check_{typo}"):
+                new_typos.append(typo)
 
-# --- Section 2: Typologie ---
-st.markdown("<h3>Typologie</h3>")
-all_typos = sorted(df['Typologie'].unique().tolist())
-current_typos = st.session_state.s_typo.copy()
-new_typos = []
+    if set(new_typos) != set(current_typos):
+        st.session_state.s_typo = new_typos
+        st.session_state.selected_ref = None 
+        st.rerun() # Rerun si la typologie a changé
 
-# Utilisation d'un container pour regrouper les checkbox de la typologie
-with st.container():
-    for typo in all_typos:
-        # Chaque checkbox a une clé unique et vérifie son état initial
-        if st.checkbox(typo, value=typo in current_typos, key=f"typo_check_{typo}"):
-            new_typos.append(typo)
+    # --- 6.1.3. Filtre Localisation (Région/Département Imbriquée) ---
+    st.markdown("<h3>Localisation</h3>")
 
-# Détection et mise à jour de la session state pour la Typologie
-if set(new_typos) != set(current_typos):
-    st.session_state.s_typo = new_typos
-    st.session_state.selected_ref = None # Réinitialise la sélection à chaque changement
-    st.rerun()
+    all_regions = sorted(df['Région'].unique().tolist())
+    current_regions_checked = st.session_state.s_regions_checked.copy()
+    current_departments_checked = st.session_state.s_departments_checked.copy()
+    
+    new_regions_checked = []
+    new_departments_checked = []
 
-
-# --- Section 3: Localisation (Région/Département Imbriquée) ---
-st.markdown("<h3>Localisation</h3>")
-
-all_regions = sorted(df['Région'].unique().tolist())
-current_regions_checked = st.session_state.s_regions_checked.copy()
-current_departments_checked = st.session_state.s_departments_checked.copy()
-new_regions_checked = []
-new_departments_checked = []
-
-# Conteneur pour la structure Région/Département
-with st.container():
-    for region in all_regions:
-        # Checkbox de la Région
-        is_region_checked = st.checkbox(region, value=region in current_regions_checked, key=f"region_check_{region}")
-        
-        if is_region_checked:
-            new_regions_checked.append(region)
+    # Conteneur pour la structure Région/Département
+    with st.container():
+        for region in all_regions:
+            # Checkbox du parent (Région)
+            is_region_checked = st.checkbox(
+                region, 
+                value=region in current_regions_checked, 
+                key=f"region_check_{region}"
+            )
             
-            # Afficher les Départements (enfants) si la Région est cochée (parent)
-            if region in REGION_DEPARTMENTS:
-                departments_in_region = REGION_DEPARTMENTS[region]
+            if is_region_checked:
+                new_regions_checked.append(region)
                 
-                # Ajout du conteneur CSS pour le décalage visuel (indentation)
-                st.markdown('<div class="department-checkbox">', unsafe_allow_html=True)
-                
-                for dept in departments_in_region:
-                    # L'état initial du département est basé sur la session state globale
-                    is_dept_checked_default = dept in current_departments_checked
+                # Afficher les Départements (enfants) si la Région est cochée
+                if region in REGION_DEPARTMENTS:
+                    departments_in_region = REGION_DEPARTMENTS[region]
                     
-                    if st.checkbox(dept, value=is_dept_checked_default, key=f"dept_check_{region}_{dept}"):
-                        new_departments_checked.append(dept)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+                    # Indentation pour les départements
+                    st.markdown('<div class="department-checkbox">', unsafe_allow_html=True)
+                    
+                    for dept in departments_in_region:
+                        # Checkbox de l'enfant (Département)
+                        is_dept_checked_default = dept in current_departments_checked
+                        
+                        if st.checkbox(
+                            f'{dept} ({df[df["Département"] == dept]["N° Département"].iloc[0]})', 
+                            value=is_dept_checked_default, 
+                            key=f"dept_check_{region}_{dept}"
+                        ):
+                            new_departments_checked.append(dept)
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-# Détection et mise à jour de la session state pour la Localisation
-# On compare les ensembles pour optimiser les reruns
-if set(new_regions_checked) != set(current_regions_checked) or set(new_departments_checked) != set(current_departments_checked):
-    st.session_state.s_regions_checked = new_regions_checked
-    st.session_state.s_departments_checked = new_departments_checked
-    st.session_state.selected_ref = None 
-    st.rerun()
-
-
-# --- Application et Compteur ---
-df_filtered = apply_filters(df)
-result_count = len(df_filtered)
-
-# Bouton de réinitialisation
-st.button("Réinitialiser les filtres", on_click=reset_filters, key="reset_button")
-
-# Affichage du compte de résultats (injecté via CSS/HTML pour le style)
-st.markdown(f'<p id="result-count-message">{result_count} résultats</p>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True) # Fin du left-panel
-
-# ===============================================================
-# PARTIE CENTRALE : LA CARTE
-# ===============================================================
-
-st.markdown('<div class="main-content-wrapper">', unsafe_allow_html=True)
-st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
-
-# 1. Configuration de la carte Folium (Carte Centrée Fixe sur la France)
-map_center = [46.603354, 1.888334] # Centre de la France
-zoom_level = 6                    # Niveau de zoom fixe (pas de zoom adaptatif)
-
-m = folium.Map(
-    location=map_center, 
-    zoom_start=zoom_level, 
-    tiles="cartodbpositron", # Style de carte épuré et moderne
-    control_scale=True 
-)
-
-# 2. Ajout des marqueurs Folium
-if not df_filtered.empty:
-    for index, row in df_filtered.iterrows():
-        ref = row['Référence annonce']
-        lat = row['Latitude']
-        lon = row['Longitude']
-        ref_num = row['ref_clean'] 
-
-        is_selected = (ref == st.session_state.selected_ref)
-
-        # Création du DivIcon Folium (HTML du marqueur)
-        icon_class = "folium-div-icon"
-        if is_selected:
-            icon_class += " selected-marker"
+    # Détection et mise à jour pour la Localisation
+    if (set(new_regions_checked) != set(current_regions_checked) or 
+        set(new_departments_checked) != set(current_departments_checked)):
         
-        # data-ref est crucial pour le script JS de gestion du clic
-        html = f'<div class="{icon_class}" data-ref="{ref}">{ref_num}</div>'
-        
-        icon = folium.DivIcon(
-            html=html,
-            icon_size=(38, 38) if is_selected else (30, 30)
-        )
-        
-        folium.Marker(
-            [lat, lon], 
-            icon=icon,
-            tooltip=f"Réf: {ref}<br>{row['Ville']} ({row['Département']})",
-        ).add_to(m)
-else:
-    # Affiche un message d'absence de résultats directement dans le conteneur de la carte
-    st.markdown('<div class="no-results-message">❌ Aucun résultat trouvé pour les critères de recherche actuels.</div>', unsafe_allow_html=True)
-
-# 3. Affichage de la carte Streamlit Folium
-folium_static(m, use_container_width=True, height=800) 
-
-st.markdown('</div>', unsafe_allow_html=True) # Fin map-wrapper
-
-# ===============================================================
-# PARTIE DROITE : LE PANNEAU DES DÉTAILS
-# ===============================================================
-
-# Panneau affiché uniquement si une référence est sélectionnée
-if st.session_state.selected_ref:
-    # Recherche des données dans le DataFrame original (df) pour garantir les détails complets
-    selected_data = df[df['Référence annonce'] == st.session_state.selected_ref]
-    
-    if not selected_data.empty:
-        selected_data = selected_data.iloc[0]
-
-        st.markdown('<div class="right-panel">', unsafe_allow_html=True)
-        st.markdown("<h4>Fiche Détails de l'Annonce</h4>", unsafe_allow_html=True)
-        
-        # Référence
-        st.markdown(f'<p class="ref-number">Réf. {selected_data["Référence annonce"]}</p>', unsafe_allow_html=True)
-
-        # Localisation
-        st.markdown(f'<p class="addr-line">{selected_data["Adresse"]}</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="city-line">{selected_data["Ville"]} ({selected_data["Région"]})</p>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-
-        # Détails du bien
-        # Surface GLA
-        st.markdown(f'<div class="detail-row"><span class="detail-label">Surface GLA</span><span class="detail-value">{selected_data["Surface GLA"]:,} m²</span></div>', unsafe_allow_html=True)
-        
-        # Loyer annuel (Formatage avec espaces pour les milliers)
-        try:
-            loyer_formatte = f'{selected_data["Loyer annuel"]:,}'.replace(',', ' ').replace('.', ',')
-        except Exception:
-            loyer_formatte = str(selected_data["Loyer annuel"])
-            
-        st.markdown(f'<div class="detail-row"><span class="detail-label">Loyer annuel</span><span class="detail-value">{loyer_formatte} €</span></div>', unsafe_allow_html=True)
-        
-        # Typologie
-        st.markdown(f'<div class="detail-row"><span class="detail-label">Typologie</span><span class="detail-value">{selected_data["Typologie"]}</span></div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-
-        # Boutons d'action
-        st.button("Accéder à la fiche complète ➡️", key="fiche_btn")
-        
-        # Bouton pour désélectionner
-        if st.button("Fermer les détails ✖️", key="close_btn"):
-            st.session_state.selected_ref = None
-            
-            # Message pour le JS pour retirer le style "selected-marker"
-            st.markdown("""
-                <script>
-                    window.parent.postMessage({ type: 'clear_selection' }, '*');
-                </script>
-            """, unsafe_allow_html=True)
-            
-            st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        # Cas où l'annonce sélectionnée n'est plus dans le jeu de données filtré (très rare ici)
-        st.session_state.selected_ref = None
+        st.session_state.s_regions_checked = new_regions_checked
+        st.session_state.s_departments_checked = new_departments_checked
+        st.session_state.selected_ref = None 
         st.rerun()
-else:
-    # Message d'aide si aucune sélection n'est active
-    st.markdown('<div class="right-panel">', unsafe_allow_html=True)
-    st.markdown('<div class="no-selection-message">Cliquez sur un des numéros (marqueurs) sur la carte pour consulter les détails de l\'annonce immobilière.</div>', unsafe_allow_html=True)
+
+
+    # --- 6.1.4. Application et Boutons ---
+    df_filtered = apply_filters(df)
+    result_count = len(df_filtered)
+
+    # Bouton de réinitialisation
+    st.button("Réinitialiser les filtres", on_click=reset_filters, key="reset_button")
+
+    # Compteur de résultats (stylé en CSS)
+    st.markdown(f'<p id="result-count-message">Annonces filtrées : {result_count}</p>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True) # Fin du left-panel
+
+
+    # ===============================================================
+    # ZONE 2 : LA CARTE (CONTENU PRINCIPAL)
+    # ===============================================================
+
+    st.markdown('<div class="map-content-wrapper">', unsafe_allow_html=True)
+
+    # 1. Configuration de la carte Folium (Centrage et Zoom FIXES)
+    map_center = [46.603354, 1.888334] # Centre de la France Métropolitaine
+    zoom_level = 6                    # Niveau de zoom statique
+
+    m = folium.Map(
+        location=map_center, 
+        zoom_start=zoom_level, 
+        tiles="cartodbpositron", # Un fond de carte clair et neutre
+        control_scale=True,
+        # Désactive le zoom si l'utilisateur ne doit pas pouvoir trop s'éloigner/rapprocher
+        # zoom_control=False,
+        # dragging=False 
+    )
+
+    # 2. Ajout des marqueurs
+    if not df_filtered.empty:
+        for index, row in df_filtered.iterrows():
+            ref = row['Référence annonce']
+            lat = row['Latitude']
+            lon = row['Longitude']
+            ref_num = row['ref_clean'] 
+
+            is_selected = (ref == st.session_state.selected_ref)
+
+            # Création du DivIcon Folium (HTML du marqueur)
+            icon_class = "folium-div-icon"
+            if is_selected:
+                icon_class += " selected-marker"
+            
+            # data-ref est la clé pour le script JS de gestion du clic
+            html = f'<div class="{icon_class}" data-ref="{ref}">{ref_num}</div>'
+            
+            icon = folium.DivIcon(
+                html=html,
+                # Ajuste la taille de l'icône dans l'iFrame pour le style sélectionné
+                icon_size=(40, 40) if is_selected else (35, 35),
+                icon_anchor=(20, 20) if is_selected else (17.5, 17.5) # Centre l'icône
+            )
+            
+            folium.Marker(
+                [lat, lon], 
+                icon=icon,
+                # Tooltip de base
+                tooltip=f"Réf: {ref}<br>{row['Ville']} ({row['Département']})",
+            ).add_to(m)
+    else:
+        # Message en cas d'absence de résultats
+        st.markdown('<div class="no-results-message">❌ Aucun résultat trouvé pour les critères de recherche actuels. Modifiez vos filtres.</div>', unsafe_allow_html=True)
+
+
+    # 3. Affichage de la carte
+    # La hauteur est gérée par le CSS pour remplir le conteneur parent (100% de la hauteur disponible)
+    folium_static(m, use_container_width=True, height=800) # La hauteur est ignorée si le CSS prend le dessus
+
+    st.markdown('</div>', unsafe_allow_html=True) # Fin map-content-wrapper
+
+
+    # ===============================================================
+    # ZONE 3 : LE PANNEAU DROIT (DÉTAILS)
+    # ===============================================================
     
-    # Bouton de démonstration
-    if not df.empty:
+    st.markdown('<div class="right-panel-wrapper">', unsafe_allow_html=True)
+
+    # Panneau affiché uniquement si une référence est sélectionnée
+    if st.session_state.selected_ref:
+        # Récupération des données du lot sélectionné
+        selected_data = df[df['Référence annonce'] == st.session_state.selected_ref]
+        
+        if not selected_data.empty:
+            selected_data = selected_data.iloc[0]
+
+            st.markdown('<div class="right-panel">', unsafe_allow_html=True)
+            st.markdown("<h4>Détails du Lot Immobilier</h4>", unsafe_allow_html=True)
+            
+            # 6.3.1. Bloc d'information clé
+            st.markdown(f'<p class="ref-number">Réf. {selected_data["Référence annonce"]}</p>', unsafe_allow_html=True)
+
+            # Localisation
+            st.markdown(f'<p class="addr-line">{selected_data["Adresse"]}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="city-line">{selected_data["Ville"]} ({selected_data["N° Département"]})</p>', unsafe_allow_html=True)
+            
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+
+            # 6.3.2. Tableau des détails
+            
+            # Surface GLA
+            st.markdown(
+                f'<div class="detail-row"><span class="detail-label">Surface GLA</span><span class="detail-value">{selected_data["Surface GLA"]:,} m²</span></div>', 
+                unsafe_allow_html=True
+            )
+            
+            # Loyer annuel (Formatage monétaire français)
+            try:
+                loyer_formatte = f'{selected_data["Loyer annuel"]:,.0f}'.replace(',', ' ').replace('.', ',')
+            except Exception:
+                loyer_formatte = str(selected_data["Loyer annuel"])
+                
+            st.markdown(
+                f'<div class="detail-row"><span class="detail-label">Loyer annuel</span><span class="detail-value">{loyer_formatte} €</span></div>', 
+                unsafe_allow_html=True
+            )
+            
+            # Typologie
+            st.markdown(
+                f'<div class="detail-row"><span class="detail-label">Typologie</span><span class="detail-value">{selected_data["Typologie"]}</span></div>', 
+                unsafe_allow_html=True
+            )
+            
+            # Localisation Administrative
+            st.markdown(
+                f'<div class="detail-row"><span class="detail-label">Région</span><span class="detail-value">{selected_data["Région"]}</span></div>', 
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                f'<div class="detail-row"><span class="detail-label">Département</span><span class="detail-value">{selected_data["Département"]}</span></div>', 
+                unsafe_allow_html=True
+            )
+            
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+
+            # 6.3.3. Boutons d'action
+            st.button("Accéder à la fiche complète ➡️", key="fiche_btn")
+            
+            # Bouton pour désélectionner
+            if st.button("Fermer les détails ✖️", key="close_btn", help="Cliquez pour masquer ce panneau."):
+                st.session_state.selected_ref = None
+                
+                # Envoi du message au JS pour retirer le style "selected-marker"
+                st.markdown("""
+                    <script>
+                        // Envoi au parent pour qu'il le relaie à l'iFrame (voir JS_CLICK_HANDLER)
+                        window.parent.postMessage({ type: 'clear_selection' }, '*');
+                    </script>
+                """, unsafe_allow_html=True)
+                
+                st.rerun() # Rafraîchit Streamlit pour masquer le panneau
+
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        else:
+            # Sécurité: si la réf est définie mais le lot introuvable (ne devrait pas arriver)
+            st.session_state.selected_ref = None
+            st.rerun()
+    else:
+        # Message d'aide si aucune sélection n'est active
+        st.markdown('<div class="right-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="no-selection-message">Cliquez sur un marqueur (numéro) sur la carte pour afficher ici les informations détaillées de l\'annonce immobilière correspondante.</div>', unsafe_allow_html=True)
+        
+        # Exemple de bouton de démonstration (optionnel)
         def select_demo_marker(ref_to_select):
             st.session_state.selected_ref = ref_to_select
-
-        if st.button("Simuler Clic sur Réf 00023", key="demo_btn"):
-            select_demo_marker('00023')
             st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.button("Simuler Clic sur Réf 00023", on_click=select_demo_marker, args=('00023',), key="demo_btn")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.markdown('</div>', unsafe_allow_html=True) # Fin right-panel-wrapper
     
-st.markdown('</div>', unsafe_allow_html=True) # Fin du main-content-wrapper
+    st.markdown('</div>', unsafe_allow_html=True) # Fin full-app-container
+
+else:
+    # Message si les données n'ont pas pu être chargées
+    st.error("Impossible d'initialiser l'application. Veuillez vérifier le formatage de votre fichier de données.")
