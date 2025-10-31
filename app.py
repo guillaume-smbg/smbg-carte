@@ -25,7 +25,8 @@ EXCEL_FILE_PATH = 'data/Liste des lots.xlsx'
 REF_COL = 'Référence annonce' 
 
 # --- CSS / HTML pour le volet flottant --- 
-CUSTOM_CSS = f""" 
+# J'ai corrigé le bloc en le déclarant comme une simple triple-string (non f-string) pour éviter les erreurs d'interprétation d'indentation.
+CUSTOM_CSS = """ 
 <style> 
 /* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */ 
 .details-panel { 
@@ -53,21 +54,21 @@ CUSTOM_CSS = f"""
 } 
 
 /* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */ 
-.css-hxt7xp {{ 
+.css-hxt7xp { 
     z-index: 1000 !important; 
-}} 
+} 
 
 /* Assure que la section principale gère correctement le débordement horizontal */ 
-section.main {{ 
+section.main { 
     overflow-x: auto; 
-}} 
+} 
 
 /* Style du bouton Google Maps ré-implémenté en HTML (Couleur Cuivre) */ 
-.maps-button {{ 
+.maps-button { 
     width: 100%; 
     padding: 10px; 
     margin-bottom: 15px; 
-    background-color: {COLOR_SMBG_COPPER}; 
+    background-color: #C67B42; /* COLOR_SMBG_COPPER en dur pour la chaîne */
     color: white; 
     border: none; 
     border-radius: 5px; 
@@ -75,7 +76,29 @@ section.main {{
     font-weight: bold; 
     text-align: center; 
     display: block;
-}} 
+} 
+
+/* Styles spécifiques au tableau dans le panneau de détails */
+.details-panel table {
+    width: 100%; 
+    border-collapse: collapse; 
+    font-size: 13px;
+}
+.details-panel tr {
+    border-bottom: 1px solid #eee;
+}
+.details-panel td {
+    padding: 5px 0;
+    max-width: 50%; 
+    overflow-wrap: break-word;
+}
+.details-panel td:first-child {
+    font-weight: bold; 
+    color: #05263D; /* COLOR_SMBG_BLUE en dur */
+}
+.details-panel td:last-child {
+    text-align: right;
+}
 
 </style> 
 """ 
@@ -126,11 +149,18 @@ def format_table_value(value, champ):
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
         
-    is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value))
+    # Vérification si la valeur est numérisable (car le dtype peut être object)
+    try:
+        float_value = float(value)
+        is_numeric = True
+    except (ValueError, TypeError):
+        is_numeric = False
+
     is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
     
     if is_money_col and is_numeric: 
         try: 
+            # Reconvertir en float
             float_value = float(value) 
             formatted_value = f"{float_value:,.0f}" 
             formatted_value = formatted_value.replace(",", " ") 
@@ -289,6 +319,7 @@ else:
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant) --- 
 
+# On utilise une f-string ici, mais son contenu (le panneau HTML) est correctement formaté
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
@@ -315,6 +346,7 @@ if show_details:
         lien_maps = selected_data.get('Lien Google Maps', None) 
         
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''): 
+            # Le bouton Maps utilise la classe CSS définie plus haut
             html_content += f"""
                 <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
                     <button class="maps-button">
@@ -342,7 +374,7 @@ if show_details:
         html_content += '</p>'
         
         # ---------------------------------------------------------------------------------
-        # --- TABLEAU DÉTAILLÉ (Déplacé de la section 5) ---
+        # --- TABLEAU DÉTAILLÉ (Dans le volet) ---
         # ---------------------------------------------------------------------------------
         
         html_content += '<h5 style="color: #303030; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
@@ -355,20 +387,20 @@ if show_details:
             
         all_cols = temp_df.columns.tolist() 
         
-        # Filtrage pour ne garder que les colonnes de 'Adresse' jusqu'à 'Commentaires'
+        # Filtrage pour ne garder que les colonnes pertinentes
+        cols_to_keep = []
         try: 
             adresse_index = all_cols.index('Adresse') 
             commentaires_index = all_cols.index('Commentaires') 
             cols_to_keep = all_cols[adresse_index : commentaires_index + 1] 
-            display_df = temp_df[cols_to_keep] 
         except ValueError: 
-            # Fallback
-            try:
-                adresse_index = all_cols.index('Adresse')
-                cols_to_keep = all_cols[adresse_index:]
-                display_df = temp_df[cols_to_keep]
-            except ValueError:
-                display_df = temp_df
+            # Fallback (prend tout sauf la référence, lat/lon)
+            cols_to_keep = [c for c in all_cols if c not in [REF_COL, 'Latitude', 'Longitude']]
+
+        if cols_to_keep:
+            display_df = temp_df[cols_to_keep]
+        else:
+            display_df = temp_df # Si rien n'est trouvé, affiche tout
 
         # Transposition et nettoyage
         transposed_df = display_df.T.reset_index() 
@@ -377,10 +409,8 @@ if show_details:
         # On exclut les champs d'adresse déjà affichés en haut
         transposed_df = transposed_df[~transposed_df['Champ'].isin(['Adresse', 'Code Postal', 'Ville'])] 
         
-        # Début de la table HTML
-        html_content += """
-        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-        """
+        # Début de la table HTML (les styles sont dans CUSTOM_CSS)
+        html_content += "<table>"
         
         # Ajout des lignes formatées
         for index, row in transposed_df.iterrows():
@@ -388,10 +418,11 @@ if show_details:
             valeur = row['Valeur']
             formatted_value = format_table_value(valeur, champ)
             
+            # Note: Les styles de TD sont dans CUSTOM_CSS
             html_content += f"""
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="font-weight: bold; color: {COLOR_SMBG_BLUE}; padding: 5px 0; max-width: 50%; overflow-wrap: break-word;">{champ}</td>
-                <td style="text-align: right; padding: 5px 0; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</td>
+            <tr>
+                <td>{champ}</td>
+                <td>{formatted_value}</td>
             </tr>
             """
             
@@ -411,9 +442,4 @@ else:
 
 # Fermeture de la div flottante (FIN du panneau) 
 html_content += '</div>' 
-st.markdown(html_content, unsafe_allow_html=True) 
-
-# --- 5. L'ancienne section d'affichage du tableau sous la carte est maintenant vide ---
-# st.markdown("---") 
-# st.header("📋 Annonce du Lot Sélectionné") 
-# ... (SUPPRIMÉE)
+st.markdown(html_content, unsafe_allow_html=True)
