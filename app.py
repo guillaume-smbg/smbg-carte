@@ -9,7 +9,7 @@
     <!-- Chargement de la librairie Leaflet pour la carte OSM -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <!-- Configuration de la police Inter et correction des interférences avec l'environnement de compilation -->
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
