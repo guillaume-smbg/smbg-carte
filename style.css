@@ -1,206 +1,171 @@
-/* -------------------------------------------------
-// STYLE.CSS - Feuille de style globale
-// ------------------------------------------------- */
-
-/* Variables pour les couleurs définies dans app.py */
+/* --- VARIABLES ET RESET --- */
 :root {
-    --logo-blue: #05263d;
-    --copper: #b87333;
-    --white: #ffffff;
-    --gray-light: #f4f4f4;
-    --gray-dark: #333333;
+    --logo-blue: #05263d; /* Correspondant à LOGO_BLUE dans app.py */
+    --copper: #b87333; /* Correspondant à COPPER dans app.py */
+    --light-gray: #f4f7f9;
+    --border-radius: 8px;
 }
 
 /* Police et couleur globale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
-    font-family: 'Inter', sans-serif; /* Utilisation de la police recommandée */
-    color: var(--gray-dark);
-    font-size: 13px;
-    line-height: 1.4;
+    /* Utilisation d'une police moderne pour une meilleure lisibilité */
+    font-family: 'Inter', sans-serif !important; 
+    color: #333;
+    font-size: 14px;
+    line-height: 1.6;
 }
 
-/* Titre principal de l'application */
-h1.css-1r6rwwk { /* sélecteur Streamlit pour le titre h1 */
+/* Titre principal */
+h1 {
     color: var(--logo-blue);
-    font-size: 28px;
-    padding-bottom: 10px;
     border-bottom: 2px solid var(--copper);
+    padding-bottom: 8px;
     margin-bottom: 20px;
-    font-weight: 700;
 }
 
 h3 {
-    color: var(--white);
-    font-size: 18px;
-    font-weight: 600;
-    margin-top: 0;
+    color: #fff; /* Couleur par défaut pour les h3 dans le panneau de gauche */
+    border-bottom: 1px solid var(--copper);
+    padding-bottom: 5px;
     margin-bottom: 15px;
 }
 
-/* Réinitialisation de l'arrière-plan du corps Streamlit */
-.stApp {
-    background-color: var(--gray-light);
-}
-
-/* Ajustement de la largeur des conteneurs pour le mode "wide" */
-div.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
+/* Correction du padding par défaut de Streamlit pour que le layout "wide" soit propre */
+div.block-container:first-of-type {
+    padding-top: 20px;
     padding-left: 1rem;
     padding-right: 1rem;
 }
 
-/* -------------------------------------------------
-// 1. PANNEAU GAUCHE (Filtres)
-// ------------------------------------------------- */
+/* ===== PANNEAU GAUCHE (filtres) ===== */
 .left-panel {
     background-color: var(--logo-blue);
-    color: var(--white) !important;
     padding: 16px;
-    border-radius: 12px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    height: 100%; /* Important pour la hauteur dans la colonne */
+    border-radius: var(--border-radius);
+    min-height: 800px; 
+    box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.2);
 }
 
-/* Style des labels des filtres dans le panneau gauche */
-.left-panel label {
-    color: var(--white) !important;
-    font-weight: 600;
-    font-size: 14px;
-    margin-top: 10px;
+.left-panel * {
+    color: #fff !important; /* Force le texte des widgets en blanc */
 }
 
-/* Sélecteurs Streamlit pour les selectbox/dropdowns */
-.stSelectbox div[data-baseweb="select"], 
-.stSelectbox div[data-baseweb="input"] {
-    border-radius: 6px;
-    background-color: rgba(255, 255, 255, 0.9);
-    color: var(--gray-dark);
-    padding: 4px 8px;
+/* Style spécifique pour le nombre de lots trouvés */
+.left-panel strong {
+    color: var(--copper) !important;
+    font-size: 16px;
 }
 
-/* Bouton de réinitialisation */
-.left-panel .stButton button {
-    background-color: var(--copper);
-    color: var(--white);
+/* Style des selectbox dans le panneau de gauche */
+.stSelectbox label {
     font-weight: bold;
-    border-radius: 8px;
-    border: none;
-    margin-top: 20px;
-    transition: background-color 0.2s;
-    width: 100%;
-}
-
-.left-panel .stButton button:hover {
-    background-color: #a0652d; /* Nuance plus foncée */
+    margin-top: 10px;
+    margin-bottom: 5px;
 }
 
 
-/* -------------------------------------------------
-// 2. PANNEAU DROIT (Détails du Lot)
-// ------------------------------------------------- */
+/* ===== PANNEAU DROIT (détails) ===== */
 .right-panel {
-    background-color: var(--white);
+    background-color: var(--light-gray);
     padding: 16px;
-    border-radius: 12px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    height: 100%;
+    border-radius: var(--border-radius);
+    box-shadow: -4px 4px 10px rgba(0, 0, 0, 0.1);
+    min-height: 800px;
 }
 
+/* Titre des détails */
 .right-panel h3 {
-    color: var(--logo-blue); /* Le titre dans le panneau droit est bleu */
-    border-bottom: 1px solid var(--gray-light);
-    padding-bottom: 10px;
-    margin-bottom: 15px;
+    color: var(--logo-blue);
+    border-bottom: 2px solid var(--copper);
+    margin-top: 0;
 }
 
 .detail-address {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 15px;
     font-style: italic;
-    color: var(--gray-dark);
-    margin-bottom: 20px;
 }
 
 .detail-line {
     display: flex;
     justify-content: space-between;
     padding: 4px 0;
-    border-bottom: 1px dotted var(--gray-light);
+    border-bottom: 1px dotted #ddd;
 }
 
 .detail-label {
     font-weight: 600;
     color: var(--logo-blue);
-    flex: 1;
-    min-width: 120px;
-    padding-right: 10px;
+    flex-basis: 50%;
 }
 
 .detail-value {
     text-align: right;
-    font-weight: 400;
-    color: var(--gray-dark);
-    flex: 2;
+    flex-basis: 50%;
+    color: #333;
+}
+
+.detail-comments {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: var(--border-radius);
+    margin-top: 10px;
+    font-style: italic;
+    white-space: pre-wrap;
 }
 
 .no-selection-msg {
     text-align: center;
-    color: var(--gray-dark);
-    padding-top: 50px;
-    font-style: italic;
-}
-
-/* Style spécifique pour le bloc commentaires */
-.detail-comments {
-    border: 1px solid var(--gray-light);
-    background-color: var(--gray-light);
-    padding: 10px;
-    border-radius: 8px;
-    margin-top: 10px;
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-/* Style du bouton Google Maps (st.link_button) */
-.right-panel .stButton button {
-    background-color: var(--copper);
-    color: var(--white);
-    font-weight: bold;
-    border-radius: 8px;
-    border: none;
-    transition: background-color 0.2s;
-    width: 100%;
-}
-.right-panel .stButton button:hover {
-    background-color: #a0652d;
+    color: #666;
+    margin-top: 50px;
+    padding: 20px;
+    border: 1px dashed var(--copper);
+    border-radius: var(--border-radius);
+    background-color: #fff;
 }
 
 
-/* -------------------------------------------------
-// 3. CARTE FOLIUM (au centre)
-// ------------------------------------------------- */
-
+/* ===== CARTE (Center Panel) ===== */
 .map-wrapper {
-    border-radius: 12px;
-    overflow: hidden; /* Assure que la carte respecte les coins arrondis */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 0;
+    margin: 0;
+    border-radius: var(--border-radius);
+    overflow: hidden; 
 }
 
-/* Style du marqueur personnalisé sur la carte */
+/* Style des marqueurs Folium (Référence annonce) */
 .custom-marker {
     background-color: var(--logo-blue);
-    color: var(--white);
+    color: #fff;
     padding: 4px 8px;
-    border-radius: 8px;
+    border-radius: 4px;
     font-weight: bold;
     font-size: 11px;
-    text-align: center;
-    border: 2px solid var(--copper);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--copper);
+    box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
+    transform: translate(-50%, -100%); /* Centre l'icône au point de coordonnée */
     cursor: pointer;
-    line-height: 1; /* Pour centrer le texte verticalement */
 }
 
-.custom-marker:hover {
-    background-color: var(--copper);
-    border-color: var(--logo-blue);
+/* Style du bouton Google Maps */
+.stButton button {
+    background-color: var(--copper) !important;
+    border-color: var(--copper) !important;
+    color: #fff !important;
+    transition: background-color 0.2s ease;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.stButton button:hover {
+    background-color: #a3652c !important; /* Couleur légèrement plus foncée au survol */
+    border-color: #a3652c !important;
+}
+
+/* Correction de la couleur du texte dans la barre d'outils Folium */
+.leaflet-container .leaflet-control-zoom,
+.leaflet-container .leaflet-control-scale {
+    color: var(--logo-blue) !important; 
 }
