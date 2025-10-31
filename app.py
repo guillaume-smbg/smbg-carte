@@ -57,8 +57,8 @@ section.main {
 
 /* Style général pour les boutons link_button dans la section 5 */ 
 div.stLinkButton > a > button { 
-    /* 🎨 NOUVEAU BLEU NUIT */
-    background-color: #0B1C33 !important; 
+    /* 🎨 NOUVEAU BLEU SMBG */
+    background-color: #05263D !important; 
     color: white !important; 
     border: none; 
     box-shadow: 2px 2px 5px rgba(0,0,0,0.2); 
@@ -188,10 +188,10 @@ if not data_df.empty:
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
-            # 🎨 NOUVEAU BLEU NUIT 
-            color="#0B1C33", 
+            # 🎨 NOUVEAU BLEU SMBG 
+            color="#05263D", 
             fill=True, 
-            fill_color="#0B1C33", 
+            fill_color="#05263D", 
             fill_opacity=0.8, 
         ).add_to(m) 
 
@@ -248,7 +248,7 @@ if show_details:
         html_content += f""" 
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3> 
             <hr style="border: 1px solid #ccc; margin: 5px 0;"> 
-            <h4 style="color: #0B1C33;">Réf. : {display_title_ref}</h4> 
+            <h4 style="color: #05263D;">Réf. : {display_title_ref}</h4> 
         """ 
         
         # --- Affichage de l'adresse --- 
@@ -324,7 +324,7 @@ if show_details:
 else: 
     # Message par défaut quand aucun lot n'est sélectionné 
     html_content += """ 
-    <p style="font-weight: bold; margin-top: 10px; color: #0B1C33;"> 
+    <p style="font-weight: bold; margin-top: 10px; color: #05263D;"> 
         Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici. 
     </p> 
     """ 
