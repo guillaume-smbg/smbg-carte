@@ -75,7 +75,7 @@ def format_value(value, unit=""):
     try:
         num_value = float(value)
         
-        # --- NOUVEAU FORMATAGE FRANÇAIS (espace milliers, virgule décimale) ---
+        # --- FORMATAGE FRANÇAIS (espace milliers, virgule décimale) ---
         if num_value != round(num_value, 2):
             # Format avec décimales (Ex: 12,345.67 avec f-string standard)
             val_str = f"{num_value:,.2f}"
@@ -216,7 +216,7 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# Le formatage dans cette section utilise la fonction format_value, maintenant mise à jour.
+# Le code du panneau de droite est laissé tel quel.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -345,14 +345,32 @@ if show_details:
         else:
             display_df = selected_row_df
             
-        # --- LOGIQUE: Limiter les colonnes jusqu'à 'Commentaires' inclus ---
+        # --- NOUVELLE LOGIQUE: Limiter les colonnes de 'Adresse' jusqu'à 'Commentaires' inclus ---
         all_cols = display_df.columns.tolist()
+        
         try:
+            # 1. Trouver l'index de 'Adresse'
+            adresse_index = all_cols.index('Adresse')
+            
+            # 2. Trouver l'index de 'Commentaires'
             commentaires_index = all_cols.index('Commentaires')
-            cols_to_keep = all_cols[:commentaires_index + 1]
+            
+            # 3. Conserver les colonnes de 'Adresse' à 'Commentaires' inclus
+            cols_to_keep = all_cols[adresse_index : commentaires_index + 1]
             display_df = display_df[cols_to_keep]
-        except ValueError:
-            st.warning("La colonne 'Commentaires' est introuvable. Affichage de toutes les colonnes disponibles.")
+        
+        except ValueError as e:
+            if 'Adresse' in str(e):
+                st.warning("La colonne 'Adresse' est introuvable. Affichage de toutes les colonnes disponibles.")
+            elif 'Commentaires' in str(e):
+                 # Si 'Commentaires' n'existe pas, on commence à 'Adresse' et va jusqu'à la fin
+                 try:
+                     adresse_index = all_cols.index('Adresse')
+                     cols_to_keep = all_cols[adresse_index:]
+                     display_df = display_df[cols_to_keep]
+                     st.warning("La colonne 'Commentaires' est introuvable. Affichage des colonnes à partir de 'Adresse' jusqu'à la fin.")
+                 except ValueError:
+                    st.warning("Erreur de filtrage des colonnes. Affichage de toutes les colonnes disponibles.")
 
         # Transposition du DataFrame
         transposed_df = display_df.T.reset_index()
@@ -400,7 +418,7 @@ if show_details:
                  except (ValueError, TypeError):
                     return value
                     
-            # Coordonnées
+            # Coordonnées (à ne plus afficher dans ce tableau, mais la logique est là si on les réintroduit)
             if champ in ['Latitude', 'Longitude'] and is_numeric:
                  try:
                     return f"{float(value):.4f}"
