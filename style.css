@@ -4,6 +4,8 @@
 :root {
     --logo-blue: #05263d; /* Bleu foncé principal */
     --copper: #b87333;   /* Cuivre/Marron pour l'accentuation */
+    --light-gray: #f7f7f7; /* Fond du panneau de droite */
+    --dark-gray: #333333; /* Fond de la barre de slider non sélectionnée */
     --left-panel-width: 275px;
     --right-panel-width: 275px;
 }
@@ -12,6 +14,7 @@
    RÉINITIALISATION & POLICE
    ------------------------------------------------- */
 
+/* Police plus audacieuse pour une meilleure lisibilité générale */
 .stApp, .stMarkdown, .stButton, .stDataFrame, div, span, p, td, th, label {
     font-family: 'Futura', sans-serif !important;
     color: #000;
@@ -81,10 +84,12 @@
 
 /* Widgets (slider, multiselect) */
 .left-panel .stSlider > div:first-child {
-    background-color: #333333;
+    /* Couleur du track du slider (non sélectionné) */
+    background-color: var(--dark-gray); 
     border-radius: 8px;
 }
 .left-panel .stSlider .st-emotion-cache-1r6p3m5 {
+    /* Couleur du remplissage du slider (sélectionné) */
     background-color: var(--copper);
 }
 
@@ -114,6 +119,7 @@
     color: #000;
 }
 .left-panel .stMultiSelect [data-baseweb="tag"] {
+    /* Amélioration du contraste des tags sélectionnés */
     background-color: var(--copper);
     color: #fff;
 }
@@ -175,7 +181,7 @@
 .right-panel {
     min-width: var(--right-panel-width);
     max-width: var(--right-panel-width);
-    background-color: #f7f7f7;
+    background-color: var(--light-gray); /* Utilisation de la variable */
     padding: 16px;
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -186,6 +192,7 @@
     scrollbar-width: thin;
 }
 
+/* Titre de la section détails */
 .right-panel h4 {
     color: var(--logo-blue);
     font-size: 16px;
@@ -196,11 +203,26 @@
     padding-bottom: 5px;
 }
 
+/* Style pour la référence (Ex: 00001) - Amélioration de la hiérarchie visuelle */
+.ref-number {
+    font-size: 18px; /* Plus grand */
+    font-weight: 800; /* Plus audacieux */
+    color: var(--copper); /* Couleur d'accentuation */
+    display: block;
+    text-align: center;
+    margin-bottom: 15px;
+    padding: 5px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
+
+
 /* Style des lignes de détail */
 .detail-row {
     display: flex;
     justify-content: space-between;
-    padding: 6px 0;
+    /* Augmentation du padding pour un meilleur espacement */
+    padding: 8px 0; 
     border-bottom: 1px dashed #ddd;
     font-size: 14px;
 }
@@ -216,17 +238,19 @@
     border-bottom: none;
 }
 
-/* Mise en forme de l'adresse et de la ville */
+/* Mise en forme de l'adresse et de la ville - Amélioration du bloc adresse */
 .addr-line {
     font-size: 14px;
     font-weight: 500;
     color: #333;
+    line-height: 1.2;
 }
 .city-line {
-    font-size: 16px;
+    font-size: 18px; /* L'information la plus importante est la ville, elle est plus grande */
     font-weight: bold;
     color: var(--logo-blue);
-    margin-bottom: 10px;
+    margin-bottom: 15px;
+    margin-top: 5px;
 }
 h3 span {
     font-size: inherit;
