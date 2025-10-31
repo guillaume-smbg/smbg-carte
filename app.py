@@ -86,18 +86,15 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs (CircleMarker standard) ---
+        # --- Création des marqueurs (CircleMarker standard SANS POPUP NI TOOLTIP) ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
             reference = row.get(REF_COL, 'N/A')
             
-            # Affichage de la référence sans les zéros en tête pour le popup
-            display_ref = str(int(reference)) if reference.isdigit() else reference
-            
-            # Création du Popup
-            popup_html = f"<b>Réf. : {display_ref}</b><br>Cliquez à proximité pour les détails."
-
+            # Création d'un CircleMarker simple pour assurer la transmission du clic
+            # REMARQUE : 'tooltip' et 'popup' sont omis pour garantir que l'événement de clic
+            # atteint la couche de la carte écoutée par st_folium.
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=10,
@@ -105,8 +102,6 @@ with col_map:
                 fill=True,
                 fill_color="#0072B2",
                 fill_opacity=0.8,
-                tooltip=f"Réf. {display_ref}", # Info-bulle au survol
-                popup=folium.Popup(popup_html, max_width=300),
             ).add_to(m)
 
         # Affichage et capture des événements de clic
@@ -121,7 +116,7 @@ with col_map:
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # Recherche du lot le plus proche
+                # Recherche du lot le plus proche 
                 data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
                 closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
                 
@@ -138,9 +133,9 @@ st.markdown("---")
 selected_ref = st.session_state['selected_ref']
 st.header("🔍 Détails du Lot Sélectionné")
 
-# Ligne de diagnostic masquée, mais on utilise la logique
+# Ligne de diagnostic masquée, car elle ne devrait plus être nécessaire
 # st.text(f"DEBUG REF: {selected_ref if selected_ref else 'NOT SET'}") 
-# st.markdown("---") 
+st.markdown("---") 
 
 if selected_ref and selected_ref != 'None':
     selected_ref_clean = selected_ref.strip()
@@ -192,50 +187,4 @@ if selected_ref and selected_ref != 'None':
             ('Type', selected_data.get('Type', 'N/A')),
             ('Cession / Droit au bail', selected_data.get('Cession / Droit au bail', 'N/A')),
             ('Nombre de lots', selected_data.get('Nombre de lots', 'N/A')),
-            ('Surface GLA', f"{selected_data.get('Surface GLA', 'N/A')} m²"),
-            ('Répartition surface GLA', selected_data.get('Répartition surface GLA', 'N/A')),
-            ('Surface utile', f"{selected_data.get('Surface utile', 'N/A')} m²"),
-            ('Répartition surface utile', selected_data.get('Répartition surface utile', 'N/A')),
-            ('Loyer annuel', f"{selected_data.get('Loyer annuel', 'N/A')} €"),
-            ('Loyer Mensuel', f"{selected_data.get('Loyer Mensuel', 'N/A')} €"),
-            ('Loyer €/m²', f"{selected_data.get('Loyer €/m²', 'N/A')} €/m²"),
-            ('Loyer variable', selected_data.get('Loyer variable', 'N/A')),
-            ('Charges anuelles', f"{selected_data.get('Charges anuelles', 'N/A')} €"),
-            ('Charges Mensuelles', f"{selected_data.get('Charges Mensuelles', 'N/A')} €"),
-            ('Charges €/m²', f"{selected_data.get('Charges €/m²', 'N/A')} €/m²"),
-            ('Dépôt de garantie', selected_data.get('Dépôt de garantie', 'N/A')),
-            ('GAPD', selected_data.get('GAPD', 'N/A')),
-            ('Taxe foncière', f"{selected_data.get('Taxe foncière', 'N/A')} €"),
-            ('Marketing', selected_data.get('Marketing', 'N/A')),
-            ('Gestion', selected_data.get('Gestion', 'N/A')),
-            ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
-            ('Extraction', selected_data.get('Extraction', 'N/A')),
-            ('Restauration', selected_data.get('Restauration', 'N/A')),
-            ('Environnement Commercial', selected_data.get('Environnement Commercial', 'N/A')),
-            ('Commentaires', selected_data.get('Commentaires', 'N/A')),
-            ('Actif', selected_data.get('Actif', 'N/A')),
-            ('Valeur BP', selected_data.get('Valeur BP', 'N/A')),
-            ('Contact', selected_data.get('Contact', 'N/A')),
-        ]
-        
-        cols_info = st.columns(3)
-        col_index = 0
-        
-        for nom, valeur in colonnes_a_afficher:
-            valeur_str = str(valeur).strip()
-            if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None', 'None €', 'None m²'):
-                with cols_info[col_index % 3]:
-                    if nom == 'Commentaires':
-                        st.caption("Commentaires:")
-                        st.text(valeur)
-                    else:
-                        st.metric(label=nom, value=valeur)
-                col_index += 1
-        
-        st.markdown("---")
-            
-    else:
-        st.error("❌ ÉCHEC : La référence a été capturée, mais la recherche dans le DataFrame a échoué (Problème de correspondance de chaîne).")
-        
-else:
-    st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ci-dessous.")
+            ('Surface
