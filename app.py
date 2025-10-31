@@ -9,17 +9,15 @@
     <!-- Chargement de la librairie Leaflet pour la carte OSM -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <!-- Configuration de la police Inter -->
+    <!-- Configuration de la police Inter et correction des interférences avec l'environnement de compilation -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            overflow: hidden; /* Empêche tout défilement */
+            overflow: hidden;
         }
-        /* Styles personnalisés pour les marqueurs Leaflet */
         .custom-marker {
-            /* CORRECTION: Remplacement de rgba(0,0,0,0.3) par une couleur plus sûre pour éviter l'erreur de compilation Python */
-            box-shadow: 0 4px 8px #0000004d; /* #0000004d est l'équivalent de rgba(0,0,0,0.3) */
+            box-shadow: 0 4px 8px #0000004d;
             cursor: pointer;
         }
     </style>
@@ -161,8 +159,14 @@
 
                 // Détection du séparateur
                 let separator = ',';
-                if (rows.length > 0 && rows[0].includes(';')) {
-                    separator = ';';
+                // Vérifier la première ligne si elle contient plus de ";" que de ","
+                if (rows.length > 0) {
+                    const firstRow = rows[0];
+                    const semiCount = (firstRow.match(/;/g) || []).length;
+                    const commaCount = (firstRow.match(/,/g) || []).length;
+                    if (semiCount > commaCount) {
+                        separator = ';';
+                    }
                 }
                 console.log(`Séparateur détecté: "${separator}"`);
 
@@ -171,6 +175,7 @@
                 const data = [];
                 for (let i = 1; i < rows.length; i++) {
                     const values = rows[i].split(separator);
+                    
                     // Si le nombre de colonnes ne correspond pas, on passe
                     if (values.length !== header.length || values.every(v => v.trim() === '')) continue;
 
@@ -180,11 +185,14 @@
                     });
                     
                     // Conversion de types pour Latitude et Longitude
-                    if (row['Latitude'] && row['Longitude']) {
+                    const latKey = header.find(h => h.toLowerCase().includes('latitude'));
+                    const lonKey = header.find(h => h.toLowerCase().includes('longitude'));
+
+                    if (latKey && lonKey && row[latKey] && row[lonKey]) {
                         
                         // 1. Nettoyage de la chaîne: retirer les espaces, remplacer la virgule par le point
-                        let latStr = String(row.Latitude).replace(/\s/g, '').replace(/,/g, '.');
-                        let lonStr = String(row.Longitude).replace(/\s/g, '').replace(/,/g, '.');
+                        let latStr = String(row[latKey]).replace(/\s/g, '').replace(/,/g, '.');
+                        let lonStr = String(row[lonKey]).replace(/\s/g, '').replace(/,/g, '.');
                         
                         row.Latitude = parseFloat(latStr);
                         row.Longitude = parseFloat(lonStr);
@@ -192,6 +200,9 @@
                         
                         // 2. Vérification: Si les coordonnées sont valides et non nulles (pas au 0,0)
                         if (!isNaN(row.Latitude) && !isNaN(row.Longitude) && (row.Latitude !== 0 || row.Longitude !== 0)) {
+                            // Assigner les coordonnées nettoyées pour l'utilisation dans Leaflet
+                            row[latKey] = row.Latitude;
+                            row[lonKey] = row.Longitude;
                             data.push(row);
                         }
                     }
@@ -272,13 +283,14 @@
             dataMarkers = [];
 
             // 2. Créer et ajouter les nouveaux marqueurs
-            const bounds = data.length > 0 ? L.latLngBounds(data.map(d => [d.Latitude, d.Longitude])) : null;
+            const latKey = data.length > 0 ? Object.keys(data[0]).find(h => h.toLowerCase().includes('latitude')) : 'Latitude';
+            const lonKey = data.length > 0 ? Object.keys(data[0]).find(h => h.toLowerCase().includes('longitude')) : 'Longitude';
+
+            const bounds = data.length > 0 ? L.latLngBounds(data.map(d => [d[latKey], d[lonKey]])) : null;
 
             data.forEach(lot => {
-                // Utilisation d'un DivIcon personnalisé pour un meilleur contrôle du style
                 const refCourt = (lot['Référence annonce'] || '').replace(/^0+/, '');
                 
-                // Mettre le marqueur en jaune s'il est actuellement sélectionné
                 const isSelected = selectedMarker && selectedMarker.ref === lot['Référence annonce'];
                 const markerClass = isSelected 
                     ? 'bg-yellow-500 selected-marker-active' 
@@ -295,9 +307,8 @@
                     iconAnchor: [16, 16]
                 });
 
-                const marker = L.marker([lot.Latitude, lot.Longitude], { icon: customIcon });
+                const marker = L.marker([lot[latKey], lot[lonKey]], { icon: customIcon });
                 
-                // Ajouter la référence à l'objet marqueur pour la retrouver facilement
                 marker.ref = lot['Référence annonce']; 
                 
                 marker.on('click', (e) => onMarkerClick(e, lot));
@@ -307,7 +318,7 @@
             
             // 3. Adapter la vue aux marqueurs s'ils existent
             if (bounds && data.length > 0) {
-                // Ne pas ajuster la vue si un filtre est actif et qu'un marqueur est sélectionné (pour garder le zoom sur la ville)
+                // Si aucun marqueur n'est sélectionné, ajuster la vue
                 if (!selectedMarker) {
                     map.fitBounds(bounds, { padding: [20, 20] });
                 }
