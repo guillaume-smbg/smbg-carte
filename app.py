@@ -17,22 +17,16 @@ if 'last_clicked_coords' not in st.session_state:
 # --- Chemin d'accès du fichier ---
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 
-# --- Fonction de Chargement des Données ---
+# --- Fonction de Chargement des Données (Identique) ---
 @st.cache_data
 def load_data(file_path):
     try:
-        # Tente de lire le fichier .xlsx (ou .csv si le nom est trompeur)
-        # La lecture des fichiers est basée sur le chemin relatif dans le dépôt GitHub.
         if file_path.endswith('.xlsx'):
             df = pd.read_excel(file_path)
         else:
-            # Si le fichier est un CSV (comme le suggèrent les snippets), utiliser read_csv
             df = pd.read_csv(file_path)
 
-        # NETTOYAGE CRITIQUE : Supprimer les espaces avant/après les noms de colonnes
         df.columns = df.columns.str.strip() 
-        
-        # Le nom exact de la colonne de référence (assurez-vous que cela corresponde)
         REF_COL = 'Référence annonce' 
         
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
@@ -66,7 +60,7 @@ with col_left:
     st.write(f"Lots chargés: **{len(data_df)}**")
 
 
-# --- 3. Zone de la Carte ---
+# --- 3. Zone de la Carte (Identique) ---
 with col_map:
     MAP_HEIGHT = 800 
     st.header("Carte des Lots Immobiliers")
@@ -77,7 +71,6 @@ with col_map:
         
         m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True)
 
-        # --- Création des marqueurs ---
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
@@ -109,10 +102,9 @@ with col_map:
                 icon=icon,
             ).add_to(m)
 
-        # Affichage et capture des événements de clic
         map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map")
 
-        # --- Logique de détection de clic ---
+        # Logique de détection de clic
         if map_output and map_output.get("last_clicked"):
             clicked_coords = map_output["last_clicked"]
             current_coords = (clicked_coords['lat'], clicked_coords['lng'])
@@ -120,7 +112,6 @@ with col_map:
             if current_coords != st.session_state['last_clicked_coords']:
                 st.session_state['last_clicked_coords'] = current_coords
                 
-                # Recherche du lot le plus proche
                 data_df['distance'] = np.sqrt((data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2)
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
@@ -140,38 +131,75 @@ with col_right:
     selected_ref = st.session_state['selected_ref']
     
     if selected_ref:
-        # Le nom exact de la colonne de référence est utilisé
         selected_data = data_df[data_df['Référence annonce'] == selected_ref].iloc[0].copy()
         
         st.subheader(f"Réf. : {selected_ref}")
         
-        # --- AFFICHAGE DES INFORMATIONS (basé sur la liste fournie) ---
+        # --- Colonne G: Adresse ---
+        adresse = selected_data.get('Adresse', 'N/A')
+        st.markdown("##### 📍 Adresse")
+        st.write(adresse)
         
-        st.markdown("##### 📍 Localisation")
-        st.write(f"**Adresse :** {selected_data.get('Adresse', 'N/A')}")
-        st.write(f"**Ville :** {selected_data.get('Ville', 'N/A')} ({selected_data.get('N° Département', 'N/A')})")
-        st.write(f"**Région :** {selected_data.get('Région', 'N/A')}")
-        
-        st.markdown("##### 📐 Caractéristiques")
-        st.write(f"**Typologie :** {selected_data.get('Typologie', 'N/A')}")
-        st.write(f"**Surface GLA :** {selected_data.get('Surface GLA', 'N/A')} m²")
-        st.write(f"**Surface utile :** {selected_data.get('Surface utile', 'N/A')} m²")
-        st.write(f"**État de livraison :** {selected_data.get('Etat de livraison', 'N/A')}")
-        
-        st.markdown("##### 💲 Finances")
-        st.write(f"**Loyer Annuel :** {selected_data.get('Loyer annuel', 'N/A')} €")
-        st.write(f"**Loyer €/m² :** {selected_data.get('Loyer €/m²', 'N/A')} €")
-        st.write(f"**Charges Ann. :** {selected_data.get('Charges anuelles', 'N/A')} €")
-        st.write(f"**Taxe foncière :** {selected_data.get('Taxe foncière', 'N/A')}")
+        # --- Colonne H: Lien Google Maps (Bouton d'Action) ---
+        lien_maps = selected_data.get('Lien Google Maps', None)
+        if lien_maps and pd.notna(lien_maps):
+            # Le bouton qui ouvre le lien dans un nouvel onglet
+            st.markdown(
+                f'<a href="{lien_maps}" target="_blank">'
+                f'<button style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; width: 100%;">'
+                f'Voir sur Google Maps'
+                f'</button></a>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.caption("Lien Google Maps indisponible.")
         
         st.markdown("---")
-        st.caption("Commentaires:")
-        st.text(selected_data.get('Commentaires', 'Aucun commentaire disponible.'))
         
-        # Affichage de l'image
-        photo_url = selected_data.get('Photos annonce', '')
-        if photo_url and pd.notna(photo_url) and photo_url != 'nan':
-             st.image(photo_url, caption="Photo de l'annonce", use_column_width=True)
+        # --- Colonnes I à AH (Affichage Liste) ---
+        st.markdown("##### Informations Détaillées")
+        
+        # Création d'un dictionnaire de mapping pour l'affichage
+        # Nous commençons à 'I' jusqu'à 'AH', en sautant 'H'
+        colonnes_a_afficher = [
+            ('Emplacement', selected_data.get('Emplacement', 'N/A')),
+            ('Typologie', selected_data.get('Typologie', 'N/A')),
+            ('Type', selected_data.get('Type', 'N/A')),
+            ('Cession / Droit au bail', selected_data.get('Cession / Droit au bail', 'N/A')),
+            ('Nombre de lots', selected_data.get('Nombre de lots', 'N/A')),
+            ('Surface GLA', f"{selected_data.get('Surface GLA', 'N/A')} m²"),
+            ('Répartition surface GLA', selected_data.get('Répartition surface GLA', 'N/A')),
+            ('Surface utile', f"{selected_data.get('Surface utile', 'N/A')} m²"),
+            ('Répartition surface utile', selected_data.get('Répartition surface utile', 'N/A')),
+            ('Loyer annuel', f"{selected_data.get('Loyer annuel', 'N/A')} €"),
+            ('Loyer Mensuel', f"{selected_data.get('Loyer Mensuel', 'N/A')} €"),
+            ('Loyer €/m²', f"{selected_data.get('Loyer €/m²', 'N/A')} €/m²"),
+            ('Loyer variable', selected_data.get('Loyer variable', 'N/A')),
+            ('Charges anuelles', f"{selected_data.get('Charges anuelles', 'N/A')} €"),
+            ('Charges Mensuelles', f"{selected_data.get('Charges Mensuelles', 'N/A')} €"),
+            ('Charges €/m²', f"{selected_data.get('Charges €/m²', 'N/A')} €/m²"),
+            ('Dépôt de garantie', selected_data.get('Dépôt de garantie', 'N/A')),
+            ('GAPD', selected_data.get('GAPD', 'N/A')),
+            ('Taxe foncière', selected_data.get('Taxe foncière', 'N/A')),
+            ('Marketing', selected_data.get('Marketing', 'N/A')),
+            ('Gestion', selected_data.get('Gestion', 'N/A')),
+            ('Etat de livraison', selected_data.get('Etat de livraison', 'N/A')),
+            ('Extraction', selected_data.get('Extraction', 'N/A')),
+            ('Restauration', selected_data.get('Restauration', 'N/A')),
+            ('Environnement Commercial', selected_data.get('Environnement Commercial', 'N/A')),
+            ('Commentaires', selected_data.get('Commentaires', 'N/A')),
+            ('Latitude', selected_data.get('Latitude', 'N/A')),
+        ]
+
+        # Affichage des informations sous forme de table (plus compact) ou liste
+        for nom, valeur in colonnes_a_afficher:
+            if nom == 'Commentaires':
+                st.caption("Commentaires:")
+                st.text(valeur)
+            else:
+                st.write(f"**{nom} :** {valeur}")
+        
+        st.markdown("---")
         
         # Bouton pour désélectionner
         if st.button("Masquer les détails", key="deselect_right"):
