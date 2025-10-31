@@ -80,7 +80,8 @@ DETAIL_COLUMNS = [
 ]
 COL_GMAPS = "Lien Google Maps"
 
-# Fichier de données (nom du snippet généré)
+# Fichier de données (nom du snippet généré correspondant à la feuille Tableau recherche)
+# CORRECTION: Utilisation du nom du fichier snippet CSV correspondant à la feuille 'Tableau recherche'
 DATA_FILE_PATH = "Liste des lots Version 2.xlsx - Tableau recherche.csv"
 
 
@@ -93,10 +94,9 @@ def load_data(file_path: str) -> pd.DataFrame:
     """Charge le DataFrame depuis le fichier CSV de la feuille 'Tableau recherche' et effectue le nettoyage."""
     try:
         # Tente de charger le fichier CSV correspondant à la feuille Excel
-        # Utilisation du nom du fichier snippet
         df = pd.read_csv(file_path)
     except FileNotFoundError:
-        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que le fichier 'Liste des lots Version 2.xlsx' est bien présent et traité en tant que CSV.")
+        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vous assurer que le fichier 'Liste des lots Version 2.xlsx' est bien présent et que la feuille 'Tableau recherche' est accessible.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erreur lors de la lecture du fichier de données. Détails: {e}")
@@ -190,6 +190,7 @@ def render_right_panel(
         lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
 
         # --- TITRE ET ADRESSE ---
+        # Utilisation de h3 pour le titre du panneau de droite, qui a un style spécifique dans style.css
         st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
         st.markdown(f'<p class="detail-address">{lot_data[col_addr_full]} ({lot_data[col_city]})</p>', unsafe_allow_html=True)
 
