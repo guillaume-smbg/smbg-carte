@@ -14,40 +14,37 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state:
     st.session_state['last_clicked_coords'] = (0, 0)
 
-# --- Chemin d'accès du fichier ---
-# ATTENTION : Confirmer le nom exact du fichier. J'utilise 'Liste des lots.xlsx'
-EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
+# --- Chemin d'accès du fichier (CORRIGÉ) ---
+# L'utilisateur a confirmé que le nom est juste "Liste des Lots".
+EXCEL_FILE_PATH = 'Liste des Lots.xlsx' 
+REF_COL = 'Référence annonce' 
 
 # --- Fonction de Chargement des Données ---
 @st.cache_data
 def load_data(file_path):
     try:
-        if file_path.endswith('.xlsx'):
-            # Lecture du fichier Excel
-            df = pd.read_excel(file_path)
-        else:
-            # Lecture si c'est un CSV (comme le suggèrent les aperçus)
-            df = pd.read_csv(file_path)
+        # Tente de lire le fichier en tant qu'Excel (ou le type d'origine)
+        # S'il y a un problème de feuille dans l'Excel, cela pourrait nécessiter un paramètre 'sheet_name'.
+        df = pd.read_excel(file_path)
 
         # NETTOYAGE CRITIQUE : Supprimer les espaces avant/après les noms de colonnes
         df.columns = df.columns.str.strip() 
         
-        # Le nom de colonne de référence utilisé pour la recherche
-        REF_COL = 'Référence annonce' 
-        
-        # Vérification des colonnes essentielles
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns:
              st.error(f"Colonnes essentielles ({REF_COL}, Latitude ou Longitude) introuvables. Vérifiez les en-têtes exacts.")
              return pd.DataFrame()
             
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
-        df[REF_COL] = df[REF_COL].astype(str)
+        
+        # SÉCURISATION : Conversion de la colonne de référence en string
+        df[REF_COL] = df[REF_COL].apply(str).str.strip() 
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
     except Exception as e:
-        st.error(f"Erreur de chargement du fichier : {e}")
+        # Cette erreur affichera si le chemin ou le nom du fichier est incorrect
+        st.error(f"Erreur de chargement du fichier '{file_path}'. Assurez-vous que le fichier est au bon emplacement et accessible : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -66,32 +63,11 @@ with col_left:
     st.markdown("---")
     st.write(f"Lots chargés: **{len(data_df)}**")
     
-    # =======================================================
-    # >>>>> BLOC DE DIAGNOSTIC CRITIQUE À COPIER <<<<<
-    # =======================================================
-    if not data_df.empty:
-        st.markdown("##### 🕵️ Diagnostic (Copiez ces lignes)")
-        
-        # 1. Afficher les noms de colonnes exacts lus par Pandas
-        st.code(f"Colonnes Pandas lues: {list(data_df.columns)}")
-
-        # 2. Afficher les 5 premières références et leur type
-        refs_samples = data_df['Référence annonce'].head(5).tolist()
-        st.code(f"Réf. Exemples: {refs_samples}")
-        
-        # 3. Afficher la référence actuellement sélectionnée et le résultat de la recherche
-        if st.session_state['selected_ref']:
-            selected_ref = st.session_state['selected_ref']
-            st.code(f"Réf. Sélectionnée: '{selected_ref}'")
-            
-            # Test de la recherche de données (le plus important)
-            test_df = data_df[data_df['Référence annonce'] == selected_ref]
-            st.code(f"Résultats trouvés: {len(test_df)} lignes")
-        
-        st.markdown("---")
-    # =======================================================
-    # >>>>> FIN DU BLOC DE DIAGNOSTIC <<<<<
-    # =======================================================
+    # Bouton pour désélectionner
+    if st.session_state['selected_ref']:
+        if st.button("Masquer les détails", key="hide_left"):
+            st.session_state['selected_ref'] = None
+            st.experimental_rerun()
 
 
 # --- 3. Zone de la Carte ---
@@ -109,7 +85,7 @@ with col_map:
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            reference = str(row.get('Référence annonce', 'N/A'))
+            reference = str(row.get(REF_COL, 'N/A')).strip() 
             
             display_ref = reference[-4:] if len(reference) > 4 and reference != 'nan' else reference
             
@@ -153,7 +129,7 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
                 if closest_row['distance'] < 0.0001: 
-                    new_ref = closest_row['Référence annonce']
+                    new_ref = str(closest_row[REF_COL]).strip()
                     st.session_state['selected_ref'] = new_ref
                  
     else:
@@ -168,10 +144,9 @@ with col_right:
     selected_ref = st.session_state['selected_ref']
     
     if selected_ref:
-        # Recherche du lot sélectionné
-        selected_data_series = data_df[data_df['Référence annonce'] == selected_ref]
+        # Recherche du lot sélectionné (comparaison de chaînes pures)
+        selected_data_series = data_df[data_df[REF_COL] == selected_ref]
         
-        # IMPORTANT : Vérification que le lot a été trouvé
         if len(selected_data_series) > 0:
             selected_data = selected_data_series.iloc[0].copy()
             
@@ -184,7 +159,7 @@ with col_right:
             
             # --- Colonne H: Lien Google Maps (Bouton d'Action) ---
             lien_maps = selected_data.get('Lien Google Maps', None)
-            if lien_maps and pd.notna(lien_maps):
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower() not in ('nan', 'n/a'):
                 st.markdown(
                     f'<a href="{lien_maps}" target="_blank">'
                     f'<button style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; width: 100%;">'
@@ -200,7 +175,6 @@ with col_right:
             # --- Colonnes I à AH (Liste) ---
             st.markdown("##### Informations Détaillées")
             
-            # Définition des colonnes à afficher (y compris les unités)
             colonnes_a_afficher = [
                 ('Emplacement', selected_data.get('Emplacement', 'N/A')),
                 ('Typologie', selected_data.get('Typologie', 'N/A')),
@@ -232,11 +206,13 @@ with col_right:
             ]
 
             for nom, valeur in colonnes_a_afficher:
-                if nom == 'Commentaires':
-                    st.caption("Commentaires:")
-                    st.text(valeur)
-                else:
-                    st.write(f"**{nom} :** {valeur}")
+                # N'affiche pas les champs s'ils sont manquants ou "nan"
+                if not (isinstance(valeur, str) and valeur.strip().lower() in ('nan', 'n/a')) and str(valeur).strip() != 'N/A':
+                    if nom == 'Commentaires':
+                        st.caption("Commentaires:")
+                        st.text(valeur)
+                    else:
+                        st.write(f"**{nom} :** {valeur}")
             
             st.markdown("---")
             
@@ -246,7 +222,7 @@ with col_right:
                  st.experimental_rerun() 
                  
         else:
-            st.error(f"Erreur : Données introuvables pour la référence '{selected_ref}'.")
+            st.error(f"Erreur de recherche : Aucune ligne trouvée pour la référence '{selected_ref}'.")
 
     else:
         st.info("Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.")
