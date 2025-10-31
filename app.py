@@ -22,7 +22,7 @@ REF_COL = 'Référence annonce'
 @st.cache_data
 def load_data(file_path):
     try:
-        # Lire sans spécifier la feuille pour couvrir les cas où la feuille par défaut est utilisée
+        # Lire sans spécifier la feuille pour la compatibilité maximale
         df = pd.read_excel(file_path)
 
         df.columns = df.columns.str.strip() 
@@ -34,9 +34,13 @@ def load_data(file_path):
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
         
-        # SÉCURISATION : Force le format 5 chiffres pour la comparaison
-        df[REF_COL] = pd.to_numeric(df[REF_COL], errors='coerce').astype('Int64', errors='ignore')
-        df[REF_COL] = df[REF_COL].apply(lambda x: f'{x:05d}' if pd.notna(x) else 'N/A')
+        # SÉCURISATION MAXIMALE DE LA COLONNE DE RÉFÉRENCE:
+        # 1. Convertit en chaîne et supprime la partie décimale (ex: "1.0" -> "1")
+        df[REF_COL] = df[REF_COL].apply(lambda x: str(x).split('.')[0])
+        # 2. Supprime tous les espaces et caractères invisibles
+        df[REF_COL] = df[REF_COL].str.strip()
+        # 3. Force le format 5 chiffres avec des zéros en tête (ex: "1" -> "00001")
+        df[REF_COL] = df[REF_COL].str.zfill(5) 
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
         return df
@@ -82,16 +86,15 @@ with col_map:
         for index, row in data_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            # La référence est au format '00025' pour la recherche
+            # La référence stockée dans le DataFrame est au format '00025'
             reference = row.get(REF_COL, 'N/A')
             
-            # LOGIQUE CORRIGÉE POUR L'AFFICHAGE DU PIN :
+            # LOGIQUE POUR L'AFFICHAGE DU PIN : Supprimer les zéros en tête
             if reference != 'N/A' and reference.isdigit():
-                # Convertit la chaîne '00025' en '25'
+                # On utilise la conversion en int puis en str pour retirer les zéros non significatifs
                 display_ref = str(int(reference)) 
             else:
                 display_ref = reference
-            # --- FIN LOGIQUE CORRIGÉE ---
             
             html = f"""
                 <div id='lot-{reference}' style='
@@ -133,6 +136,7 @@ with col_map:
                 closest_row = data_df.loc[data_df['distance'].idxmin()]
                 
                 if closest_row['distance'] < 0.0001: 
+                    # On stocke la référence au format '00025' dans la session state pour la recherche
                     new_ref = closest_row[REF_COL]
                     st.session_state['selected_ref'] = new_ref
                  
@@ -149,8 +153,7 @@ with col_right:
     
     if selected_ref:
         # Recherche du lot sélectionné
-        
-        # FIX ULTIME : Utilisation de isin() pour une recherche plus robuste.
+        # Utilisation de isin() pour une recherche par correspondance de chaîne fiable
         selected_data_series = data_df[data_df[REF_COL].isin([selected_ref])]
         
         if len(selected_data_series) > 0:
@@ -166,12 +169,15 @@ with col_right:
             
             # --- Colonne G: Adresse ---
             adresse = selected_data.get('Adresse', 'N/A')
+            code_postal = selected_data.get('Code Postal', '')
+            ville = selected_data.get('Ville', '')
+            
             st.markdown("##### 📍 Adresse")
-            st.write(adresse)
+            st.write(f"{adresse} \n{code_postal} - {ville}")
             
             # --- Colonne H: Lien Google Maps (Bouton d'Action) ---
             lien_maps = selected_data.get('Lien Google Maps', None)
-            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower() not in ('nan', 'n/a'):
+            if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower() not in ('nan', 'n/a', 'none'):
                 st.markdown(
                     f'<a href="{lien_maps}" target="_blank">'
                     f'<button style="background-color: #4CAF50; color: white; border: none; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 8px; width: 100%;">'
@@ -219,7 +225,8 @@ with col_right:
 
             for nom, valeur in colonnes_a_afficher:
                 valeur_str = str(valeur).strip()
-                if valeur_str not in ('N/A', 'nan', '', '€'): # Ajout de '€' pour masquer les valeurs vides avec unité
+                # N'affiche pas les champs si la valeur est vide, 'nan', 'N/A' ou juste l'unité
+                if valeur_str not in ('N/A', 'nan', '', '€', 'm²'): 
                     if nom == 'Commentaires':
                         st.caption("Commentaires:")
                         st.text(valeur)
@@ -229,6 +236,7 @@ with col_right:
             st.markdown("---")
             
         else:
+            # Message d'erreur si la recherche échoue, pour un diagnostic futur
             st.error(f"Erreur de correspondance: Aucune ligne trouvée pour la référence '{selected_ref}'.")
 
     else:
