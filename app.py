@@ -204,11 +204,11 @@ if not data_df.empty:
                     st.rerun() 
              
 else:
-    # Ce bloc ne devrait s'exécuter que si le DataFrame est vide après le chargement
     st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes. Aucune carte ne peut être affichée.")
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
+# NOTE: Le problème d'affichage du code persiste, mais la structure est maintenue.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -256,7 +256,7 @@ if show_details:
         # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
         html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
-        # Colonnes à exclure (déjà traitées ou non pertinentes pour l'affichage général)
+        # Colonnes à exclure 
         cols_to_exclude = [
             REF_COL, 
             'Latitude', 'Longitude', 
@@ -322,17 +322,31 @@ html_content += '</div>'
 st.markdown(html_content, unsafe_allow_html=True)
 
 
-# --- 5. Affichage du Tableau de Données (Sous la carte) ---
+# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte) ---
 st.markdown("---")
-st.header("📊 Tableau des Lots Immobiliers")
+st.header("📋 Annonce du Lot Sélectionné")
 
-if not data_df.empty:
-    # Suppression des colonnes temporaires et non pertinentes pour l'affichage du tableau
-    if 'distance_sq' in data_df.columns:
-        display_df = data_df.drop(columns=['distance_sq'])
-    else:
-        display_df = data_df.copy()
+if show_details:
+    # Filtre sur la référence sélectionnée
+    selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy()
+    
+    if not selected_row_df.empty:
+        # Suppression des colonnes temporaires pour l'affichage
+        if 'distance_sq' in selected_row_df.columns:
+            display_df = selected_row_df.drop(columns=['distance_sq'])
+        else:
+            display_df = selected_row_df
+            
+        # Transposition du DataFrame pour afficher les données verticalement (plus lisible)
+        # On renomme l'index pour que la colonne des noms de champs s'appelle "Champ"
+        transposed_df = display_df.T.reset_index()
+        transposed_df.columns = ['Champ', 'Valeur']
         
-    st.dataframe(display_df, use_container_width=True)
+        # Affichage du tableau (une ligne / champ par ligne)
+        st.dataframe(transposed_df, hide_index=True, use_container_width=True)
+    else:
+        st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
 else:
-    st.warning("Aucune donnée disponible pour l'affichage du tableau.")
+    st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
+
+# --- FIN DU CODE ---
