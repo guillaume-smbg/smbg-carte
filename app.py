@@ -1,6 +1,3 @@
-# SMBG Carte - Version complète finale (layout bleu/cuivre, filtres dynamiques, carte Folium, panneau droit complet)
-# --- Code intégral déjà validé par l'utilisateur ---
-
 import os
 import io
 import re
@@ -14,188 +11,356 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 
+
 # -------------------------------------------------
-# CONFIGURATION GÉNÉRALE
+# CONFIG DE BASE ET CONSTANTES
 # -------------------------------------------------
-st.set_page_config(page_title="SMBG Carte", layout="wide")
+
+st.set_page_config(
+    page_title="SMBG Carte Immo",
+    layout="wide",
+)
+
+# 🚨 CORRECTION CRUCIALE 🚨
+# Le chemin pointe vers le fichier EXCEL (.xlsx) dans le sous-dossier 'data'
+DATA_FILE_PATH = "data/Liste des lots Version 2.xlsx"
+EXCEL_SHEET_NAME = "Tableau recherche" # Nom de la feuille de calcul à charger
+
+# Configuration des couleurs et dimensions
 LOGO_BLUE = "#05263d"
 COPPER = "#b87333"
 LEFT_PANEL_WIDTH_PX = 275
 RIGHT_PANEL_WIDTH_PX = 275
-DEFAULT_LOCAL_PATH = "data/Liste des lots Version 2.xlsx"
+
+# Noms des colonnes pour les FILTRES et les COORDONNEES (À VÉRIFIER)
+COL_REGION = "Région"
+COL_DEPARTEMENT = "Département"
+COL_VILLE = "Ville"
+COL_REF = "Référence annonce" 
+COL_LAT = "Latitude"
+COL_LON = "Longitude"
+COL_ADDR_FULL = "Adresse"
+
+# LISTE COMPLÈTE DES COLONNES À AFFICHER DE G À AH
+# Les colonnes sont affichées dans l'ordre de cette liste
+DETAIL_COLUMNS = [
+    "Emplacement", 
+    "Lien Google Maps", # H (sera traité comme bouton)
+    "Typologie", 
+    "Type", 
+    "Cession / Droit au bail", 
+    "Nombre de lots", 
+    "Surface GLA", 
+    "Répartition surface GLA", 
+    "Surface utile", 
+    "Répartition surface utile", 
+    "Loyer annuel", 
+    "Loyer Mensuel", 
+    "Loyer €/m²", 
+    "Loyer variable", 
+    "Charges anuelles", 
+    "Charges Mensuelles", 
+    "Charges €/m²", 
+    "Dépôt de garantie", 
+    "GAPD", 
+    "Taxe foncière", 
+    "Marketing", 
+    "Gestion", 
+    "Etat de livraison", 
+    "Extraction", 
+    "Restauration", 
+    "Environnement Commercial", 
+    "Commentaires" # AH (sera affiché avec un style spécial)
+]
+COL_GMAPS = "Lien Google Maps"
+
 
 # -------------------------------------------------
-# CSS GLOBAL (simplifié pour stabilité Streamlit Cloud)
+# CHARGEMENT ET PREPARATION DES DONNEES
 # -------------------------------------------------
-st.markdown(
-    f"""
-    <style>
-    body, .stApp {{
-        font-family: 'Futura', sans-serif !important;
-    }}
-    [data-testid="column"]:nth-of-type(1) {{
-        background-color: {LOGO_BLUE};
-        color: white !important;
-        border-radius: 12px;
-        padding: 16px;
-    }}
-    [data-testid="column"]:nth-of-type(1) * {{
-        color: white !important;
-        font-family: 'Futura', sans-serif !important;
-    }}
-    [data-testid="column"]:nth-of-type(3) {{
-        border-radius: 12px;
-        border: 1px solid rgba(0,0,0,0.1);
-        background-color: white;
-        padding: 0px;
-    }}
-    .panel-banner {{
-        background-color: {LOGO_BLUE};
-        color: #fff !important;
-        padding: 10px 12px;
-        border-radius: 12px 12px 0 0;
-        font-weight: 600;
-        font-size: 14px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }}
-    .badge-nouveau {{
-        background-color: {COPPER};
-        color: white;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: bold;
-    }}
-    .gmaps-btn button {{
-        background-color: {COPPER};
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 6px 10px;
-        font-weight: 500;
-        cursor: pointer;
-    }}
-    .gmaps-btn button:hover {{
-        filter: brightness(1.1);
-    }}
-    </style>
-    """, unsafe_allow_html=True
-)
 
-# -------------------------------------------------
-# FONCTIONS
-# -------------------------------------------------
-def normalize_excel_url(url: str) -> str:
-    if not url:
-        return url
-    return re.sub(r"https://github\.com/(.+)/blob/(.+)", r"https://github.com/\1/raw/\2", url.strip())
-
-@st.cache_data(show_spinner=False)
-def load_excel() -> pd.DataFrame:
-    excel_url = st.secrets.get("EXCEL_URL", os.environ.get("EXCEL_URL", "")).strip()
-    excel_url = normalize_excel_url(excel_url)
-    if excel_url:
-        r = requests.get(excel_url, timeout=25)
-        r.raise_for_status()
-        return pd.read_excel(io.BytesIO(r.content))
-    if os.path.exists(DEFAULT_LOCAL_PATH):
-        return pd.read_excel(DEFAULT_LOCAL_PATH)
-    st.error("Impossible de charger le fichier Excel.")
-    st.stop()
-
-def to_number(value):
-    if value is None:
-        return None
-    s = str(value).replace("€","").replace("m²","").replace(",","").replace(" ","")
+@st.cache_data
+def load_data(file_path: str, sheet_name: str) -> pd.DataFrame:
+    """Charge le DataFrame depuis le fichier Excel et effectue le nettoyage."""
     try:
-        return float(s)
-    except:
-        return None
+        # Tente de charger le fichier EXCEL (.xlsx)
+        # Nécessite que pandas puisse lire le format Excel (pas de librairie externe requise par défaut sur Streamlit)
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+    except FileNotFoundError:
+        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez vérifier le chemin d'accès.")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture du fichier Excel (feuille: '{sheet_name}'). Détails: {e}")
+        return pd.DataFrame()
 
-def clean_latlon_series(series: pd.Series) -> pd.Series:
-    return series.astype(str).str.replace(",",".",regex=False).map(to_number)
 
-def normalize_bool(v):
-    if isinstance(v,str): return v.lower().strip() in ["oui","true","1"]
-    if isinstance(v,bool): return v
-    if isinstance(v,(int,float)): return v==1
-    return False
+    # Nettoyage des coordonnées (Conversion en numériques et suppression des lignes invalides)
+    df[COL_LAT] = pd.to_numeric(df[COL_LAT], errors='coerce')
+    df[COL_LON] = pd.to_numeric(df[COL_LON], errors='coerce')
+    
+    # Suppression des lignes avec des coordonnées manquantes ou invalides pour la carte
+    df.dropna(subset=[COL_LAT, COL_LON], inplace=True)
+    
+    # Assurer que la colonne de référence est une chaîne de caractères
+    df[COL_REF] = df[COL_REF].astype(str).str.strip()
 
-def find_col(df,*names):
-    def norm(x): return re.sub(r"\s+"," ",unicodedata.normalize("NFKD",x.lower()))
-    for n in names:
-        for c in df.columns:
-            if norm(n) in norm(c): return c
-    return ""
+    # Créer les colonnes de coordonnées utilisées pour le tracé (avec des noms uniques)
+    df["_lat_plot"] = df[COL_LAT]
+    df["_lon_plot"] = df[COL_LON]
 
-def is_recent(date_val,days=30)->bool:
-    if pd.isna(date_val): return False
-    try: dt=pd.to_datetime(date_val,dayfirst=True,errors="coerce")
-    except: return False
-    if pd.isna(dt): return False
-    return (pd.Timestamp.now()-dt).days<=days
-
-# -------------------------------------------------
-# PANNEAU DROIT
-# -------------------------------------------------
-def render_right_panel(selected_ref,df,col_ref,col_addr,col_city,col_gmaps,col_date_pub):
-    if not selected_ref:
-        st.markdown("<div class='panel-banner'>Aucune sélection</div>",unsafe_allow_html=True)
-        return
-    row=df[df[col_ref].astype(str)==str(selected_ref)].iloc[0]
-    badge=""
-    if col_date_pub and is_recent(row.get(col_date_pub)): badge="<span class='badge-nouveau'>Nouveau</span>"
-    st.markdown(f"<div class='panel-banner'>Réf. {row[col_ref]} {badge}</div>",unsafe_allow_html=True)
-    gmaps=row.get(col_gmaps,"")
-    if gmaps not in ["","-","/"]:
-        st.markdown(f"<div class='gmaps-btn'><a href='{gmaps}' target='_blank'><button>Cliquer ici</button></a></div>",unsafe_allow_html=True)
-    st.write(row.get(col_addr,""))
-    st.write(row.get(col_city,""))
-    st.dataframe(row.to_frame().iloc[6:25])
+    return df
 
 # -------------------------------------------------
-# MAIN
+# FONCTIONS DE RENDU
 # -------------------------------------------------
+
+def get_global_css_style(css_file_path: str) -> str:
+    """Lit le contenu du fichier CSS et l'encapsule dans des balises <style>."""
+    try:
+        # Le fichier style.css doit être à la racine
+        with open(css_file_path, 'r', encoding='utf-8') as f:
+            css_content = f.read()
+        return f"<style>{css_content}</style>"
+    except FileNotFoundError:
+        # En cas d'erreur, renvoie un style minimal
+        return "<style>/* Fichier style.css non trouvé. Styles par défaut appliqués. */</style>"
+
+
+def format_value(value):
+    """
+    Applique les règles de formatage pour l'affichage dans le panneau de détails.
+    - Retourne None si la valeur est vide/NaN.
+    - Retourne "Non spécifié" si la valeur est '/' ou '-'.
+    """
+    if pd.isna(value) or value is None or str(value).strip() == "":
+        return None # Ne pas afficher le champ s'il est vide
+    
+    value_str = str(value).strip()
+    
+    if value_str in ["/", "-"]:
+        return "Non spécifié"
+    
+    return value_str
+
+
+def render_right_panel(
+    selected_ref: Optional[str],
+    df: pd.DataFrame,
+    detail_columns: List[str],
+    col_ref: str,
+    col_addr_full: str,
+    col_gmaps: str,
+    col_city: str,
+):
+    """Affiche le panneau de droite avec les détails du lot sélectionné."""
+    
+    st.markdown('<div class="right-panel">', unsafe_allow_html=True)
+    
+    if selected_ref and selected_ref != "NO_SELECTION":
+        
+        # Récupérer les données du lot sélectionné
+        # Utiliser .fillna('') pour remplacer les NaN par des chaînes vides
+        lot_data = df[df[col_ref] == selected_ref].iloc[0].fillna('') 
+
+        # --- TITRE ET ADRESSE ---
+        st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
+        st.markdown(f'<p class="detail-address">{lot_data[col_addr_full]} ({lot_data[col_city]})</p>', unsafe_allow_html=True)
+
+        # --- BOUTON GOOGLE MAPS (Traitement spécial pour Lien Google Maps) ---
+        gmaps_link = format_value(lot_data.get(col_gmaps))
+        if gmaps_link and gmaps_link != "Non spécifié":
+             # st.link_button est le widget Streamlit le plus approprié
+             st.link_button("Voir sur Google Maps 🗺️", gmaps_link, help="Ouvre le lien Google Maps dans un nouvel onglet", type="primary")
+             st.markdown("---") # Séparateur après le bouton
+        
+        
+        # --- AFFICHAGE DES AUTRES CHAMPS DE DÉTAILS ---
+        
+        # Filtrer la liste des colonnes pour exclure celles déjà traitées (Lien Google Maps et Commentaires)
+        data_columns_to_show = [col for col in detail_columns if col != col_gmaps and col != "Commentaires"]
+        
+        for col_name in data_columns_to_show:
+            value = lot_data.get(col_name)
+            formatted_value = format_value(value)
+            
+            # Si format_value retourne None, on n'affiche pas cette ligne (valeur vide)
+            if formatted_value is not None:
+                # Utilise un format HTML pour un alignement précis Label/Valeur
+                st.markdown(
+                    f"""
+                    <div class="detail-line">
+                        <span class="detail-label">{col_name} :</span>
+                        <span class="detail-value">{formatted_value}</span>
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
+        
+        # --- AFFICHAGE DES COMMENTAIRES (en bas avec un style dédié) ---
+        comments = format_value(lot_data.get("Commentaires"))
+        if comments is not None:
+             st.markdown('<br><span class="detail-label">Commentaires :</span>', unsafe_allow_html=True)
+             st.markdown(f'<p class="detail-comments">{comments}</p>', unsafe_allow_html=True)
+
+    else:
+        # Message si aucun lot n'est sélectionné
+        st.markdown('<p class="no-selection-msg">Cliquez sur un marqueur sur la carte pour voir les détails du lot.</p>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True) # fin .right-panel
+
+
+# -------------------------------------------------
+# FONCTION PRINCIPALE DE L'APPLICATION
+# -------------------------------------------------
+
 def main():
-    df=load_excel()
-    if df.empty: st.warning("Excel vide"); return
+    # Injection du CSS global (à lire depuis le fichier style.css)
+    st.markdown(get_global_css_style("style.css"), unsafe_allow_html=True)
 
-    col_lat=find_col(df,"Latitude"); col_lon=find_col(df,"Longitude")
-    col_ref=find_col(df,"Référence annonce"); col_actif=find_col(df,"Actif")
-    col_addr=find_col(df,"Adresse complète","Adresse"); col_city=find_col(df,"Ville")
-    col_gmaps=find_col(df,"Google Maps"); col_date_pub=find_col(df,"Date publication")
+    # Initialisation de l'état de la sélection
+    if "selected_ref" not in st.session_state:
+        st.session_state["selected_ref"] = "NO_SELECTION"
 
-    df["_actif"]=df[col_actif].apply(normalize_bool) if col_actif else True
-    df["_lat"]=clean_latlon_series(df[col_lat]) if col_lat else None
-    df["_lon"]=clean_latlon_series(df[col_lon]) if col_lon else None
-    df_map=df[df["_actif"] & df["_lat"].notna() & df["_lon"].notna()]
+    # Chargement des données
+    df = load_data(DATA_FILE_PATH, EXCEL_SHEET_NAME)
+    if df.empty:
+        return
 
-    col_left,col_map,col_right=st.columns([1,4,1])
+    st.title("Catalogue Immobilier : Visualisation Cartographique")
 
+    # Mise en place des colonnes pour la mise en page (GAUCHE - CENTRE - DROITE)
+    col_left, col_map, col_right = st.columns([LEFT_PANEL_WIDTH_PX, 1000, RIGHT_PANEL_WIDTH_PX], gap="20px")
+
+
+    # ======== COLONNE GAUCHE (panneau de filtres) ========
     with col_left:
-        st.subheader("Filtres")
-        st.checkbox("Centre-ville")
-        st.checkbox("Périphérie")
-        st.button("Réinitialiser")
-        st.button("Je suis intéressé")
+        st.markdown('<div class="left-panel">', unsafe_allow_html=True)
+        st.markdown("<h3>Filtres de Recherche</h3>", unsafe_allow_html=True)
 
+        # 1. Filtre Région
+        # Utilise .dropna() pour exclure les valeurs manquantes
+        regions = ['Toutes'] + sorted(df[COL_REGION].dropna().unique().tolist())
+        selected_region = st.selectbox("Région", regions, key="region_filter")
+
+        # Filtrage par Région
+        df_filtered = df.copy()
+        if selected_region != 'Toutes':
+            df_filtered = df_filtered[df_filtered[COL_REGION] == selected_region]
+
+        # 2. Filtre Département (dépend de la région sélectionnée)
+        departements = ['Tous'] + sorted(df_filtered[COL_DEPARTEMENT].dropna().unique().tolist())
+        selected_departement = st.selectbox("Département", departements, key="departement_filter")
+
+        # Filtrage par Département
+        if selected_departement != 'Tous':
+            df_filtered = df_filtered[df_filtered[COL_DEPARTEMENT] == selected_departement]
+            
+        # 3. Filtre Ville (dépend de la région/département sélectionné)
+        villes = ['Toutes'] + sorted(df_filtered[COL_VILLE].dropna().unique().tolist())
+        selected_ville = st.selectbox("Ville", villes, key="ville_filter")
+        
+        # Filtrage par Ville
+        if selected_ville != 'Toutes':
+            df_filtered = df_filtered[df_filtered[COL_VILLE] == selected_ville]
+
+        # Affichage du nombre de lots trouvés
+        st.markdown(f"**{len(df_filtered)}** lots trouvés.", unsafe_allow_html=True)
+
+        # Bouton de Réinitialisation 
+        if st.button("Réinitialiser la sélection", key="reset_button"):
+            st.session_state["selected_ref"] = "NO_SELECTION"
+            # Réinitialiser les selectbox pour une cohérence totale
+            st.session_state.region_filter = 'Toutes'
+            st.session_state.departement_filter = 'Tous'
+            st.session_state.ville_filter = 'Toutes'
+            st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True) # fin .left-panel
+
+    # ======== COLONNE CENTRALE (carte) ========
     with col_map:
-        if df_map.empty:
-            st.warning("Aucune coordonnée valide")
+        st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
+
+        # Calculer le centre de la carte et le zoom
+        if not df_filtered.empty:
+            center_lat = df_filtered["_lat_plot"].mean()
+            center_lon = df_filtered["_lon_plot"].mean()
         else:
-            m=folium.Map(location=[46.6,1.88],zoom_start=6,tiles="cartodbpositron")
-            for _,r in df_map.iterrows():
-                ref=str(r[col_ref])
+            center_lat, center_lon = 46.603354, 1.888334 # Centre de la France (Par défaut)
+        
+        zoom_start = 6 
+        if selected_region != 'Toutes': zoom_start = 8
+        if selected_departement != 'Tous': zoom_start = 10
+        if selected_ville != 'Toutes': zoom_start = 12
+
+
+        # Création de la carte Folium
+        m = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=zoom_start,
+            control_scale=True,
+            tiles='OpenStreetMap',
+        )
+        
+        layer = folium.FeatureGroup(name="Lots Filtrés").add_to(m)
+        click_registry = {} # Registre pour lier les coordonnées du clic à la référence
+
+        
+        # Ajout des marqueurs à la carte
+        for index, r in df_filtered.iterrows():
+            # Conversion en float nécessaire pour folium
+            lat = float(r["_lat_plot"]) 
+            lon = float(r["_lon_plot"])
+            raw_label = str(r[COL_REF]).strip()
+
+            # Utilisation de la classe CSS .custom-marker pour le style
+            icon = folium.DivIcon(html=f'<div class="custom-marker" style="white-space:nowrap;">{raw_label}</div>')
+
+            layer.add_child(
                 folium.Marker(
-                    [r["_lat"],r["_lon"]],
-                    icon=folium.DivIcon(html=f"<div style='background:{LOGO_BLUE};color:white;border-radius:50%;width:26px;height:26px;text-align:center;line-height:26px;font-weight:600;font-size:11px'>{ref}</div>")
-                ).add_to(m)
-            st_folium(m,height=750,width=None)
+                    location=[lat, lon],
+                    icon=icon,
+                )
+            )
 
+            # Enregistre la référence pour la détection du clic
+            # Arrondir les coordonnées permet de s'assurer que le clic Streamlit correspond au marqueur Folium
+            click_registry[(round(lat, 6), round(lon, 6))] = raw_label
+
+        # Affichage de la carte Streamlit
+        out = st_folium(m, height=800, width=None) 
+
+        clicked_ref = None
+        if isinstance(out, dict):
+            loc_info = out.get("last_object_clicked")
+            # Vérifie si un marqueur a été cliqué
+            if isinstance(loc_info, dict) and "lat" in loc_info and "lng" in loc_info:
+                lat_clicked = round(float(loc_info["lat"]), 6)
+                lon_clicked = round(float(loc_info["lng"]), 6)
+                clicked_ref = click_registry.get((lat_clicked, lon_clicked))
+
+        # Met à jour l'état de la session si une référence a été cliquée
+        if clicked_ref:
+            st.session_state["selected_ref"] = clicked_ref
+
+        st.markdown('</div>', unsafe_allow_html=True)  # fin .map-wrapper
+
+    # ======== COLONNE DROITE (panneau annonce) ========
     with col_right:
-        render_right_panel(df_map[col_ref].iloc[0] if not df_map.empty else None,df,col_ref,col_addr,col_city,col_gmaps,col_date_pub)
+        render_right_panel(
+            st.session_state["selected_ref"],
+            df,
+            DETAIL_COLUMNS, # Liste des colonnes de G à AH
+            COL_REF,
+            COL_ADDR_FULL,
+            COL_GMAPS,
+            COL_VILLE,
+        )
 
-if __name__=="__main__":
+
+# -------------------------------------------------
+# LANCEMENT DE L'APPLICATION
+# -------------------------------------------------
+
+if __name__ == "__main__":
     main()
