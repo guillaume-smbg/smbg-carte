@@ -3,7 +3,7 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
-import streamlit.components.v1 as components # NOUVEAU: Importation pour l'injection HTML
+# Remarque : on n'importe plus streamlit.components.v1
 
 # --- 0. Configuration et Initialisation ---
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
@@ -18,13 +18,10 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- CSS / HTML pour le volet flottant avec transition ---
-# Note : Le CSS est maintenant injecté directement dans le composant HTML
-# pour une meilleure isolation, mais nous gardons cette section pour la clarté.
-# L'injection finale se fera via components.html
-CUSTOM_CSS_AND_PANEL_STRUCTURE = """
+# --- CSS / HTML pour le volet flottant avec transition (CRITICAL FIX: Z-index) ---
+CUSTOM_CSS = """
 <style>
-/* Style global pour la transition du panneau de détails */
+/* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */
 .details-panel {
     position: fixed;
     top: 0;
@@ -32,28 +29,31 @@ CUSTOM_CSS_AND_PANEL_STRUCTURE = """
     width: 300px; 
     height: 100vh;
     background-color: white; 
-    z-index: 999; 
+    z-index: 1000; /* Z-INDEX ÉLEVÉ POUR S'ASSURER QU'IL EST AU DESSUS DE TOUT */
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
     transition: transform 0.4s ease-in-out; 
-    /* Point important: Le panneau doit être complètement hors-écran par défaut si fermé */
 }
+
+/* 2. Classe pour l'état FERMÉ (caché) */
 .details-panel-closed {
     transform: translateX(100%);
 }
+
+/* 3. Classe pour l'état OUVERT (visible) */
 .details-panel-open {
     transform: translateX(0);
 }
-/* Empêcher l'injection de code HTML du panneau dans le corps principal de Streamlit */
-body {
-    overflow: hidden; 
+
+/* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
+.css-hxt7xp { 
+    z-index: 1000 !important; 
 }
 </style>
 """
-
-# Injection du CSS global (pour le panneau principal)
-st.markdown(CUSTOM_CSS_AND_PANEL_STRUCTURE, unsafe_allow_html=True) 
+# On injecte le CSS dès le début
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
 # --- Fonction utilitaire de formatage ---
@@ -79,14 +79,17 @@ def format_value(value, unit=""):
         
         # Arrondit à 2 décimales si nécessaire
         if num_value != round(num_value, 2):
-            val_str = f"{num_value:.2f}"
+            val_str = f"{num_value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        else:
+            # Ajoute un séparateur de milliers simple (non standard mais améliore la lisibilité)
+            val_str = f"{num_value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
             
         # Ajoute l'unité si elle n'est pas déjà présente
         if unit and not val_str.lower().endswith(unit.lower().strip()):
             return f"{val_str} {unit}"
             
     except (ValueError, TypeError):
-        # La valeur n'est pas un simple nombre (ex: "300 €/m² = 73 500 €", "36 à 265 m²")
+        # La valeur n'est pas un simple nombre 
         pass
         
     return val_str
@@ -205,10 +208,11 @@ else:
     st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
-# --- 4. Panneau de Détails Droit (Injection via components.html) ---
+# --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
 
-# Construction du contenu HTML interne
-html_content_inner = ""
+html_content = f"""
+<div class="details-panel {panel_class}">
+"""
 
 if show_details:
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean]
@@ -222,7 +226,7 @@ if show_details:
             display_title_ref = selected_ref_clean
             
         # --- Entête ---
-        html_content_inner += f"""
+        html_content += f"""
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3>
             <hr style="border: 1px solid #ccc; margin: 5px 0;">
             <h4 style="color: #0072B2;">Réf. : {display_title_ref}</h4>
@@ -233,24 +237,24 @@ if show_details:
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
         
-        html_content_inner += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse complète</p>'
+        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse complète</p>'
         adresse_str = str(adresse).strip()
         code_ville_str = f"{code_postal} - {ville}".strip()
         
-        html_content_inner += f'<p style="margin: 0; font-size: 14px;">'
+        html_content += f'<p style="margin: 0; font-size: 14px;">'
         if adresse_str not in ('N/A', 'nan', ''):
-             html_content_inner += f'{adresse_str}<br>'
+             html_content += f'{adresse_str}<br>'
         
         if code_ville_str not in ('N/A - N/A', 'nan - nan', '-'):
-             html_content_inner += f'{code_ville_str}'
+             html_content += f'{code_ville_str}'
         
-        html_content_inner += '</p>'
+        html_content += '</p>'
 
 
-        html_content_inner += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
+        html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">'
         
         # --- LOGIQUE D'AFFICHAGE DES INFORMATIONS DÉTAILLÉES (G à AH) ---
-        html_content_inner += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
+        html_content += '<p style="font-weight: bold; margin-bottom: 10px;">Informations Détaillées:</p>'
         
         # Colonnes à exclure (déjà traitées ou non pertinentes pour l'affichage général)
         cols_to_exclude = [
@@ -280,7 +284,7 @@ if show_details:
                 formatted_value = format_value(value, unit=unit)
                 
                 # Affichage des paires Nom : Valeur
-                html_content_inner += f'''
+                html_content += f'''
                 <div style="margin-bottom: 8px;">
                     <span style="font-weight: bold; color: #555; font-size: 14px;">{col_name} :</span> 
                     <span style="font-size: 14px;">{formatted_value}</span>
@@ -290,7 +294,7 @@ if show_details:
         # --- Lien Google Maps (en bas du volet) ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
-             html_content_inner += f'''
+             html_content += f'''
              <hr style="border: 1px solid #eee; margin: 20px 0;">
              <a href="{lien_maps}" target="_blank" style="text-decoration: none;">
                 <button style="background-color: #4CAF50; color: white; border: none; padding: 10px 0px; text-align: center; text-decoration: none; display: block; font-size: 14px; margin-top: 10px; cursor: pointer; border-radius: 4px; width: 100%;">
@@ -300,26 +304,20 @@ if show_details:
              '''
         
     else:
-        html_content_inner += "<p>❌ Erreur: Référence non trouvée.</p>"
+        html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
+        
+else:
+    # Message par défaut quand aucun lot n'est sélectionné
+    html_content += """
+    <p style="font-weight: bold; margin-top: 10px; color: #0072B2;">
+        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici.
+    </p>
+    """
 
-# --- Injection Finale du Composant HTML ---
 
-# On injecte le tout dans un composant HTML Streamlit
-# Note: Nous définissons une hauteur de 0 et une clé, car nous voulons uniquement que 
-# le CSS et le HTML flottant soient exécutés, le contenu étant positionné en dehors
-# du flux normal de l'application.
+# Fermeture de la div flottante (FIN du panneau)
+html_content += '</div>' 
 
-# Pour éviter l'affichage dans le corps principal, nous utilisons un espace réservé.
-# Le CSS global (au début du script) gère le positionnement fixe.
-components.html(
-    f"""
-    {html_content_inner}
-    """,
-    height=0, # Hauteur minimale car le panneau est positionné en 'fixed'
-    width=0,
-    scrolling=False 
-)
-
-# Message dans le corps principal si aucun détail n'est affiché
-if not show_details and not data_df.empty:
-    st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
+# Injection du panneau de détails flottant
+# Important : Cette injection doit se faire après l'injection de la carte pour des raisons de flux Streamlit
+st.markdown(html_content, unsafe_allow_html=True)
