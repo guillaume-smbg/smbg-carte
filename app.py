@@ -55,7 +55,7 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- FIN CSS / HTML ---
 
-# --- Fonction utilitaire de formatage ---
+# --- Fonction utilitaire de formatage (utilisée uniquement par le panneau de droite) ---
 def format_value(value, unit=""):
     """
     Formate la valeur: 
@@ -208,7 +208,7 @@ else:
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) ---
-# NOTE: Le problème d'affichage du code persiste, mais la structure est maintenue.
+# Le code du panneau de droite est laissé tel quel en attendant la résolution du problème de rendu HTML.
 
 html_content = f"""
 <div class="details-panel {panel_class}">
@@ -337,16 +337,73 @@ if show_details:
         else:
             display_df = selected_row_df
             
-        # Transposition du DataFrame pour afficher les données verticalement (plus lisible)
-        # On renomme l'index pour que la colonne des noms de champs s'appelle "Champ"
+        # Transposition du DataFrame
         transposed_df = display_df.T.reset_index()
         transposed_df.columns = ['Champ', 'Valeur']
         
-        # Affichage du tableau (une ligne / champ par ligne)
+        # --- LOGIQUE D'ARRONDI ET DE FORMATAGE MONÉTAIRE ---
+        
+        # 1. Identifier les colonnes qui contiennent des valeurs monétaires
+        # Nous allons nous baser sur les noms de colonnes qui contiennent ces mots-clés
+        money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix']
+        
+        # Colonnes à formater
+        cols_to_format = [col for col in display_df.columns if any(keyword.lower() in col.lower() for keyword in money_keywords)]
+        
+        # 2. Créer un dictionnaire de formatage pour les valeurs monétaires
+        # Format : Pas de décimales, séparateur de milliers et suffixe €
+        format_dict = {col: "€{:,.0f}" for col in cols_to_format}
+        
+        # Appliquer le formatage au DataFrame original (avant transposition)
+        # Note: on utilise st.data_editor pour une meilleure interactivité de style
+        styled_df = display_df.style.format(format_dict, na_rep='N/A')
+        
+        # Pour afficher le DataFrame stylisé transposé :
+        # Malheureusement, st.dataframe() de Streamlit n'affiche pas directement un DataFrame stylisé transposé de manière élégante.
+        # La solution la plus simple est de formater uniquement la colonne "Valeur" du DataFrame transposé pour les lignes monétaires.
+        
+        
+        # --- Nouvelle approche de formatage après transposition (plus complexe mais nécessaire pour l'affichage vertical) ---
+        
+        def format_monetary_value(row):
+            """Applique le formatage uniquement si le Champ est monétaire."""
+            champ = row['Champ']
+            value = row['Valeur']
+            
+            # Vérifie si le champ est monétaire et si la valeur est numérique
+            is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords)
+            
+            if is_money_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
+                try:
+                    # Formatage en euros sans décimales
+                    return f"€{float(value):,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                except (ValueError, TypeError):
+                    return value # Retourne la valeur non modifiée si ce n'est pas un nombre
+            
+            # Si le champ est une surface (pour l'arrondi)
+            is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile'])
+            if is_surface_col and pd.api.types.is_numeric_dtype(pd.Series(value)):
+                 try:
+                    return f"{float(value):,.0f} m²".replace(",", "X").replace(".", ",").replace("X", ".")
+                 except (ValueError, TypeError):
+                    return value
+                    
+            # Si le champ est Latitude/Longitude, on les arrondit
+            if champ in ['Latitude', 'Longitude'] and pd.api.types.is_numeric_dtype(pd.Series(value)):
+                 try:
+                    return f"{float(value):.4f}"
+                 except (ValueError, TypeError):
+                    return value
+
+            return value
+        
+        # Appliquer la fonction de formatage à la colonne 'Valeur'
+        transposed_df['Valeur'] = transposed_df.apply(format_monetary_value, axis=1)
+        
+        # Affichage du tableau formaté
         st.dataframe(transposed_df, hide_index=True, use_container_width=True)
+        
     else:
         st.warning(f"Référence **{selected_ref_clean}** introuvable dans les données.")
 else:
     st.info("Cliquez sur un marqueur sur la carte pour afficher l'annonce complète ici.")
-
-# --- FIN DU CODE ---
