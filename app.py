@@ -17,25 +17,40 @@ if 'last_clicked_coords' not in st.session_state:
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
 
-# --- CSS / HTML pour le volet flottant à droite ---
+# --- CSS / HTML pour le volet flottant avec transition ---
 CUSTOM_CSS = """
 <style>
-/* Cette règle fixe le panneau de détails à droite, au-dessus de la carte. */
+/* 1. La classe de base : définit l'apparence, la position FIXE et la TRANSITION */
 .details-panel {
     position: fixed;
-    top: 0; /* Aligné en haut */
-    right: 0; /* Aligné à droite */
+    top: 0;
+    right: 0; /* Position par défaut (ouverte), sera ajustée par transform */
     width: 300px; /* Largeur du panneau de détails */
     height: 100vh;
     background-color: white; 
-    z-index: 999; /* Très haut pour être au-dessus de tous les éléments */
+    z-index: 999; 
     padding: 15px;
     box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
     overflow-y: auto; 
+    
+    /* PROPRIÉTÉ CLÉ : Ajoute la transition au mouvement (transform) */
+    transition: transform 0.4s ease-in-out; 
+}
+
+/* 2. Classe pour l'état FERMÉ (caché) */
+/* Translate le panneau de 100% de sa largeur (300px) vers la droite, hors écran */
+.details-panel-closed {
+    transform: translateX(100%);
+}
+
+/* 3. Classe pour l'état OUVERT (visible) */
+/* Le panneau est à sa position normale (translateX(0)) */
+.details-panel-open {
+    transform: translateX(0);
 }
 
 /* Ajustement pour que le st.sidebar (Contrôles Gauche) soit bien visible */
-.css-hxt7xp { /* Cible le st.sidebar de Streamlit */
+.css-hxt7xp { 
     z-index: 1000 !important; 
 }
 </style>
@@ -47,7 +62,6 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- Fonction de Chargement des Données (Cache Réactivé) ---
 @st.cache_data
 def load_data(file_path):
-    # ... (fonction load_data inchangée) ...
     try:
         df = pd.read_excel(file_path, dtype={REF_COL: str})
         
@@ -73,13 +87,16 @@ data_df, error_message = load_data(EXCEL_FILE_PATH)
 
 # --- 1. Préparation des variables de mise en page ---
 
-# Nettoyage de la référence pour la vérification
 selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None
 if selected_ref_clean == 'None':
     selected_ref_clean = None
     st.session_state['selected_ref'] = None 
 
+# show_details reste la variable pivot
 show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty
+
+# Détermine la classe CSS à utiliser pour le panneau
+panel_class = "details-panel-open" if show_details else "details-panel-closed"
 
 
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) ---
@@ -90,7 +107,6 @@ with st.sidebar:
     st.info(f"Lots chargés: **{len(data_df)}**")
     
     if show_details:
-        # st.rerun() est utilisé ici
         if st.button("Masquer les détails", key="hide_left", use_container_width=True):
             st.session_state['selected_ref'] = None
             st.rerun() 
@@ -103,7 +119,6 @@ with st.sidebar:
         st.warning("Le DataFrame est vide.")
 
 # --- 3. Zone de la Carte (Corps Principal) ---
-# La carte prendra maintenant toute la place restante du corps principal (colonne de gauche non incluse)
 
 MAP_HEIGHT = 800 
 st.header("Carte des Lots Immobiliers")
@@ -136,25 +151,41 @@ if not data_df.empty:
         clicked_coords = map_output["last_clicked"]
         current_coords = (clicked_coords['lat'], clicked_coords['lng'])
         
+        # Vérifie si le clic est éloigné des pins (logique approximative pour "clic sur la carte")
+        # NOTE : Cette logique n'est pas fiable à 100% car le clic retourne toujours les coordonnées.
+        # Nous allons nous fier à la distance par rapport au pin le plus proche.
+        data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
+        closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
+        min_distance_sq = data_df['distance_sq'].min()
+        
+        # Si la distance est grande (seuil à ajuster selon la densité des pins)
+        DISTANCE_THRESHOLD = 0.0005 # Seuil arbitraire (doit être affiné)
+
         if current_coords != st.session_state['last_clicked_coords']:
             st.session_state['last_clicked_coords'] = current_coords
             
-            # Recherche du lot le plus proche 
-            data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2
-            closest_row = data_df.loc[data_df['distance_sq'].idxmin()]
-            
-            new_ref = closest_row[REF_COL]
-            
-            if new_ref != st.session_state['selected_ref']:
-                st.session_state['selected_ref'] = new_ref
-                # On ne rafraîchit que si la référence change pour afficher/masquer le panneau
-                st.rerun() 
+            if min_distance_sq > DISTANCE_THRESHOLD:
+                # Clic loin du pin le plus proche -> Masquer le volet
+                if st.session_state['selected_ref'] is not None:
+                     st.session_state['selected_ref'] = None
+                     st.rerun()
+            else:
+                # Clic proche d'un pin -> Afficher les détails
+                new_ref = closest_row[REF_COL]
+                if new_ref != st.session_state['selected_ref']:
+                    st.session_state['selected_ref'] = new_ref
+                    st.rerun()
              
 else:
     st.info("⚠️ Le DataFrame est vide ou les coordonnées sont manquantes.")
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant) ---
+
+# Le panneau est injecté à chaque fois, mais sa classe CSS est soit 'open' soit 'closed'
+html_content = f"""
+<div class="details-panel {panel_class}">
+"""
 
 if show_details:
     # Récupération des données sélectionnées
@@ -168,15 +199,14 @@ if show_details:
         except ValueError:
             display_title_ref = selected_ref_clean
             
-        # Début de la construction du contenu HTML/CSS
-        html_content = f"""
-        <div class="details-panel">
+        # Construction du contenu HTML pour les détails
+        
+        html_content += f"""
             <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3>
             <hr style="border: 1px solid #ccc; margin: 5px 0;">
             <h4 style="color: #0072B2;">Réf. : {display_title_ref}</h4>
         """
         
-        # --- Contenu des informations clés ---
         html_content += '<div style="background-color: #f7f7f7; padding: 10px; border-radius: 5px; margin-bottom: 10px;">'
         html_content += '<p style="font-weight: bold; margin: 5px 0;">Informations clés:</p>'
         
@@ -192,9 +222,8 @@ if show_details:
             if valeur_str not in ('N/A', 'nan', '', '€', 'm²', 'None', 'None €', 'None m²'):
                  html_content += f'<div style="margin-bottom: 5px;"><span style="font-weight: bold; color: #555;">{nom} :</span> {valeur}</div>'
                  
-        html_content += '</div>' # Fin div informations clés
+        html_content += '</div>' 
         
-        # --- Adresse ---
         adresse = selected_data.get('Adresse', 'N/A')
         code_postal = selected_data.get('Code Postal', '')
         ville = selected_data.get('Ville', '')
@@ -205,7 +234,6 @@ if show_details:
         else:
              html_content += f'<p style="margin: 0;">Adresse non renseignée.</p>'
              
-        # --- Lien Google Maps ---
         lien_maps = selected_data.get('Lien Google Maps', None)
         if lien_maps and pd.notna(lien_maps) and str(lien_maps).lower().strip() not in ('nan', 'n/a', 'none', ''):
              html_content += f'''
@@ -216,13 +244,14 @@ if show_details:
             </a>
              '''
         
-        # Fermeture de la div flottante
-        html_content += '</div>' 
+        # Ajout du bouton "Masquer" dans le panneau
+        # (Nous n'utiliserons pas ce bouton car le clic ailleurs sur la carte le fait déjà)
         
-        # Injection du panneau de détails flottant
-        st.markdown(html_content, unsafe_allow_html=True)
+    else:
+        html_content += "<p>❌ Erreur: Référence non trouvée.</p>"
 
-else:
-    # Message dans le corps principal si aucun détail n'est affiché
-    if not show_details and not data_df.empty:
-        st.info("Cliquez sur un marqueur sur la carte pour afficher ses détails dans le volet de droite.")
+# Fermeture de la div flottante (que le contenu soit vide ou non)
+html_content += '</div>' 
+
+# Injection du panneau de détails flottant (ouvert ou fermé)
+st.markdown(html_content, unsafe_allow_html=True)
