@@ -12,7 +12,7 @@ COLOR_SMBG_BLUE = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42" 
 
 # Utilisation de l'URL brute pour charger le logo
-# J'ai mis à jour le chemin pour utiliser la référence du fichier uploaded: "Logo bleu crop.jpg"
+# Assurez-vous que cette URL pointe vers votre logo
 LOGO_FILE_PATH_URL = 'https://raw.githubusercontent.com/guillaume-smbg/smbg-carte/main/assets/Logo%20bleu%20crop.png'
 # Pour le test, conservez l'emplacement de votre fichier Excel
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
@@ -331,7 +331,6 @@ filtered_df = data_df.copy()
 
 with st.sidebar: 
     # 🎨 Logo 
-    # 
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     
     st.markdown("---")
@@ -475,21 +474,25 @@ with st.sidebar:
     # 2.3.2. Loyer Annuel (Filtrage par chevauchement d'intervalle)
     if COL_LOYER_MIN in data_df.columns and COL_LOYER_MAX in data_df.columns:
         
-        # On utilise uniquement les lignes qui ont un Loyer Annuel Max > 0 pour les bornes du slider
-        df_loyer_valid = data_df[data_df[COL_LOYER_MAX] > 0]
-        
-        if not df_loyer_valid.empty:
-            min_l_total = float(df_loyer_valid[COL_LOYER_MIN].min()) 
-            max_l_total = float(df_loyer_valid[COL_LOYER_MAX].max())
+        min_l_initial = float(data_df[COL_LOYER_MIN].min()) 
+        max_l_initial = float(data_df[COL_LOYER_MAX].max())
 
+        if max_l_initial > 0: # S'il y a au moins un loyer > 0
+            
+            # La borne min du slider doit être 0 si 0 est présent, sinon la plus petite valeur > 0
+            min_l_display = 0.0 
+            if min_l_initial > 0 :
+                 min_l_display = min_l_initial
+            
+            # Initialisation du slider (avec 0 si nécessaire)
             if 'loyer_range' not in st.session_state:
-                 st.session_state['loyer_range'] = (min_l_total, max_l_total)
+                 st.session_state['loyer_range'] = (min_l_display, max_l_initial)
 
-            if min_l_total < max_l_total:
+            if min_l_display < max_l_initial:
                 loyer_range = st.slider(
                     f'Loyer Annuel disponible (€)',
-                    min_value=min_l_total,
-                    max_value=max_l_total,
+                    min_value=min_l_display,
+                    max_value=max_l_initial,
                     value=st.session_state['loyer_range'],
                     step=100.0,
                     format="%.0f €",
@@ -499,11 +502,22 @@ with st.sidebar:
                 filtre_min_user = loyer_range[0]
                 filtre_max_user = loyer_range[1]
                 
-                # Condition pour l'inclusion : (Lot_Min <= Filtre_Max) ET (Lot_Max >= Filtre_Min)
-                filtered_df = filtered_df[
-                    (filtered_df[COL_LOYER_MIN] <= filtre_max_user) & 
-                    (filtered_df[COL_LOYER_MAX] >= filtre_min_user)
-                ]
+                # Condition d'inclusion par défaut (filtre min est à 0) : 
+                is_at_min_default = (filtre_min_user <= min_l_display)
+                
+                if is_at_min_default:
+                    # Inclure tous les lots qui chevauchent la plage, y compris ceux dont la borne est 0
+                    filtered_df = filtered_df[
+                        (filtered_df[COL_LOYER_MIN] <= filtre_max_user) & 
+                        (filtered_df[COL_LOYER_MAX] >= filtre_min_user)
+                    ]
+                else:
+                    # Si l'utilisateur a monté le filtre min, les loyers à 0 sont exclus
+                     filtered_df = filtered_df[
+                        (filtered_df[COL_LOYER_MIN] <= filtre_max_user) & 
+                        (filtered_df[COL_LOYER_MAX] >= filtre_min_user) &
+                        (filtered_df[COL_LOYER_MAX] > 0)
+                    ]
                 
     st.markdown("---")
     st.info(f"Annonces filtrées : **{len(filtered_df)}**")
@@ -530,27 +544,15 @@ if not df_to_map.empty:
         lat = row['Latitude'] 
         lon = row['Longitude'] 
         
-        # Popup text: Afficher l'intervalle de loyer et de surface
-        surface_min_disp = format_value(row[COL_SURFACE_MIN], unit="m²")
-        surface_max_disp = format_value(row[COL_SURFACE_MAX], unit="m²")
-        
-        loyer_min_disp = format_value(row[COL_LOYER_MIN], unit="€")
-        loyer_max_disp = format_value(row[COL_LOYER_MAX], unit="€")
-
-        popup_html = f"""
-        <b>Réf. {row[REF_COL]}</b><br>
-        Surface : {surface_min_disp} à {surface_max_disp}<br>
-        Loyer Annuel : {loyer_min_disp} à {loyer_max_disp}
-        """
-
+        # --- CORRECTION : Suppression du popup ---
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
             color=COLOR_SMBG_BLUE, 
             fill=True, 
             fill_color=COLOR_SMBG_BLUE, 
-            fill_opacity=0.8,
-            popup=folium.Popup(popup_html, max_width=300)
+            fill_opacity=0.8
+            # Pas de popup pour forcer l'utilisation du volet de droite
         ).add_to(m) 
 
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
