@@ -4,7 +4,6 @@ import folium
 from streamlit_folium import st_folium 
 import numpy as np 
 from folium.features import DivIcon
-from pathlib import Path 
 
 # --- FICHIERS ET COULEURS ---
 COLOR_SMBG_BLUE = "#05263D" 
@@ -24,16 +23,16 @@ st.set_page_config(layout="wide", page_title="Carte Interactive")
 # --- Fonction de réinitialisation ---
 def reset_all_filters():
     """Réinitialise tous les états de session liés aux filtres."""
-    for key in st.session_state.keys():
+    # Efface l'état de tous les widgets de filtre (cases à cocher et sliders)
+    for key in list(st.session_state.keys()): # Utiliser list() pour éviter une erreur lors de la modification du dictionnaire
         if key.startswith('reg_') or key.startswith('dept_') or \
            key.startswith('emp_') or key.startswith('type_') or \
            key.startswith('rest_') or key == 'surface_range' or key == 'loyer_range':
             del st.session_state[key]
-    # Les sliders n'utilisent pas de session state clé/valeur par défaut, 
-    # mais nous les réinitialisons en relançant l'application pour effacer toutes les sélections.
+    # Réinitialise les variables de clic et de référence sélectionnée
     st.session_state['selected_ref'] = None
     st.session_state['last_clicked_coords'] = (0, 0)
-    # L'appel à st.rerun est effectué après l'appel à reset_all_filters
+    # Rerun est appelé après l'appel
     
 # Initialisation de la session state (inchangée)
 if 'selected_ref' not in st.session_state: 
@@ -79,7 +78,6 @@ CUSTOM_CSS = f"""
 }}
 
 /* 🎨 Style des Headers de la Barre Latérale en cuivré SMBG */
-/* Note: st.header/st.subheader sont en h2/h3. st.markdown en p */
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{
     color: {COLOR_SMBG_COPPER} !important;
 }}
@@ -91,6 +89,33 @@ CUSTOM_CSS = f"""
 [data-testid="stSidebar"] label span strong {{
     color: white !important; /* pour les labels en gras */
 }}
+
+/* ❌ Suppression de la flèche (bouton hamburger) pour maximiser l'espace */
+/* Note: Ceci cache le bouton, mais le volet reste rétractable par l'utilisateur */
+[data-testid="stSidebar"] > div:first-child > div:first-child {{
+    display: none !important;
+    padding-top: 0 !important; /* Supprime le padding pour remonter le logo */
+}}
+
+/* ⬆️ Remonte le contenu (le reste du volet) */
+[data-testid="stSidebar"] > div:first-child {{
+    padding-top: 5px !important; 
+}}
+
+/* 🎨 Style du Bouton Réinitialiser (Forcé en style SMBG Cuivré) */
+/* Cible le bouton généré par st.button qui a un style "secondary" par défaut */
+button[kind="secondary"] {{
+    background-color: {COLOR_SMBG_COPPER} !important;
+    border-color: {COLOR_SMBG_COPPER} !important;
+    color: white !important;
+}}
+/* S'assurer que le style est maintenu au survol (hover) */
+button[kind="secondary"]:hover {{
+    background-color: #A36437 !important; /* Cuivré légèrement plus foncé */
+    border-color: #A36437 !important;
+    color: white !important;
+}}
+
 
 /* Styles du Bouton Google Maps (inchangé) */
 .maps-button {{ 
@@ -127,6 +152,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -------------------------------------------------------------------------
 
 # --- Fonctions utilitaires (inchangées) --- 
+
 def format_value(value, unit=""): 
     # ... (Fonction inchangée)
     val_str = str(value).strip() 
@@ -230,12 +256,11 @@ with st.sidebar:
     # 🎨 Logo remonté tout en haut
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     
-    # 📝 Renommé et sans titre de section
     st.markdown("---")
     st.info(f"Annonces chargées : **{len(data_df)}**") 
     
-    # ➕ Bouton de réinitialisation des filtres
-    if st.button("Réinitialiser tous les filtres", use_container_width=True):
+    # ➕ Bouton de réinitialisation des filtres (Style forcé par CSS)
+    if st.button("Réinitialiser tous les filtres", use_container_width=True, type="secondary"):
         reset_all_filters()
         st.rerun()
 
@@ -287,6 +312,7 @@ with st.sidebar:
             combined_geo_indices = region_indices.union(dept_indices)
             
             if not combined_geo_indices.empty:
+                # Applique l'intersection avec le DF actuel pour maintenir les filtres déjà appliqués
                 filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
             else:
                 filtered_df = filtered_df.iloc[0:0] 
@@ -314,7 +340,7 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=key_emp):
                 selected_charac_map[COL_EMPLACEMENT].append(option)
     
-    # 2.2.2. Typologie du bien (Vérification et Correction de l'affichage)
+    # 2.2.2. Typologie du bien
     if COL_TYPOLOGIE in data_df.columns:
         st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
@@ -340,10 +366,8 @@ with st.sidebar:
                 
     # LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :
     for col, selected_options in selected_charac_map.items():
-        if selected_options:
-            # Note: Si filtered_df est déjà vide (à cause des filtres régionaux), on ne filtre pas sur un DF vide
-            if not filtered_df.empty:
-                 filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
+        if selected_options and not filtered_df.empty:
+            filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
 
     st.markdown("---")
 
