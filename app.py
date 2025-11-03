@@ -31,19 +31,18 @@ COL_RESTAURATION = 'Restauration'
 COL_SURFACE = 'Surface GLA' 
 COL_LOYER = 'Loyer annuel' 
 
-# --- CSS / HTML pour le volet flottant --- 
-# La couleur du panneau est maintenant le bleu SMBG
+# --- CSS / HTML pour le volet flottant et la barre latérale --- 
 CUSTOM_CSS = f""" 
 <style> 
-/* Styles du Panneau de Détails */
+/* Style du Panneau de Détails Droit (inchangé et déjà en bleu SMBG) */
 .details-panel {{ 
     position: fixed; 
     top: 0; 
     right: 0; 
     width: 300px; 
     height: 100vh; 
-    background-color: {COLOR_SMBG_BLUE}; /* 🎨 Couleur corrigée */
-    color: white; /* Texte en blanc pour le fond bleu */
+    background-color: {COLOR_SMBG_BLUE};
+    color: white;
     z-index: 1000; 
     padding: 15px; 
     box-shadow: -5px 0 15px rgba(0,0,0,0.4); 
@@ -51,15 +50,25 @@ CUSTOM_CSS = f"""
     transition: transform 0.4s ease-in-out; 
 }} 
 
-.details-panel-closed {{ 
-    transform: translateX(100%); 
-}} 
+/* 🎨 Correction : Style de la Barre Latérale Gauche (st.sidebar) */
+[data-testid="stSidebar"] {{
+    background-color: {COLOR_SMBG_BLUE};
+    color: white; /* Couleur du texte par défaut */
+}}
 
-.details-panel-open {{ 
-    transform: translateX(0); 
-}} 
+/* Correction : Style des Headers de la Barre Latérale en cuivré SMBG */
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4, [data-testid="stSidebar"] p strong {{
+    color: {COLOR_SMBG_COPPER} !important;
+}}
+/* Correction : Couleur des cases à cocher */
+[data-testid="stSidebar"] label span {{
+    color: white !important;
+}}
+[data-testid="stSidebar"] label span strong {{
+    color: white !important;
+}}
 
-/* Styles du Bouton Google Maps */
+/* Styles du Bouton Google Maps (inchangé) */
 .maps-button {{ 
     width: 100%; 
     padding: 10px; 
@@ -74,14 +83,14 @@ CUSTOM_CSS = f"""
     display: block;
 }} 
 
-/* Styles pour le tableau détaillé dans le volet */
+/* Styles pour le tableau détaillé dans le volet (inchangé) */
 .details-panel table {{
     width: 100%; 
     border-collapse: collapse; 
     font-size: 13px;
 }}
 .details-panel tr {{
-    border-bottom: 1px solid #304f65; /* Ligne de séparation claire */
+    border-bottom: 1px solid #304f65; 
 }}
 .details-panel td {{
     padding: 5px 0;
@@ -94,8 +103,9 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -------------------------------------------------------------------------
 
 # --- Fonctions utilitaires de formatage (inchangées) --- 
+
 def format_value(value, unit=""): 
-    """ Formate la valeur pour le panneau de droite. """ 
+    # ... (Fonction inchangée)
     val_str = str(value).strip() 
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
@@ -117,7 +127,7 @@ def format_value(value, unit=""):
     return val_str 
 
 def format_monetary_value(row): 
-    """Applique le formatage monétaire/surface pour le st.dataframe.""" 
+    # ... (Fonction inchangée)
     money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix', 'm²'] 
     champ = row['Champ'] 
     value = row['Valeur'] 
@@ -136,7 +146,7 @@ def format_monetary_value(row):
             pass 
     is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
     if is_surface_col and is_numeric: 
-        try: 
+        try:
             float_value = float(value) 
             formatted_value = f"{float_value:,.0f}" 
             formatted_value = formatted_value.replace(",", " ") 
@@ -152,6 +162,7 @@ def format_monetary_value(row):
 
 @st.cache_data 
 def load_data(file_path): 
+    # ... (Fonction inchangée)
     try: 
         df = pd.read_excel(file_path, dtype={REF_COL: str}) 
         df.columns = df.columns.str.strip() 
@@ -194,13 +205,16 @@ filtered_df = data_df.copy()
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
+    # 🎨 Ajout du logo en haut du volet de gauche
+    st.image(LOGO_FILE_PATH, use_column_width=True) 
     st.header("⚙️ Contrôles et Filtres") 
     
     st.info(f"Lots chargés : **{len(data_df)}**") 
     st.markdown("---") 
 
-    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Logique de filtre à l'intérieur) ---
+    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT ---
     
+    selected_regions = []
     selected_depts = []
     
     if COL_REGION in data_df.columns and COL_DEPARTEMENT in data_df.columns:
@@ -208,13 +222,9 @@ with st.sidebar:
         
         regions = data_df[COL_REGION].dropna().unique()
         
-        # Liste pour stocker les régions et départements cochés
-        selected_regions = []
-        
         for region in sorted(regions):
             region_key = f"reg_{region}"
             
-            # Checkbox Région: AUCUNE cochée par défaut (value=False)
             is_region_selected = st.checkbox(label=f"**{region}**", key=region_key, value=False)
             
             if is_region_selected:
@@ -226,88 +236,82 @@ with st.sidebar:
                     
                     col_indent, col_dept = st.columns([0.1, 0.9])
                     with col_dept:
-                        # Checkbox Département: AUCUNE cochée par défaut (value=False)
                         if st.checkbox(label=f"{dept}", key=dept_key, value=False):
                             selected_depts.append(dept)
 
         # ----------------------------------------------------------------------
-        # **LOGIQUE DE FILTRAGE RÉGION/DÉPARTEMENT :**
+        # **LOGIQUE DE FILTRAGE GÉOGRAPHIQUE CORRIGÉE (Union des Régions/Départements) :**
         # ----------------------------------------------------------------------
-        if selected_depts:
-            # PRIORITÉ 1: Si des départements sont sélectionnés, on filtre sur eux.
-            filtered_df = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].copy()
-        elif selected_regions:
-            # PRIORITÉ 2: Si seulement des régions sont sélectionnées (et aucun département), on filtre sur les régions.
-            filtered_df = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].copy()
-        # Sinon (état initial), filtered_df reste le DataFrame complet.
+        if selected_regions or selected_depts:
+            # Indices des lots des régions sélectionnées
+            region_indices = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].index
+            
+            # Indices des lots des départements sélectionnés
+            dept_indices = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].index
+            
+            # Union des indices : on prend tous les lots des régions ET des départements sélectionnés
+            combined_geo_indices = region_indices.union(dept_indices)
+            
+            if not combined_geo_indices.empty:
+                filtered_df = filtered_df.loc[combined_geo_indices].copy()
+            else:
+                # Si l'utilisateur a coché, mais qu'il n'y a aucun lot correspondant, on vide le DF
+                filtered_df = filtered_df.iloc[0:0] 
+        # Sinon (si rien n'est coché), filtered_df reste le DataFrame complet.
     
     st.markdown("---")
 
     # --- 2.2. FILTRES 2: CASES À COCHER INDIVIDUELLES (Emplacement, Typologie, Restauration) ---
     st.subheader("Caractéristiques du Lot")
     
-    selected_charac = []
-    
-    # Emplacement, Typologie et Restauration sont maintenant des cases à cocher.
-    # On itère sur les options disponibles dans le DF de base pour l'affichage initial, 
-    # mais on applique le filtre sur le filtered_df actuel.
+    # Dictionnaire pour stocker les options sélectionnées par colonne
+    selected_charac_map = {
+        COL_EMPLACEMENT: [],
+        COL_TYPOLOGIE: [],
+        COL_RESTAURATION: []
+    }
     
     # 2.2.1. Emplacement
     if COL_EMPLACEMENT in data_df.columns:
-        st.markdown('**Emplacement :**')
+        st.markdown(f'**{COL_EMPLACEMENT} :**')
         options_emp = data_df[COL_EMPLACEMENT].dropna().unique()
         for option in sorted(options_emp):
             if st.checkbox(f'{option}', key=f'emp_{option}', value=False):
-                selected_charac.append(option)
+                selected_charac_map[COL_EMPLACEMENT].append(option)
     
-    # 2.2.2. Typologie du bien
+    # 2.2.2. Typologie du bien (Réintroduit et corrigé)
     if COL_TYPOLOGIE in data_df.columns:
-        st.markdown('**Typologie du bien :**')
+        st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
         for option in sorted(options_type):
             if st.checkbox(f'{option}', key=f'type_{option}', value=False):
-                selected_charac.append(option)
+                selected_charac_map[COL_TYPOLOGIE].append(option)
 
     # 2.2.3. Restauration
     if COL_RESTAURATION in data_df.columns:
-        st.markdown('**Restauration :**')
+        st.markdown(f'**{COL_RESTAURATION} :**')
         options_restauration = data_df[COL_RESTAURATION].dropna().unique()
         for option in sorted(options_restauration):
             if st.checkbox(f'{option}', key=f'rest_{option}', value=False):
-                selected_charac.append(option)
+                selected_charac_map[COL_RESTAURATION].append(option)
                 
     # ----------------------------------------------------------------------
-    # **LOGIQUE DE FILTRAGE CASES À COCHER :**
-    # Si des cases sont cochées, on filtre le filtered_df sur les lots qui correspondent à AU MOINS un critère de chaque colonne
-    # (Logique OR au sein d'une catégorie, et AND entre les catégories)
+    # **LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :**
+    # ----------------------------------------------------------------------
     
-    if selected_charac:
-        # Création des filtres par colonne pour éviter de mélanger des options d'Emplacement et de Typologie
-        
-        filter_emp = data_df[data_df[COL_EMPLACEMENT].isin(selected_charac)]
-        filter_type = data_df[data_df[COL_TYPOLOGIE].isin(selected_charac)]
-        filter_rest = data_df[data_df[COL_RESTAURATION].isin(selected_charac)]
-        
-        # Concaténation des index uniques des lignes sélectionnées (Logique OR au sein des catégories de cases à cocher)
-        combined_indices = pd.Index([])
-        if not filter_emp.empty: combined_indices = combined_indices.union(filter_emp.index)
-        if not filter_type.empty: combined_indices = combined_indices.union(filter_type.index)
-        if not filter_rest.empty: combined_indices = combined_indices.union(filter_rest.index)
-        
-        # Le filtrage final est la jointure des index précédents avec le filtered_df (Logique AND)
-        if not combined_indices.empty:
-             filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_indices)]
-        
-        # Si rien n'est sélectionné, filtered_df est inchangé, mais si l'utilisateur coche puis décoche, on revient à l'état précédent.
-        # Comme nous utilisons des checkboxes individuelles, le filtre ne s'applique que si selected_charac n'est pas vide.
-        
+    for col, selected_options in selected_charac_map.items():
+        if selected_options:
+            # On applique un filtre AND pour chaque catégorie non vide.
+            # Logique OR au sein de chaque catégorie (ex: Typologie = A OU B)
+            filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
+
 
     st.markdown("---")
 
     # --- 2.3. FILTRES 3: SLIDERS (Surface GLA et Loyer) ---
     st.subheader("Valeurs Numériques")
     
-    # 2.3.1. Surface GLA 
+    # 2.3.1. Surface GLA (Les sliders sont réintroduits)
     if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
         df_surface = data_df[data_df[COL_SURFACE].notna() & pd.to_numeric(data_df[COL_SURFACE], errors='coerce').notna()]
         
@@ -316,7 +320,6 @@ with st.sidebar:
             max_s_total = float(df_surface[COL_SURFACE].max()) if not df_surface.empty else 1000.0
             
             if min_s_total < max_s_total:
-                # Valeur par défaut : toute la plage (état zéro)
                 surface_range = st.slider(
                     f'{COL_SURFACE} (m²)',
                     min_value=min_s_total,
@@ -325,7 +328,6 @@ with st.sidebar:
                     step=10.0,
                     format="%.0f m²"
                 )
-                # Application du filtre
                 filtered_df = filtered_df[
                     (filtered_df[COL_SURFACE].fillna(min_s_total) >= surface_range[0]) & 
                     (filtered_df[COL_SURFACE].fillna(max_s_total) <= surface_range[1])
@@ -340,7 +342,6 @@ with st.sidebar:
             max_l_total = float(df_loyer[COL_LOYER].max()) if not df_loyer.empty else 100000.0
 
             if min_l_total < max_l_total:
-                # Valeur par défaut : toute la plage (état zéro)
                 loyer_range = st.slider(
                     f'{COL_LOYER} (€)',
                     min_value=min_l_total,
@@ -349,17 +350,14 @@ with st.sidebar:
                     step=100.0,
                     format="%.0f €"
                 )
-                # Application du filtre
                 filtered_df = filtered_df[
                     (filtered_df[COL_LOYER].fillna(min_l_total) >= loyer_range[0]) & 
                     (filtered_df[COL_LOYER].fillna(max_l_total) <= loyer_range[1])
                 ]
 
     st.markdown("---")
-    # Affichage du nombre de lots après filtrage
     st.info(f"Lots filtrés : **{len(filtered_df)}**")
     
-    # Bouton Masquer/Afficher les détails
     if show_details: 
         if st.button("Masquer les détails", key="hide_left", use_container_width=True): 
             st.session_state['selected_ref'] = None 
@@ -448,7 +446,6 @@ if show_details:
         except ValueError: 
             display_title_ref = selected_ref_clean 
             
-        # Couleur du texte H4 en Cuivre SMBG pour le contraste
         html_content += f""" 
             <h3 style="color:white; margin-top: 0;">🔍 Détails du Lot</h3> 
             <hr style="border: 1px solid #ccc; margin: 5px 0;"> 
