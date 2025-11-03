@@ -5,9 +5,11 @@ from streamlit_folium import st_folium
 import numpy as np 
 from folium.features import DivIcon
 
-# --- COULEURS SMBG ---
+# --- FICHIERS ET COULEURS ---
 COLOR_SMBG_BLUE = "#05263D" 
 COLOR_SMBG_COPPER = "#C67B42" 
+LOGO_FILE_PATH = 'Logo bleu crop.jpg' 
+EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 # --------------------
 
 # --- 0. Configuration et Initialisation --- 
@@ -19,11 +21,8 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state: 
     st.session_state['last_clicked_coords'] = (0, 0) 
 
-# --- Chemin d'accès du fichier et Colonnes Essentielles --- 
-EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
+# --- Colonnes Essentielles --- 
 REF_COL = 'Référence annonce' 
-
-# --- NOMS DE COLONNES UTILISÉS POUR LES FILTRES ---
 COL_REGION = 'Région'
 COL_DEPARTEMENT = 'Département'
 COL_EMPLACEMENT = 'Emplacement'
@@ -33,6 +32,7 @@ COL_SURFACE = 'Surface GLA'
 COL_LOYER = 'Loyer annuel' 
 
 # --- CSS / HTML pour le volet flottant --- 
+# La couleur du panneau est maintenant le bleu SMBG
 CUSTOM_CSS = f""" 
 <style> 
 /* Styles du Panneau de Détails */
@@ -42,10 +42,11 @@ CUSTOM_CSS = f"""
     right: 0; 
     width: 300px; 
     height: 100vh; 
-    background-color: white; 
+    background-color: {COLOR_SMBG_BLUE}; /* 🎨 Couleur corrigée */
+    color: white; /* Texte en blanc pour le fond bleu */
     z-index: 1000; 
     padding: 15px; 
-    box-shadow: -5px 0 15px rgba(0,0,0,0.2); 
+    box-shadow: -5px 0 15px rgba(0,0,0,0.4); 
     overflow-y: auto; 
     transition: transform 0.4s ease-in-out; 
 }} 
@@ -80,7 +81,7 @@ CUSTOM_CSS = f"""
     font-size: 13px;
 }}
 .details-panel tr {{
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #304f65; /* Ligne de séparation claire */
 }}
 .details-panel td {{
     padding: 5px 0;
@@ -93,20 +94,15 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -------------------------------------------------------------------------
 
 # --- Fonctions utilitaires de formatage (inchangées) --- 
-
 def format_value(value, unit=""): 
     """ Formate la valeur pour le panneau de droite. """ 
     val_str = str(value).strip() 
-    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
-        
     if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str): 
         return val_str 
-    
     try: 
         num_value = float(value) 
-        
         if num_value != round(num_value, 2): 
             val_str = f"{num_value:,.2f}" 
             val_str = val_str.replace(',', ' ') 
@@ -114,30 +110,22 @@ def format_value(value, unit=""):
         else: 
             val_str = f"{num_value:,.0f}" 
             val_str = val_str.replace(',', ' ') 
-            
         if unit and not val_str.lower().endswith(unit.lower().strip()): 
             return f"{val_str} {unit}" 
-            
     except (ValueError, TypeError): 
         pass 
-        
     return val_str 
 
 def format_monetary_value(row): 
     """Applique le formatage monétaire/surface pour le st.dataframe.""" 
     money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix', 'm²'] 
-    
     champ = row['Champ'] 
     value = row['Valeur'] 
-    
     is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
     val_str = str(value).strip()
-    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
-
     is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
-    
     if is_money_col and is_numeric: 
         try: 
             float_value = float(value) 
@@ -146,7 +134,6 @@ def format_monetary_value(row):
             return f"€{formatted_value}" 
         except (ValueError, TypeError): 
             pass 
-    
     is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
     if is_surface_col and is_numeric: 
         try: 
@@ -156,13 +143,11 @@ def format_monetary_value(row):
             return f"{formatted_value} m²" 
         except (ValueError, TypeError): 
             pass 
-            
     if champ in ['Latitude', 'Longitude'] and is_numeric: 
         try: 
             return f"{float(value):.4f}" 
         except (ValueError, TypeError): 
             pass 
-
     return val_str 
 
 @st.cache_data 
@@ -171,14 +156,11 @@ def load_data(file_path):
         df = pd.read_excel(file_path, dtype={REF_COL: str}) 
         df.columns = df.columns.str.strip() 
         
-        # S'assurer que les colonnes de filtrage existent pour éviter des erreurs
         required_cols = [REF_COL, 'Latitude', 'Longitude', COL_REGION, COL_DEPARTEMENT, COL_EMPLACEMENT, COL_TYPOLOGIE, COL_RESTAURATION, COL_SURFACE, COL_LOYER]
         for col in required_cols:
             if col not in df.columns:
-                # Ajout de colonnes manquantes comme NaN pour permettre au script de continuer
                 df[col] = np.nan 
 
-        # Conversion et nettoyage des coordonnées et référence
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce') 
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce') 
         df[REF_COL] = df[REF_COL].astype(str).str.strip() 
@@ -186,7 +168,6 @@ def load_data(file_path):
         df[REF_COL] = df[REF_COL].str.zfill(5) 
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True) 
         
-        # Préparation des colonnes pour les filtres si elles existent
         if COL_RESTAURATION in df.columns:
             df[COL_RESTAURATION] = df[COL_RESTAURATION].fillna('Non renseigné').astype(str)
 
@@ -218,7 +199,7 @@ with st.sidebar:
     st.info(f"Lots chargés : **{len(data_df)}**") 
     st.markdown("---") 
 
-    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT ---
+    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Logique de filtre à l'intérieur) ---
     
     selected_depts = []
     
@@ -227,67 +208,106 @@ with st.sidebar:
         
         regions = data_df[COL_REGION].dropna().unique()
         
+        # Liste pour stocker les régions et départements cochés
+        selected_regions = []
+        
         for region in sorted(regions):
             region_key = f"reg_{region}"
             
             # Checkbox Région: AUCUNE cochée par défaut (value=False)
             is_region_selected = st.checkbox(label=f"**{region}**", key=region_key, value=False)
             
-            # Affichage des Départements UNIQUEMENT si la région est sélectionnée
             if is_region_selected:
+                selected_regions.append(region)
                 departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
                 
                 for dept in sorted(departements):
                     dept_key = f"dept_{dept}"
                     
-                    # Utilisation de st.columns pour l'indentation visuelle
                     col_indent, col_dept = st.columns([0.1, 0.9])
                     with col_dept:
                         # Checkbox Département: AUCUNE cochée par défaut (value=False)
                         if st.checkbox(label=f"{dept}", key=dept_key, value=False):
                             selected_depts.append(dept)
 
-        # Application du filtre Région/Département
+        # ----------------------------------------------------------------------
+        # **LOGIQUE DE FILTRAGE RÉGION/DÉPARTEMENT :**
+        # ----------------------------------------------------------------------
         if selected_depts:
-            # Si des départements sont sélectionnés, on filtre le DataFrame
+            # PRIORITÉ 1: Si des départements sont sélectionnés, on filtre sur eux.
             filtered_df = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].copy()
-        # Sinon, filtered_df reste le DataFrame complet (état initial)
+        elif selected_regions:
+            # PRIORITÉ 2: Si seulement des régions sont sélectionnées (et aucun département), on filtre sur les régions.
+            filtered_df = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].copy()
+        # Sinon (état initial), filtered_df reste le DataFrame complet.
     
     st.markdown("---")
 
-    # --- 2.2. FILTRES 2: MULTISELECTS (Emplacement, Typologie, Restauration) ---
+    # --- 2.2. FILTRES 2: CASES À COCHER INDIVIDUELLES (Emplacement, Typologie, Restauration) ---
     st.subheader("Caractéristiques du Lot")
+    
+    selected_charac = []
+    
+    # Emplacement, Typologie et Restauration sont maintenant des cases à cocher.
+    # On itère sur les options disponibles dans le DF de base pour l'affichage initial, 
+    # mais on applique le filtre sur le filtered_df actuel.
     
     # 2.2.1. Emplacement
     if COL_EMPLACEMENT in data_df.columns:
+        st.markdown('**Emplacement :**')
         options_emp = data_df[COL_EMPLACEMENT].dropna().unique()
-        # Par défaut, toutes les options sont sélectionnées
-        selected_emp = st.multiselect('Emplacement', options_emp, default=list(options_emp))
-        if selected_emp:
-            filtered_df = filtered_df[filtered_df[COL_EMPLACEMENT].isin(selected_emp)]
-            
+        for option in sorted(options_emp):
+            if st.checkbox(f'{option}', key=f'emp_{option}', value=False):
+                selected_charac.append(option)
+    
     # 2.2.2. Typologie du bien
     if COL_TYPOLOGIE in data_df.columns:
+        st.markdown('**Typologie du bien :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
-        # Par défaut, toutes les options sont sélectionnées
-        selected_type = st.multiselect('Typologie du bien', options_type, default=list(options_type))
-        if selected_type:
-            filtered_df = filtered_df[filtered_df[COL_TYPOLOGIE].isin(selected_type)]
-            
+        for option in sorted(options_type):
+            if st.checkbox(f'{option}', key=f'type_{option}', value=False):
+                selected_charac.append(option)
+
     # 2.2.3. Restauration
     if COL_RESTAURATION in data_df.columns:
+        st.markdown('**Restauration :**')
         options_restauration = data_df[COL_RESTAURATION].dropna().unique()
-        # Par défaut, toutes les options sont sélectionnées
-        selected_rest = st.multiselect('Restauration', options_restauration, default=list(options_restauration))
-        if selected_rest:
-            filtered_df = filtered_df[filtered_df[COL_RESTAURATION].isin(selected_rest)]
+        for option in sorted(options_restauration):
+            if st.checkbox(f'{option}', key=f'rest_{option}', value=False):
+                selected_charac.append(option)
+                
+    # ----------------------------------------------------------------------
+    # **LOGIQUE DE FILTRAGE CASES À COCHER :**
+    # Si des cases sont cochées, on filtre le filtered_df sur les lots qui correspondent à AU MOINS un critère de chaque colonne
+    # (Logique OR au sein d'une catégorie, et AND entre les catégories)
+    
+    if selected_charac:
+        # Création des filtres par colonne pour éviter de mélanger des options d'Emplacement et de Typologie
+        
+        filter_emp = data_df[data_df[COL_EMPLACEMENT].isin(selected_charac)]
+        filter_type = data_df[data_df[COL_TYPOLOGIE].isin(selected_charac)]
+        filter_rest = data_df[data_df[COL_RESTAURATION].isin(selected_charac)]
+        
+        # Concaténation des index uniques des lignes sélectionnées (Logique OR au sein des catégories de cases à cocher)
+        combined_indices = pd.Index([])
+        if not filter_emp.empty: combined_indices = combined_indices.union(filter_emp.index)
+        if not filter_type.empty: combined_indices = combined_indices.union(filter_type.index)
+        if not filter_rest.empty: combined_indices = combined_indices.union(filter_rest.index)
+        
+        # Le filtrage final est la jointure des index précédents avec le filtered_df (Logique AND)
+        if not combined_indices.empty:
+             filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_indices)]
+        
+        # Si rien n'est sélectionné, filtered_df est inchangé, mais si l'utilisateur coche puis décoche, on revient à l'état précédent.
+        # Comme nous utilisons des checkboxes individuelles, le filtre ne s'applique que si selected_charac n'est pas vide.
+        
 
     st.markdown("---")
 
     # --- 2.3. FILTRES 3: SLIDERS (Surface GLA et Loyer) ---
     st.subheader("Valeurs Numériques")
     
-    # 2.3.1. Surface GLA (Colonne N)
+    # 2.3.1. Surface GLA 
     if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
         df_surface = data_df[data_df[COL_SURFACE].notna() & pd.to_numeric(data_df[COL_SURFACE], errors='coerce').notna()]
         
@@ -311,7 +331,7 @@ with st.sidebar:
                     (filtered_df[COL_SURFACE].fillna(max_s_total) <= surface_range[1])
                 ]
 
-    # 2.3.2. Loyer Annuel (Colonne R)
+    # 2.3.2. Loyer Annuel 
     if COL_LOYER in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_LOYER]):
         df_loyer = data_df[data_df[COL_LOYER].notna() & pd.to_numeric(data_df[COL_LOYER], errors='coerce').notna()]
         
@@ -359,13 +379,11 @@ st.header("Carte des Lots Immobiliers")
 df_to_map = filtered_df
 
 if not df_to_map.empty: 
-    # Recalculer le centre uniquement sur les données filtrées
     centre_lat = df_to_map['Latitude'].mean() 
     centre_lon = df_to_map['Longitude'].mean() 
     
     m = folium.Map(location=[centre_lat, centre_lon], zoom_start=6, control_scale=True) 
 
-    # --- Création des marqueurs --- 
     for index, row in df_to_map.iterrows(): 
         lat = row['Latitude'] 
         lon = row['Longitude'] 
@@ -379,15 +397,13 @@ if not df_to_map.empty:
             fill_opacity=0.8, 
         ).add_to(m) 
 
-    # Affichage et capture des événements de clic 
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
-    # --- Logique de détection de clic --- 
+    # --- Logique de détection de clic (inchangée) --- 
     if map_output and map_output.get("last_clicked"): 
         clicked_coords = map_output["last_clicked"] 
         current_coords = (clicked_coords['lat'], clicked_coords['lng']) 
         
-        # Utiliser le DataFrame ORIGINAL pour trouver le point le plus proche
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2 
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()] 
         min_distance_sq = data_df['distance_sq'].min() 
@@ -416,6 +432,10 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
+# Ajout du logo en haut du panneau
+html_content += f"""
+    <img src="{LOGO_FILE_PATH}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
+"""
 
 if show_details: 
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean] 
@@ -428,10 +448,11 @@ if show_details:
         except ValueError: 
             display_title_ref = selected_ref_clean 
             
+        # Couleur du texte H4 en Cuivre SMBG pour le contraste
         html_content += f""" 
-            <h3 style="color:#303030; margin-top: 0;">🔍 Détails du Lot</h3> 
+            <h3 style="color:white; margin-top: 0;">🔍 Détails du Lot</h3> 
             <hr style="border: 1px solid #ccc; margin: 5px 0;"> 
-            <h4 style="color: {COLOR_SMBG_BLUE};">Réf. : {display_title_ref}</h4> 
+            <h4 style="color: {COLOR_SMBG_COPPER};">Réf. : {display_title_ref}</h4> 
         """ 
         
         lien_maps = selected_data.get('Lien Google Maps', None) 
@@ -449,11 +470,11 @@ if show_details:
         code_postal = selected_data.get('Code Postal', '') 
         ville = selected_data.get('Ville', '') 
         
-        html_content += f'<p style="font-weight: bold; color: #555; margin: 10px 0 5px;">📍 Adresse complète</p>' 
+        html_content += f'<p style="font-weight: bold; color: {COLOR_SMBG_COPPER}; margin: 10px 0 5px;">📍 Adresse complète</p>' 
         adresse_str = str(adresse).strip() 
         code_ville_str = f"{code_postal} - {ville}".strip() 
         
-        html_content += f'<p style="margin: 0; font-size: 14px;">' 
+        html_content += f'<p style="margin: 0; font-size: 14px; color: white;">' 
         if adresse_str not in ('N/A', 'nan', ''): 
              html_content += f'{adresse_str}<br>' 
         
@@ -465,7 +486,7 @@ if show_details:
 
         html_content += '<hr style="border: 1px solid #eee; margin: 15px 0;">' 
         
-        html_content += '<h5 style="color: #303030; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
+        html_content += '<h5 style="color: white; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
         
         cols_to_exclude = [REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 'Valeur BP', 'Contact', 'Page Web']
         all_cols = data_df.columns.tolist()
@@ -486,20 +507,20 @@ if show_details:
             formatted_value = format_value(valeur, unit=unit)
             
             html_content += f"""
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="font-weight: bold; color: {COLOR_SMBG_BLUE}; padding: 5px 0; max-width: 50%; overflow-wrap: break-word;">{champ}</td>
-                <td style="text-align: right; padding: 5px 0; max-width: 50%; overflow-wrap: break-word;">{formatted_value}</td>
+            <tr style="border-bottom: 1px solid #304f65;">
+                <td style="font-weight: bold; color: {COLOR_SMBG_COPPER}; padding: 5px 0; max-width: 50%; overflow-wrap: break-word;">{champ}</td>
+                <td style="text-align: right; padding: 5px 0; max-width: 50%; overflow-wrap: break-word; color: white;">{formatted_value}</td>
             </tr>
             """
             
         html_content += "</table>"
         
     else: 
-        html_content += "<p>❌ Erreur: Référence non trouvée.</p>" 
+        html_content += "<p style='color: white;'>❌ Erreur: Référence non trouvée.</p>" 
         
 else: 
     html_content += f""" 
-    <p style="font-weight: bold; margin-top: 10px; color: {COLOR_SMBG_BLUE};"> 
+    <p style="font-weight: bold; margin-top: 10px; color: {COLOR_SMBG_COPPER};"> 
         Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici. 
     </p> 
     """ 
