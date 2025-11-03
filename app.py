@@ -567,7 +567,7 @@ folium.Marker(
 map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
     # --- Logique de détection de clic --- 
-    if map_output and map_output.get("last_clicked"):
+  if map_output and map_output.get("last_clicked"):
         clicked_coords = map_output["last_clicked"] 
         current_coords = (clicked_coords['lat'], clicked_coords['lng']) 
         
