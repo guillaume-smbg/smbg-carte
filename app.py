@@ -100,11 +100,14 @@ CUSTOM_CSS = f"""
     /* Augmente le padding supérieur pour faire descendre le logo */
     padding-top: 30px !important; 
 }}
-/* ⬆️ Remonte le bloc en dessous du logo (espace réduit) */
-.stImage {{
-    /* Réduit la marge pour que le contenu remonte */
+/* ⬆️ Remonte le bloc en dessous du logo (espace réduit) et supprime les contrôles Streamlit sur l'image */
+.sidebar-logo-container img {{
+    /* Règle l'espace juste pour l'image (en remplacement de .stImage) */
     margin-bottom: 5px !important; 
-    margin-top: 0px !important; 
+}}
+/* ❌ Supprime les contrôles par défaut (bouton agrandir) de Streamlit sur les images */
+.stImage > button {{
+    display: none !important;
 }}
 
 /* 🎨 Style du Bouton Réinitialiser (Forcé en style SMBG Cuivré) */
@@ -234,6 +237,12 @@ def load_data(file_path):
         if COL_RESTAURATION in df.columns:
             df[COL_RESTAURATION] = df[COL_RESTAURATION].fillna('Non renseigné').astype(str)
 
+        # Conversion numérique propre pour les filtres sliders
+        if COL_SURFACE in df.columns:
+            df[COL_SURFACE] = pd.to_numeric(df[COL_SURFACE], errors='coerce').fillna(0)
+        if COL_LOYER in df.columns:
+            df[COL_LOYER] = pd.to_numeric(df[COL_LOYER], errors='coerce').fillna(0)
+
         return df, None 
     except Exception as e: 
         return pd.DataFrame(), f"❌ Erreur critique lors du chargement: {e}" 
@@ -256,10 +265,12 @@ filtered_df = data_df.copy()
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
-    # 🎨 Logo avec marge ajustée via CSS
+    # 🎨 Logo avec div pour supprimer le bouton agrandir
+    st.markdown('<div class="sidebar-logo-container">', unsafe_allow_html=True)
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # ⬆️ Remonte le bloc d'action
+    st.markdown("---")
     st.info(f"Annonces chargées : **{len(data_df)}**") 
     
     # ➕ Bouton de réinitialisation des filtres (Style forcé par CSS)
@@ -294,31 +305,30 @@ with st.sidebar:
                 # Affichage des départements uniquement si la région est cochée
                 departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
                 
+                # --- CORRECTION DE LA LOGIQUE DÉPARTEMENT ---
                 for dept in sorted(departements):
                     dept_key = f"dept_{dept}"
                     
-                    # Réactivation du filtre Département
                     if dept_key not in st.session_state:
                          st.session_state[dept_key] = False
                     
                     col_indent, col_dept = st.columns([0.1, 0.9])
                     with col_dept:
-                        if st.checkbox(label=f"{dept}", key=dept_key):
-                            selected_depts.append(dept)
+                        # La valeur retournée est True/False, stockée dans session_state
+                        if st.session_state[dept_key]:
+                             selected_depts.append(dept) # Si déjà coché, on l'ajoute à la liste de filtrage
 
         # LOGIQUE DE FILTRAGE GÉOGRAPHIQUE (Union des Régions/Départements) :
         if selected_regions or selected_depts:
-            region_indices = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].index
-            dept_indices = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].index
+            # Filtre par région ET/OU département
+            region_indices = data_df[data_df[COL_REGION].isin(selected_regions)].index
+            dept_indices = data_df[data_df[COL_DEPARTEMENT].isin(selected_depts)].index
             
-            # Union (OR) des indices pour afficher tous les lots des régions cochées ET des départements cochés
             combined_geo_indices = region_indices.union(dept_indices)
             
-            if not combined_geo_indices.empty:
-                # Applique l'intersection avec le DF actuel pour maintenir les filtres déjà appliqués
-                filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
-            else:
-                filtered_df = filtered_df.iloc[0:0] 
+            # Application du filtre à filtered_df
+            filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
+
     
     st.markdown("---")
 
@@ -379,14 +389,14 @@ with st.sidebar:
     
     # 2.3.1. Surface GLA 
     if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
-        df_surface = data_df[data_df[COL_SURFACE].notna() & pd.to_numeric(data_df[COL_SURFACE], errors='coerce').notna()]
+        df_surface = data_df[data_df[COL_SURFACE] > 0] # Filtre les 0/NaN pour les min/max
         
         if not df_surface.empty:
-            min_s_total = float(df_surface[COL_SURFACE].min()) if not df_surface.empty else 0.0
-            max_s_total = float(df_surface[COL_SURFACE].max()) if not df_surface.empty else 1000.0
+            min_s_total = float(df_surface[COL_SURFACE].min())
+            max_s_total = float(df_surface[COL_SURFACE].max())
             
             # Clé de session pour maintenir l'état du slider
-            if 'surface_range' not in st.session_state:
+            if 'surface_range' not in st.session_state or st.session_state['surface_range'] == (0.0, 0.0):
                  st.session_state['surface_range'] = (min_s_total, max_s_total)
 
             if min_s_total < max_s_total:
@@ -399,21 +409,22 @@ with st.sidebar:
                     format="%.0f m²",
                     key='surface_range'
                 )
+                # Applique le filtre (y compris sur les 0 si la borne min est à 0)
                 filtered_df = filtered_df[
-                    (filtered_df[COL_SURFACE].fillna(min_s_total) >= surface_range[0]) & 
-                    (filtered_df[COL_SURFACE].fillna(max_s_total) <= surface_range[1])
+                    (filtered_df[COL_SURFACE] >= surface_range[0]) & 
+                    (filtered_df[COL_SURFACE] <= surface_range[1])
                 ]
 
     # 2.3.2. Loyer Annuel 
     if COL_LOYER in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_LOYER]):
-        df_loyer = data_df[data_df[COL_LOYER].notna() & pd.to_numeric(data_df[COL_LOYER], errors='coerce').notna()]
+        df_loyer = data_df[data_df[COL_LOYER] > 0] # Filtre les 0/NaN pour les min/max
         
         if not df_loyer.empty:
-            min_l_total = float(df_loyer[COL_LOYER].min()) if not df_loyer.empty else 0.0
-            max_l_total = float(df_loyer[COL_LOYER].max()) if not df_loyer.empty else 100000.0
+            min_l_total = float(df_loyer[COL_LOYER].min())
+            max_l_total = float(df_loyer[COL_LOYER].max())
 
             # Clé de session pour maintenir l'état du slider
-            if 'loyer_range' not in st.session_state:
+            if 'loyer_range' not in st.session_state or st.session_state['loyer_range'] == (0.0, 0.0):
                  st.session_state['loyer_range'] = (min_l_total, max_l_total)
 
             if min_l_total < max_l_total:
@@ -426,9 +437,10 @@ with st.sidebar:
                     format="%.0f €",
                     key='loyer_range'
                 )
+                # Applique le filtre (y compris sur les 0 si la borne min est à 0)
                 filtered_df = filtered_df[
-                    (filtered_df[COL_LOYER].fillna(min_l_total) >= loyer_range[0]) & 
-                    (filtered_df[COL_LOYER].fillna(max_l_total) <= loyer_range[1])
+                    (filtered_df[COL_LOYER] >= loyer_range[0]) & 
+                    (filtered_df[COL_LOYER] <= loyer_range[1])
                 ]
 
     st.markdown("---")
@@ -443,7 +455,6 @@ with st.sidebar:
 # --- 3. Zone de la Carte (Corps Principal) --- 
 
 MAP_HEIGHT = 800 
-# Titre de la carte supprimé
 
 df_to_map = filtered_df
 
@@ -502,10 +513,7 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
-# Le logo est toujours affiché
-html_content += f"""
-    <img src="{LOGO_FILE_PATH_URL}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
-"""
+# Le logo a été supprimé ici
 if show_details: 
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean] 
     
@@ -587,7 +595,7 @@ if show_details:
         html_content += "<p style='color: white;'>❌ Erreur: Référence non trouvée.</p>" 
         
 else: 
-    # Le panneau est vide par défaut (sauf le logo)
+    # Le panneau est vide par défaut
     pass 
 
 html_content += '</div>' 
