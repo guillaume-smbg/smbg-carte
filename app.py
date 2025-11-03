@@ -23,16 +23,13 @@ st.set_page_config(layout="wide", page_title="Carte Interactive")
 # --- Fonction de réinitialisation ---
 def reset_all_filters():
     """Réinitialise tous les états de session liés aux filtres."""
-    # Efface l'état de tous les widgets de filtre (cases à cocher et sliders)
-    for key in list(st.session_state.keys()): # Utiliser list() pour éviter une erreur lors de la modification du dictionnaire
+    for key in list(st.session_state.keys()):
         if key.startswith('reg_') or key.startswith('dept_') or \
            key.startswith('emp_') or key.startswith('type_') or \
            key.startswith('rest_') or key == 'surface_range' or key == 'loyer_range':
             del st.session_state[key]
-    # Réinitialise les variables de clic et de référence sélectionnée
     st.session_state['selected_ref'] = None
     st.session_state['last_clicked_coords'] = (0, 0)
-    # Rerun est appelé après l'appel
     
 # Initialisation de la session state (inchangée)
 if 'selected_ref' not in st.session_state: 
@@ -42,17 +39,18 @@ if 'last_clicked_coords' not in st.session_state:
 if RESET_KEY not in st.session_state:
     st.session_state[RESET_KEY] = False
 
-# --- Colonnes Essentielles (inchangées) --- 
+# --- Colonnes Essentielles (Mise à jour COL_TYPOLOGIE = 'Typologie') --- 
 REF_COL = 'Référence annonce' 
 COL_REGION = 'Région'
 COL_DEPARTEMENT = 'Département'
 COL_EMPLACEMENT = 'Emplacement'
-COL_TYPOLOGIE = 'Typologie du bien'
+COL_TYPOLOGIE = 'Typologie' # <- CORRIGÉ pour refléter le nom de la colonne J
 COL_RESTAURATION = 'Restauration'
 COL_SURFACE = 'Surface GLA' 
 COL_LOYER = 'Loyer annuel' 
+# ----------------------------------------------------------------------
 
-# --- CSS / HTML pour le volet flottant et la barre latérale --- 
+# --- CSS / HTML pour le volet flottant et la barre latérale (inchangé) --- 
 CUSTOM_CSS = f""" 
 <style> 
 /* Style du Panneau de Détails Droit (bleu SMBG) */
@@ -224,8 +222,13 @@ def load_data(file_path):
         
         required_cols = [REF_COL, 'Latitude', 'Longitude', COL_REGION, COL_DEPARTEMENT, COL_EMPLACEMENT, COL_TYPOLOGIE, COL_RESTAURATION, COL_SURFACE, COL_LOYER]
         for col in required_cols:
+            # Si le nom de colonne de travail n'est pas trouvé, on le crée avec des NaNs
             if col not in df.columns:
-                df[col] = np.nan 
+                # Exception pour 'Typologie du bien' si l'utilisateur utilisait l'ancienne colonne
+                if col == COL_TYPOLOGIE and 'Typologie du bien' in df.columns:
+                    df[COL_TYPOLOGIE] = df['Typologie du bien']
+                else:
+                    df[col] = np.nan 
 
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce') 
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce') 
@@ -293,30 +296,36 @@ with st.sidebar:
         for region in sorted(regions):
             region_key = f"reg_{region}"
             
-            # Utilisation de st.session_state pour maintenir l'état du filtre
             if region_key not in st.session_state:
                 st.session_state[region_key] = False
 
             is_region_selected = st.checkbox(label=f"**{region}**", key=region_key)
             
+            # Si la région est cochée, on l'ajoute à la liste des régions sélectionnées
             if is_region_selected:
                 selected_regions.append(region)
-                
-                # Affichage des départements uniquement si la région est cochée
-                departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
-                
-                # --- CORRECTION DE LA LOGIQUE DÉPARTEMENT ---
+            
+            # Affichage des départements si la région est cochée OU si au moins un département est déjà coché dans cette région
+            departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
+            
+            show_dept_list = is_region_selected or any(st.session_state.get(f"dept_{dept}", False) for dept in departements)
+            
+            if show_dept_list:
                 for dept in sorted(departements):
                     dept_key = f"dept_{dept}"
                     
                     if dept_key not in st.session_state:
                          st.session_state[dept_key] = False
                     
+                    # On affiche la checkbox du département
                     col_indent, col_dept = st.columns([0.1, 0.9])
                     with col_dept:
-                        # La valeur retournée est True/False, stockée dans session_state
+                        # Le checkbox est affiché et son état est géré par la session_state
+                        st.checkbox(label=f"{dept}", key=dept_key) 
+                        
+                        # Si le checkbox est coché (dans l'état de session), on l'ajoute à la liste de filtrage
                         if st.session_state[dept_key]:
-                             selected_depts.append(dept) # Si déjà coché, on l'ajoute à la liste de filtrage
+                             selected_depts.append(dept)
 
         # LOGIQUE DE FILTRAGE GÉOGRAPHIQUE (Union des Régions/Départements) :
         if selected_regions or selected_depts:
@@ -324,11 +333,15 @@ with st.sidebar:
             region_indices = data_df[data_df[COL_REGION].isin(selected_regions)].index
             dept_indices = data_df[data_df[COL_DEPARTEMENT].isin(selected_depts)].index
             
+            # Union (OR) : On prend tous les lots dans les régions sélectionnées ET tous les lots dans les départements sélectionnés
             combined_geo_indices = region_indices.union(dept_indices)
             
             # Application du filtre à filtered_df
+            # Note : On filtre `data_df` puis on croise avec `filtered_df.index` pour respecter les autres filtres
+            # Correction : filtered_df doit être filtré directement si des régions/départements sont sélectionnés.
+            # On assure que le filtre s'applique à l'état actuel de filtered_df
             filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
-
+            
     
     st.markdown("---")
 
@@ -337,7 +350,7 @@ with st.sidebar:
     
     selected_charac_map = {
         COL_EMPLACEMENT: [],
-        COL_TYPOLOGIE: [],
+        COL_TYPOLOGIE: [], # <- Utilise 'Typologie'
         COL_RESTAURATION: []
     }
     
@@ -354,7 +367,7 @@ with st.sidebar:
                 selected_charac_map[COL_EMPLACEMENT].append(option)
     
     # 2.2.2. Typologie du bien
-    if COL_TYPOLOGIE in data_df.columns:
+    if COL_TYPOLOGIE in data_df.columns: # <- Utilise 'Typologie'
         st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
         for option in sorted(options_type):
@@ -389,13 +402,12 @@ with st.sidebar:
     
     # 2.3.1. Surface GLA 
     if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
-        df_surface = data_df[data_df[COL_SURFACE] > 0] # Filtre les 0/NaN pour les min/max
+        df_surface = data_df[data_df[COL_SURFACE] > 0]
         
         if not df_surface.empty:
             min_s_total = float(df_surface[COL_SURFACE].min())
             max_s_total = float(df_surface[COL_SURFACE].max())
             
-            # Clé de session pour maintenir l'état du slider
             if 'surface_range' not in st.session_state or st.session_state['surface_range'] == (0.0, 0.0):
                  st.session_state['surface_range'] = (min_s_total, max_s_total)
 
@@ -409,7 +421,6 @@ with st.sidebar:
                     format="%.0f m²",
                     key='surface_range'
                 )
-                # Applique le filtre (y compris sur les 0 si la borne min est à 0)
                 filtered_df = filtered_df[
                     (filtered_df[COL_SURFACE] >= surface_range[0]) & 
                     (filtered_df[COL_SURFACE] <= surface_range[1])
@@ -417,13 +428,12 @@ with st.sidebar:
 
     # 2.3.2. Loyer Annuel 
     if COL_LOYER in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_LOYER]):
-        df_loyer = data_df[data_df[COL_LOYER] > 0] # Filtre les 0/NaN pour les min/max
+        df_loyer = data_df[data_df[COL_LOYER] > 0]
         
         if not df_loyer.empty:
             min_l_total = float(df_loyer[COL_LOYER].min())
             max_l_total = float(df_loyer[COL_LOYER].max())
 
-            # Clé de session pour maintenir l'état du slider
             if 'loyer_range' not in st.session_state or st.session_state['loyer_range'] == (0.0, 0.0):
                  st.session_state['loyer_range'] = (min_l_total, max_l_total)
 
@@ -437,7 +447,6 @@ with st.sidebar:
                     format="%.0f €",
                     key='loyer_range'
                 )
-                # Applique le filtre (y compris sur les 0 si la borne min est à 0)
                 filtered_df = filtered_df[
                     (filtered_df[COL_LOYER] >= loyer_range[0]) & 
                     (filtered_df[COL_LOYER] <= loyer_range[1])
@@ -477,7 +486,6 @@ if not df_to_map.empty:
             fill_opacity=0.8, 
         ).add_to(m) 
 
-    # La carte prend 100% de la largeur du conteneur principal
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
     # --- Logique de détection de clic (inchangée) --- 
@@ -513,7 +521,6 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
-# Le logo a été supprimé ici
 if show_details: 
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean] 
     
@@ -564,7 +571,13 @@ if show_details:
         
         html_content += '<h5 style="color: white; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
         
-        cols_to_exclude = [REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 'Valeur BP', 'Contact', 'Page Web']
+        # COLONNES À EXCLURE : on ajoute l'ancienne colonne Typologie du bien pour éviter la redondance
+        cols_to_exclude = [
+            REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 
+            'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 
+            'Valeur BP', 'Contact', 'Page Web', 
+            'Typologie du bien' # <- EXCLUSION de l'ancienne colonne pour éviter la redondance
+        ]
         all_cols = data_df.columns.tolist()
         
         temp_cols = [c for c in all_cols if c not in cols_to_exclude]
@@ -595,14 +608,14 @@ if show_details:
         html_content += "<p style='color: white;'>❌ Erreur: Référence non trouvée.</p>" 
         
 else: 
-    # Le panneau est vide par défaut
+    # Le panneau est vide par défaut (plus de logo)
     pass 
 
 html_content += '</div>' 
 st.markdown(html_content, unsafe_allow_html=True) 
 
 
-# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte) --- 
+# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte, inchangé) --- 
 st.markdown("---") 
 st.header("📋 Annonce du Lot Sélectionné (Tableau complet)") 
 
@@ -633,6 +646,11 @@ with dataframe_container:
                 display_df = selected_row_df 
                 
             all_cols = display_df.columns.tolist() 
+            
+            # Exclusion de l'ancienne colonne 'Typologie du bien' pour le tableau du bas aussi
+            if 'Typologie du bien' in all_cols:
+                all_cols.remove('Typologie du bien')
+                display_df = display_df[all_cols]
             
             try: 
                 adresse_index = all_cols.index('Adresse') 
