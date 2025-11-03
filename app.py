@@ -85,17 +85,21 @@ CUSTOM_CSS = f"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True) 
 # -------------------------------------------------------------------------
 
-# --- Fonctions utilitaires de formatage --- 
+# --- Fonctions utilitaires de formatage (inchangées) --- 
 
 def format_value(value, unit=""): 
     """ Formate la valeur pour le panneau de droite. """ 
     val_str = str(value).strip() 
+    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
+        
     if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str): 
         return val_str 
+    
     try: 
         num_value = float(value) 
+        
         if num_value != round(num_value, 2): 
             val_str = f"{num_value:,.2f}" 
             val_str = val_str.replace(',', ' ') 
@@ -103,22 +107,30 @@ def format_value(value, unit=""):
         else: 
             val_str = f"{num_value:,.0f}" 
             val_str = val_str.replace(',', ' ') 
+            
         if unit and not val_str.lower().endswith(unit.lower().strip()): 
             return f"{val_str} {unit}" 
+            
     except (ValueError, TypeError): 
         pass 
+        
     return val_str 
 
 def format_monetary_value(row): 
     """Applique le formatage monétaire/surface pour le st.dataframe.""" 
     money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix', 'm²'] 
+    
     champ = row['Champ'] 
     value = row['Valeur'] 
+    
     is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
     val_str = str(value).strip()
+    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
+
     is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
+    
     if is_money_col and is_numeric: 
         try: 
             float_value = float(value) 
@@ -127,6 +139,7 @@ def format_monetary_value(row):
             return f"€{formatted_value}" 
         except (ValueError, TypeError): 
             pass 
+    
     is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
     if is_surface_col and is_numeric: 
         try: 
@@ -136,11 +149,13 @@ def format_monetary_value(row):
             return f"{formatted_value} m²" 
         except (ValueError, TypeError): 
             pass 
+            
     if champ in ['Latitude', 'Longitude'] and is_numeric: 
         try: 
             return f"{float(value):.4f}" 
         except (ValueError, TypeError): 
             pass 
+
     return val_str 
 
 @st.cache_data 
@@ -178,7 +193,7 @@ if selected_ref_clean == 'None':
 show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty 
 panel_class = "details-panel-open" if show_details else "details-panel-closed" 
 
-# Déclaration du DataFrame qui sera utilisé pour la carte
+# **ÉTAT INITIAL :** Le DataFrame filtré est la copie complète du DataFrame initial.
 filtered_df = data_df.copy()
 
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
@@ -218,18 +233,20 @@ with st.sidebar:
                         if st.checkbox(label=f"{dept}", key=dept_key, value=False):
                             selected_depts.append(dept)
 
-        # Application du filtre
+        # ----------------------------------------------------------------------
+        # **LOGIQUE DE FILTRAGE MISE À JOUR :**
+        # ----------------------------------------------------------------------
         if selected_depts:
-            # On filtre le DataFrame sur les départements sélectionnés
+            # Si des départements sont sélectionnés, on filtre le DataFrame
             filtered_df = data_df[data_df[COL_DEPARTEMENT].isin(selected_depts)].copy()
-        else:
-            # Si selected_depts est vide, le DataFrame filtré doit être vide par défaut
-            filtered_df = data_df.iloc[0:0]
+        # Sinon (si selected_depts est vide, ce qui est l'état initial), filtered_df reste data_df.copy() de la ligne 128.
+        # On ne fait rien pour laisser le DataFrame complet.
             
     # --- FIN FILTRES ---
 
     st.markdown("---")
     # Affichage du nombre de lots après filtrage
+    # Si le filtered_df est le DataFrame complet, il affichera len(data_df)
     st.info(f"Lots filtrés : **{len(filtered_df)}**")
     
     # Bouton Masquer/Afficher les détails
@@ -252,7 +269,7 @@ st.header("Carte des Lots Immobiliers")
 df_to_map = filtered_df
 
 if not df_to_map.empty: 
-    # Recalculer le centre uniquement sur les données filtrées
+    # Calcul du centre sur tous les lots disponibles si filtered_df = data_df (état initial)
     centre_lat = df_to_map['Latitude'].mean() 
     centre_lon = df_to_map['Longitude'].mean() 
     
@@ -300,10 +317,10 @@ if not df_to_map.empty:
                     st.rerun() 
              
 else: 
-    st.info("⚠️ Aucun lot ne correspond aux critères de filtre. Veuillez sélectionner au moins une Région et un Département.") 
+    st.info("⚠️ Aucun lot ne correspond aux critères de filtre. Veuillez sélectionner au moins un Département.") 
 
 
-# --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) --- 
+# --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown - inchangé) --- 
 
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
@@ -359,8 +376,6 @@ if show_details:
         
         html_content += '<h5 style="color: #303030; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
         
-        # Préparation des données pour le tableau HTML
-        # Suppression des colonnes non pertinentes pour l'affichage des détails
         cols_to_exclude = [REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 'Valeur BP', 'Contact', 'Page Web']
         all_cols = data_df.columns.tolist()
         
@@ -402,7 +417,7 @@ html_content += '</div>'
 st.markdown(html_content, unsafe_allow_html=True) 
 
 
-# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte - pour l'exhaustivité) --- 
+# --- 5. Affichage de l'Annonce Sélectionnée (Sous la carte - inchangé) --- 
 st.markdown("---") 
 st.header("📋 Annonce du Lot Sélectionné (Tableau complet)") 
 
