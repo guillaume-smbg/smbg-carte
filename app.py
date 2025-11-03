@@ -3,28 +3,45 @@ import streamlit as st
 import folium 
 from streamlit_folium import st_folium 
 import numpy as np 
-# --- Import optionnel si vous utilisez le chemin local ---
-# from pathlib import Path 
+from folium.features import DivIcon
+from pathlib import Path 
 
 # --- FICHIERS ET COULEURS ---
 COLOR_SMBG_BLUE = "#05263D" 
 COLOR_SMBG_COPPER = "#C67B42" 
 
-# 🚨 CORRECTION DU CHEMIN D'ACCÈS POUR CHARGEMENT DIRECT DEPUIS UNE URL BRUTE GITHUB
-# C'est la méthode la plus fiable pour les images hébergées sur GitHub si elles ne sont pas dans le dépôt local.
-# J'utilise le PNG comme indiqué dans votre URL.
+# Utilisation de l'URL brute pour charger le logo
 LOGO_FILE_PATH_URL = 'https://raw.githubusercontent.com/guillaume-smbg/smbg-carte/main/assets/Logo%20bleu%20crop.png'
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
+
+# Clé de réinitialisation pour les filtres
+RESET_KEY = 'reset_filters'
 # --------------------
 
 # --- 0. Configuration et Initialisation --- 
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
 
+# --- Fonction de réinitialisation ---
+def reset_all_filters():
+    """Réinitialise tous les états de session liés aux filtres."""
+    for key in st.session_state.keys():
+        if key.startswith('reg_') or key.startswith('dept_') or \
+           key.startswith('emp_') or key.startswith('type_') or \
+           key.startswith('rest_') or key == 'surface_range' or key == 'loyer_range':
+            del st.session_state[key]
+    # Les sliders n'utilisent pas de session state clé/valeur par défaut, 
+    # mais nous les réinitialisons en relançant l'application pour effacer toutes les sélections.
+    st.session_state['selected_ref'] = None
+    st.session_state['last_clicked_coords'] = (0, 0)
+    # L'appel à st.rerun est effectué après l'appel à reset_all_filters
+    
 # Initialisation de la session state (inchangée)
 if 'selected_ref' not in st.session_state: 
     st.session_state['selected_ref'] = None 
 if 'last_clicked_coords' not in st.session_state: 
     st.session_state['last_clicked_coords'] = (0, 0) 
+if RESET_KEY not in st.session_state:
+    st.session_state[RESET_KEY] = False
 
 # --- Colonnes Essentielles (inchangées) --- 
 REF_COL = 'Référence annonce' 
@@ -36,10 +53,10 @@ COL_RESTAURATION = 'Restauration'
 COL_SURFACE = 'Surface GLA' 
 COL_LOYER = 'Loyer annuel' 
 
-# --- CSS / HTML pour le volet flottant et la barre latérale (inchangé) --- 
+# --- CSS / HTML pour le volet flottant et la barre latérale --- 
 CUSTOM_CSS = f""" 
 <style> 
-/* Style du Panneau de Détails Droit (inchangé et déjà en bleu SMBG) */
+/* Style du Panneau de Détails Droit (bleu SMBG) */
 .details-panel {{ 
     position: fixed; 
     top: 0; 
@@ -55,22 +72,24 @@ CUSTOM_CSS = f"""
     transition: transform 0.4s ease-in-out; 
 }} 
 
-/* 🎨 Correction : Style de la Barre Latérale Gauche (st.sidebar) */
+/* 🎨 Style de la Barre Latérale Gauche (st.sidebar) */
 [data-testid="stSidebar"] {{
     background-color: {COLOR_SMBG_BLUE};
     color: white; /* Couleur du texte par défaut */
 }}
 
-/* Correction : Style des Headers de la Barre Latérale en cuivré SMBG */
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4, [data-testid="stSidebar"] p strong {{
+/* 🎨 Style des Headers de la Barre Latérale en cuivré SMBG */
+/* Note: st.header/st.subheader sont en h2/h3. st.markdown en p */
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{
     color: {COLOR_SMBG_COPPER} !important;
 }}
-/* Correction : Couleur des cases à cocher */
+
+/* 🎨 Couleur des cases à cocher */
 [data-testid="stSidebar"] label span {{
     color: white !important;
 }}
 [data-testid="stSidebar"] label span strong {{
-    color: white !important;
+    color: white !important; /* pour les labels en gras */
 }}
 
 /* Styles du Bouton Google Maps (inchangé) */
@@ -108,7 +127,6 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -------------------------------------------------------------------------
 
 # --- Fonctions utilitaires (inchangées) --- 
-
 def format_value(value, unit=""): 
     # ... (Fonction inchangée)
     val_str = str(value).strip() 
@@ -209,14 +227,21 @@ filtered_df = data_df.copy()
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
-    # 🎨 Utilisation de l'URL brute pour charger le logo
+    # 🎨 Logo remonté tout en haut
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
-    st.header("⚙️ Contrôles et Filtres") 
     
-    st.info(f"Lots chargés : **{len(data_df)}**") 
+    # 📝 Renommé et sans titre de section
+    st.markdown("---")
+    st.info(f"Annonces chargées : **{len(data_df)}**") 
+    
+    # ➕ Bouton de réinitialisation des filtres
+    if st.button("Réinitialiser tous les filtres", use_container_width=True):
+        reset_all_filters()
+        st.rerun()
+
     st.markdown("---") 
 
-    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Logique d'union inchangée) ---
+    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Logique d'union) ---
     
     selected_regions = []
     selected_depts = []
@@ -229,18 +254,28 @@ with st.sidebar:
         for region in sorted(regions):
             region_key = f"reg_{region}"
             
-            is_region_selected = st.checkbox(label=f"**{region}**", key=region_key, value=False)
+            # Utilisation de st.session_state pour maintenir l'état du filtre
+            if region_key not in st.session_state:
+                st.session_state[region_key] = False
+
+            is_region_selected = st.checkbox(label=f"**{region}**", key=region_key)
             
             if is_region_selected:
                 selected_regions.append(region)
+                
+                # Affichage des départements uniquement si la région est cochée
                 departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
                 
                 for dept in sorted(departements):
                     dept_key = f"dept_{dept}"
                     
+                    # Réactivation du filtre Département
+                    if dept_key not in st.session_state:
+                         st.session_state[dept_key] = False
+                    
                     col_indent, col_dept = st.columns([0.1, 0.9])
                     with col_dept:
-                        if st.checkbox(label=f"{dept}", key=dept_key, value=False):
+                        if st.checkbox(label=f"{dept}", key=dept_key):
                             selected_depts.append(dept)
 
         # LOGIQUE DE FILTRAGE GÉOGRAPHIQUE (Union des Régions/Départements) :
@@ -248,10 +283,11 @@ with st.sidebar:
             region_indices = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].index
             dept_indices = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].index
             
+            # Union (OR) des indices pour afficher tous les lots des régions cochées ET des départements cochés
             combined_geo_indices = region_indices.union(dept_indices)
             
             if not combined_geo_indices.empty:
-                filtered_df = filtered_df.loc[combined_geo_indices].copy()
+                filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
             else:
                 filtered_df = filtered_df.iloc[0:0] 
     
@@ -271,15 +307,23 @@ with st.sidebar:
         st.markdown(f'**{COL_EMPLACEMENT} :**')
         options_emp = data_df[COL_EMPLACEMENT].dropna().unique()
         for option in sorted(options_emp):
-            if st.checkbox(f'{option}', key=f'emp_{option}', value=False):
+            key_emp = f'emp_{option}'
+            if key_emp not in st.session_state:
+                st.session_state[key_emp] = False
+            
+            if st.checkbox(f'{option}', key=key_emp):
                 selected_charac_map[COL_EMPLACEMENT].append(option)
     
-    # 2.2.2. Typologie du bien
+    # 2.2.2. Typologie du bien (Vérification et Correction de l'affichage)
     if COL_TYPOLOGIE in data_df.columns:
         st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
         for option in sorted(options_type):
-            if st.checkbox(f'{option}', key=f'type_{option}', value=False):
+            key_type = f'type_{option}'
+            if key_type not in st.session_state:
+                st.session_state[key_type] = False
+                
+            if st.checkbox(f'{option}', key=key_type):
                 selected_charac_map[COL_TYPOLOGIE].append(option)
 
     # 2.2.3. Restauration
@@ -287,13 +331,19 @@ with st.sidebar:
         st.markdown(f'**{COL_RESTAURATION} :**')
         options_restauration = data_df[COL_RESTAURATION].dropna().unique()
         for option in sorted(options_restauration):
-            if st.checkbox(f'{option}', key=f'rest_{option}', value=False):
+            key_rest = f'rest_{option}'
+            if key_rest not in st.session_state:
+                st.session_state[key_rest] = False
+                
+            if st.checkbox(f'{option}', key=key_rest):
                 selected_charac_map[COL_RESTAURATION].append(option)
                 
     # LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :
     for col, selected_options in selected_charac_map.items():
         if selected_options:
-            filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
+            # Note: Si filtered_df est déjà vide (à cause des filtres régionaux), on ne filtre pas sur un DF vide
+            if not filtered_df.empty:
+                 filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
 
     st.markdown("---")
 
@@ -308,14 +358,19 @@ with st.sidebar:
             min_s_total = float(df_surface[COL_SURFACE].min()) if not df_surface.empty else 0.0
             max_s_total = float(df_surface[COL_SURFACE].max()) if not df_surface.empty else 1000.0
             
+            # Clé de session pour maintenir l'état du slider
+            if 'surface_range' not in st.session_state:
+                 st.session_state['surface_range'] = (min_s_total, max_s_total)
+
             if min_s_total < max_s_total:
                 surface_range = st.slider(
                     f'{COL_SURFACE} (m²)',
                     min_value=min_s_total,
                     max_value=max_s_total,
-                    value=(min_s_total, max_s_total),
+                    value=st.session_state['surface_range'],
                     step=10.0,
-                    format="%.0f m²"
+                    format="%.0f m²",
+                    key='surface_range'
                 )
                 filtered_df = filtered_df[
                     (filtered_df[COL_SURFACE].fillna(min_s_total) >= surface_range[0]) & 
@@ -330,14 +385,19 @@ with st.sidebar:
             min_l_total = float(df_loyer[COL_LOYER].min()) if not df_loyer.empty else 0.0
             max_l_total = float(df_loyer[COL_LOYER].max()) if not df_loyer.empty else 100000.0
 
+            # Clé de session pour maintenir l'état du slider
+            if 'loyer_range' not in st.session_state:
+                 st.session_state['loyer_range'] = (min_l_total, max_l_total)
+
             if min_l_total < max_l_total:
                 loyer_range = st.slider(
                     f'{COL_LOYER} (€)',
                     min_value=min_l_total,
                     max_value=max_l_total,
-                    value=(min_l_total, max_l_total),
+                    value=st.session_state['loyer_range'],
                     step=100.0,
-                    format="%.0f €"
+                    format="%.0f €",
+                    key='loyer_range'
                 )
                 filtered_df = filtered_df[
                     (filtered_df[COL_LOYER].fillna(min_l_total) >= loyer_range[0]) & 
@@ -345,12 +405,7 @@ with st.sidebar:
                 ]
 
     st.markdown("---")
-    st.info(f"Lots filtrés : **{len(filtered_df)}**")
-    
-    if show_details: 
-        if st.button("Masquer les détails", key="hide_left", use_container_width=True): 
-            st.session_state['selected_ref'] = None 
-            st.rerun() 
+    st.info(f"Annonces filtrées : **{len(filtered_df)}**")
     
     if error_message: 
         st.error(error_message) 
@@ -365,7 +420,6 @@ st.header("Carte des Lots Immobiliers")
 
 df_to_map = filtered_df
 
-# ... (Reste de la logique de la carte inchangée) ...
 if not df_to_map.empty: 
     centre_lat = df_to_map['Latitude'].mean() 
     centre_lon = df_to_map['Longitude'].mean() 
@@ -420,11 +474,10 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
-# 🎨 Utilisation de l'URL brute pour le logo dans le panneau de détails
+# Utilisation de l'URL brute pour le logo dans le panneau de détails
 html_content += f"""
     <img src="{LOGO_FILE_PATH_URL}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
 """
-# ... (Reste de la logique du panneau de détails inchangée) ...
 if show_details: 
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean] 
     
