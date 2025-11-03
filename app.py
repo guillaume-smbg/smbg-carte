@@ -19,20 +19,13 @@ if 'selected_ref' not in st.session_state:
 if 'last_clicked_coords' not in st.session_state: 
     st.session_state['last_clicked_coords'] = (0, 0) 
 
-# --- Chemin d'accès du fichier --- 
+# --- Chemin d'accès du fichier et Colonnes Essentielles --- 
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 REF_COL = 'Référence annonce' 
-
-# --- NOMS DE COLONNES UTILISÉS POUR LES FILTRES (AJUSTÉS SELON VOTRE DEMANDE) ---
 COL_REGION = 'Région'
 COL_DEPARTEMENT = 'Département'
-COL_EMPLACEMENT = 'Emplacement'
-COL_TYPOLOGIE = 'Typologie du bien'
-COL_RESTAURATION = 'Restauration'
-COL_SURFACE = 'Surface GLA' # Colonne N
-COL_LOYER = 'Loyer annuel' # Colonne R
 
-# --- CSS / HTML pour le volet flottant et les filtres --- 
+# --- CSS / HTML pour le volet flottant --- 
 CUSTOM_CSS = f""" 
 <style> 
 /* Styles du Panneau de Détails */
@@ -73,17 +66,7 @@ CUSTOM_CSS = f"""
     display: block;
 }} 
 
-/* 🎯 Style pour le miniscroll de la liste des régions dans la sidebar */
-.scroll-box {{
-    max-height: 350px; 
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    padding: 10px;
-    margin-bottom: 15px;
-}}
-
-/* Styles pour le tableau détaillé */
+/* Styles pour le tableau détaillé dans le volet */
 .details-panel table {{
     width: 100%; 
     border-collapse: collapse; 
@@ -105,20 +88,14 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # --- Fonctions utilitaires de formatage --- 
 
 def format_value(value, unit=""): 
-    """ 
-    Formate la valeur pour le panneau de droite.
-    """ 
+    """ Formate la valeur pour le panneau de droite. """ 
     val_str = str(value).strip() 
-    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
-        
     if any(c.isalpha() for c in val_str) and not any(c.isdigit() for c in val_str): 
         return val_str 
-    
     try: 
         num_value = float(value) 
-        
         if num_value != round(num_value, 2): 
             val_str = f"{num_value:,.2f}" 
             val_str = val_str.replace(',', ' ') 
@@ -126,30 +103,22 @@ def format_value(value, unit=""):
         else: 
             val_str = f"{num_value:,.0f}" 
             val_str = val_str.replace(',', ' ') 
-            
         if unit and not val_str.lower().endswith(unit.lower().strip()): 
             return f"{val_str} {unit}" 
-            
     except (ValueError, TypeError): 
         pass 
-        
     return val_str 
 
 def format_monetary_value(row): 
     """Applique le formatage monétaire/surface pour le st.dataframe.""" 
     money_keywords = ['Loyer', 'Charges', 'garantie', 'foncière', 'Taxe', 'Marketing', 'Gestion', 'BP', 'annuel', 'Mensuel', 'Prix', 'm²'] 
-    
     champ = row['Champ'] 
     value = row['Valeur'] 
-    
     is_numeric = pd.api.types.is_numeric_dtype(pd.Series(value)) 
     val_str = str(value).strip()
-    
     if val_str in ('N/A', 'nan', '', 'None', 'None €', 'None m²', '/'): 
         return "Non renseigné" 
-
     is_money_col = any(keyword.lower() in champ.lower() for keyword in money_keywords) 
-    
     if is_money_col and is_numeric: 
         try: 
             float_value = float(value) 
@@ -158,7 +127,6 @@ def format_monetary_value(row):
             return f"€{formatted_value}" 
         except (ValueError, TypeError): 
             pass 
-    
     is_surface_col = any(keyword.lower() in champ.lower() for keyword in ['Surface', 'GLA', 'utile']) 
     if is_surface_col and is_numeric: 
         try: 
@@ -168,41 +136,31 @@ def format_monetary_value(row):
             return f"{formatted_value} m²" 
         except (ValueError, TypeError): 
             pass 
-            
     if champ in ['Latitude', 'Longitude'] and is_numeric: 
         try: 
             return f"{float(value):.4f}" 
         except (ValueError, TypeError): 
             pass 
-
     return val_str 
 
 @st.cache_data 
 def load_data(file_path): 
     try: 
-        # Chargement initial des données
         df = pd.read_excel(file_path, dtype={REF_COL: str}) 
         df.columns = df.columns.str.strip() 
         
-        # Vérification des colonnes essentielles
         if REF_COL not in df.columns or 'Latitude' not in df.columns or 'Longitude' not in df.columns: 
              return pd.DataFrame(), f"Colonnes essentielles manquantes. Colonnes trouvées : {list(df.columns)}" 
             
-        # Conversion et nettoyage des coordonnées
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce') 
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce') 
         
-        # Formatage de la référence
         df[REF_COL] = df[REF_COL].astype(str).str.strip() 
         df[REF_COL] = df[REF_COL].apply(lambda x: x.split('.')[0] if isinstance(x, str) else str(x).split('.')[0]) 
         df[REF_COL] = df[REF_COL].str.zfill(5) 
         
         df.dropna(subset=['Latitude', 'Longitude'], inplace=True) 
         
-        # Préparation des colonnes pour les filtres si elles existent
-        if COL_RESTAURATION in df.columns:
-            df[COL_RESTAURATION] = df[COL_RESTAURATION].fillna('Non renseigné').astype(str)
-
         return df, None 
     except Exception as e: 
         return pd.DataFrame(), f"❌ Erreur critique lors du chargement: {e}" 
@@ -231,138 +189,47 @@ with st.sidebar:
     st.info(f"Lots chargés : **{len(data_df)}**") 
     st.markdown("---") 
 
-    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Avec scroll) ---
+    # --- 2.1. FILTRE UNIQUE: RÉGION / DÉPARTEMENT ---
+    
+    selected_depts = []
     
     if COL_REGION in data_df.columns and COL_DEPARTEMENT in data_df.columns:
         st.subheader("Région et Départements")
         
-        # Liste pour stocker les départements sélectionnés
-        selected_depts = []
+        regions = data_df[COL_REGION].dropna().unique()
         
-        with st.container():
-            st.markdown('<div class="scroll-box">', unsafe_allow_html=True)
+        for region in sorted(regions):
+            region_key = f"reg_{region}"
             
-            # Utilisation de la liste des régions disponibles dans le filtered_df actuel
-            regions = filtered_df[COL_REGION].dropna().unique()
+            # Checkbox Région: AUCUNE cochée par défaut (value=False)
+            is_region_selected = st.checkbox(label=f"**{region}**", key=region_key, value=False)
             
-            for region in sorted(regions):
-                region_key = f"reg_{region}"
+            # Affichage des Départements UNIQUEMENT si la région est sélectionnée
+            if is_region_selected:
+                departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
                 
-                # Checkbox Région
-                is_region_selected = st.checkbox(label=f"**{region}**", key=region_key, value=True)
-                
-                # Sous-catégories des départements
-                if is_region_selected:
-                    # On filtre les départements uniquement pour la région sélectionnée
-                    departements = filtered_df[filtered_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
+                for dept in sorted(departements):
+                    dept_key = f"dept_{dept}"
                     
-                    for dept in sorted(departements):
-                        dept_key = f"dept_{dept}"
-                        
-                        # Utilisation de st.columns pour l'indentation visuelle
-                        col_indent, col_dept = st.columns([0.1, 0.9])
-                        with col_dept:
-                            # Checkbox Département
-                            if st.checkbox(label=f"{dept}", key=dept_key, value=True):
-                                selected_depts.append(dept)
+                    # Utilisation de st.columns pour l'indentation visuelle
+                    col_indent, col_dept = st.columns([0.1, 0.9])
+                    with col_dept:
+                        # Checkbox Département: AUCUNE cochée par défaut (value=False)
+                        if st.checkbox(label=f"{dept}", key=dept_key, value=False):
+                            selected_depts.append(dept)
 
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Application du filtre Région/Département
+        # Application du filtre
         if selected_depts:
-            # On filtre le filtered_df uniquement sur les départements sélectionnés
-            filtered_df = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)]
+            # On filtre le DataFrame sur les départements sélectionnés
+            filtered_df = data_df[data_df[COL_DEPARTEMENT].isin(selected_depts)].copy()
         else:
-             # Si aucun département n'est sélectionné, on vide le DataFrame
-             filtered_df = filtered_df.iloc[0:0]
-    
-    st.markdown("---")
-
-    # --- 2.2. FILTRE 2: CASES À COCHER (Emplacement, Typologie, Restauration) ---
-    st.subheader("Caractéristiques du Lot")
-    
-    # 2.2.1. Emplacement
-    if COL_EMPLACEMENT in data_df.columns:
-        # On utilise les options disponibles dans le filtered_df actuel
-        options_emp = filtered_df[COL_EMPLACEMENT].dropna().unique()
-        selected_emp = st.multiselect('Emplacement', options_emp, default=options_emp)
-        if selected_emp:
-            filtered_df = filtered_df[filtered_df[COL_EMPLACEMENT].isin(selected_emp)]
+            # Si selected_depts est vide, le DataFrame filtré doit être vide par défaut
+            filtered_df = data_df.iloc[0:0]
             
-    # 2.2.2. Typologie du bien
-    if COL_TYPOLOGIE in data_df.columns:
-        options_type = filtered_df[COL_TYPOLOGIE].dropna().unique()
-        selected_type = st.multiselect('Typologie du bien', options_type, default=options_type)
-        if selected_type:
-            filtered_df = filtered_df[filtered_df[COL_TYPOLOGIE].isin(selected_type)]
-            
-    # 2.2.3. Restauration
-    if COL_RESTAURATION in data_df.columns:
-        options_restauration = filtered_df[COL_RESTAURATION].dropna().unique()
-        selected_rest = st.multiselect('Restauration', options_restauration, default=options_restauration)
-        if selected_rest:
-            filtered_df = filtered_df[filtered_df[COL_RESTAURATION].isin(selected_rest)]
+    # --- FIN FILTRES ---
 
     st.markdown("---")
-
-    # --- 2.3. FILTRE 3: SLIDERS (Surface GLA et Loyer) ---
-    st.subheader("Valeurs Numériques")
-    
-    # 2.3.1. Surface GLA (Colonne N)
-    if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
-        df_surface = data_df[data_df[COL_SURFACE].notna() & pd.to_numeric(data_df[COL_SURFACE], errors='coerce').notna()]
-        
-        if not df_surface.empty:
-            min_s_total = float(df_surface[COL_SURFACE].min())
-            max_s_total = float(df_surface[COL_SURFACE].max())
-            
-            # Utiliser la plage du filtered_df pour la valeur par défaut
-            current_min_s = float(filtered_df[COL_SURFACE].min()) if not filtered_df.empty and filtered_df[COL_SURFACE].min() > 0 else min_s_total
-            current_max_s = float(filtered_df[COL_SURFACE].max()) if not filtered_df.empty and filtered_df[COL_SURFACE].max() > 0 else max_s_total
-            
-            if min_s_total < max_s_total:
-                surface_range = st.slider(
-                    f'{COL_SURFACE} (m²)',
-                    min_value=min_s_total,
-                    max_value=max_s_total,
-                    value=(current_min_s, current_max_s),
-                    step=10.0,
-                    format="%.0f m²"
-                )
-                # Application du filtre
-                filtered_df = filtered_df[
-                    (filtered_df[COL_SURFACE].fillna(0) >= surface_range[0]) & 
-                    (filtered_df[COL_SURFACE].fillna(0) <= surface_range[1])
-                ]
-
-    # 2.3.2. Loyer Annuel (Colonne R)
-    if COL_LOYER in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_LOYER]):
-        df_loyer = data_df[data_df[COL_LOYER].notna() & pd.to_numeric(data_df[COL_LOYER], errors='coerce').notna()]
-        
-        if not df_loyer.empty:
-            min_l_total = float(df_loyer[COL_LOYER].min())
-            max_l_total = float(df_loyer[COL_LOYER].max())
-
-            # Utiliser la plage du filtered_df pour la valeur par défaut
-            current_min_l = float(filtered_df[COL_LOYER].min()) if not filtered_df.empty and filtered_df[COL_LOYER].min() > 0 else min_l_total
-            current_max_l = float(filtered_df[COL_LOYER].max()) if not filtered_df.empty and filtered_df[COL_LOYER].max() > 0 else max_l_total
-            
-            if min_l_total < max_l_total:
-                loyer_range = st.slider(
-                    f'{COL_LOYER} (€)',
-                    min_value=min_l_total,
-                    max_value=max_l_total,
-                    value=(current_min_l, current_max_l),
-                    step=100.0,
-                    format="%.0f €"
-                )
-                # Application du filtre
-                filtered_df = filtered_df[
-                    (filtered_df[COL_LOYER].fillna(0) >= loyer_range[0]) & 
-                    (filtered_df[COL_LOYER].fillna(0) <= loyer_range[1])
-                ]
-
-    st.markdown("---")
+    # Affichage du nombre de lots après filtrage
     st.info(f"Lots filtrés : **{len(filtered_df)}**")
     
     # Bouton Masquer/Afficher les détails
@@ -396,7 +263,6 @@ if not df_to_map.empty:
         lat = row['Latitude'] 
         lon = row['Longitude'] 
         
-        # Le marqueur cliquable sans numéro
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
@@ -414,7 +280,6 @@ if not df_to_map.empty:
         clicked_coords = map_output["last_clicked"] 
         current_coords = (clicked_coords['lat'], clicked_coords['lng']) 
         
-        # Utiliser le DataFrame ORIGINAL pour trouver le point le plus proche
         data_df['distance_sq'] = (data_df['Latitude'] - current_coords[0])**2 + (data_df['Longitude'] - current_coords[1])**2 
         closest_row = data_df.loc[data_df['distance_sq'].idxmin()] 
         min_distance_sq = data_df['distance_sq'].min() 
@@ -435,11 +300,10 @@ if not df_to_map.empty:
                     st.rerun() 
              
 else: 
-    st.info("⚠️ Aucun lot ne correspond aux critères de filtre ou le DataFrame est vide.") 
+    st.info("⚠️ Aucun lot ne correspond aux critères de filtre. Veuillez sélectionner au moins une Région et un Département.") 
 
 
 # --- 4. Panneau de Détails Droit (Injection HTML Flottant via st.markdown) --- 
-# (Logique de détails inchangée, elle utilise toujours le DataFrame ORIGINAL)
 
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
@@ -496,10 +360,10 @@ if show_details:
         html_content += '<h5 style="color: #303030; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
         
         # Préparation des données pour le tableau HTML
+        # Suppression des colonnes non pertinentes pour l'affichage des détails
         cols_to_exclude = [REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 'Valeur BP', 'Contact', 'Page Web']
         all_cols = data_df.columns.tolist()
         
-        # Filtration des colonnes
         temp_cols = [c for c in all_cols if c not in cols_to_exclude]
         
         html_content += """
