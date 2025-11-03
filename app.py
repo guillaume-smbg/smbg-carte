@@ -132,22 +132,62 @@ with st.sidebar:
 xlsx_path = st.secrets.get("EXCEL_PATH", "data/Liste des lots.xlsx")
 df = load_data(xlsx_path)
 
-surf_min_global = int(np.nanmin(df["Surface Min"])) if df["Surface Min"].notna().any() else 0
-surf_max_global = int(np.nanmax(df["Surface Max"])) if df["Surface Max"].notna().any() else 0
-surf_sel = st.sidebar.slider("Surface (m²)", min_value=surf_min_global, max_value=surf_max_global,
-                             value=(surf_min_global, surf_max_global), step=1)
+# ---------- Robust slider guards ----------
+def safe_min_max(series: pd.Series):
+    if series is None:
+        return None, None
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if s.empty:
+        return None, None
+    return float(np.nanmin(s)), float(np.nanmax(s))
 
-if df["Loyer Annuel Min"].notna().any() and df["Loyer Annuel Max"].notna().any():
-    loy_min_global = int(np.nanmin(df["Loyer Annuel Min"]))
-    loy_max_global = int(np.nanmax(df["Loyer Annuel Max"]))
+surf_min_val, surf_max_val = safe_min_max(df.get("Surface Min"))
+if surf_min_val is None or surf_max_val is None:
+    # No usable surface data -> no filter
+    surf_active = False
+    surf_sel = (None, None)
 else:
-    loy_min_global, loy_max_global = 0, 0
-loy_sel = st.sidebar.slider("Loyer annuel (€)", min_value=loy_min_global, max_value=loy_max_global,
-                            value=(loy_min_global, loy_max_global), step=1000 if (loy_max_global-loy_min_global)>10000 else 100)
+    surf_min_global = int(surf_min_val)
+    surf_max_global = int(surf_max_val)
+    if surf_min_global >= surf_max_global:
+        # Single value or degenerate -> keep as 'no filter' and show info
+        st.sidebar.info(f"Surface unique ou non définie : {surf_min_global if surf_min_val is not None else '—'} m²")
+        surf_active = False
+        surf_sel = (surf_min_global, surf_max_global)
+    else:
+        surf_sel = st.sidebar.slider("Surface (m²)",
+                                     min_value=surf_min_global,
+                                     max_value=surf_max_global,
+                                     value=(surf_min_global, surf_max_global),
+                                     step=1)
+        surf_active = (surf_sel[0] > surf_min_global) or (surf_sel[1] < surf_max_global)
 
-surf_active = (surf_sel[0] > surf_min_global) or (surf_sel[1] < surf_max_global)
-loy_active = (loy_sel[0] > loy_min_global) or (loy_sel[1] < loy_max_global)
+loy_min_val, loy_max_val = safe_min_max(df.get("Loyer Annuel Min")), safe_min_max(df.get("Loyer Annuel Max"))
+# The above returns tuples; we want overall min of mins and max of maxes
+def merge_min_max(mn_pair, mx_pair):
+    mn1, mx1 = mn_pair
+    mn2, mx2 = mx_pair
+    vals = [v for v in [mn1, mx1, mn2, mx2] if v is not None and not np.isnan(v)]
+    if not vals:
+        return None, None
+    return int(min(vals)), int(max(vals))
 
+loy_min_global, loy_max_global = merge_min_max(loy_min_val, loy_max_val)
+
+if loy_min_global is None or loy_max_global is None or loy_min_global >= loy_max_global:
+    st.sidebar.info("Loyer annuel : données non définies ou uniques")
+    loy_active = False
+    loy_sel = (loy_min_global or 0, loy_max_global or 0)
+else:
+    step = 1000 if (loy_max_global - loy_min_global) > 10000 else 100
+    loy_sel = st.sidebar.slider("Loyer annuel (€)",
+                                min_value=loy_min_global,
+                                max_value=loy_max_global,
+                                value=(loy_min_global, loy_max_global),
+                                step=step)
+    loy_active = (loy_sel[0] > loy_min_global) or (loy_sel[1] < loy_max_global)
+
+# Characteristic filters (optional)
 col_characteristics = []
 for c in ["Emplacement", "Typologie", "Restauration"]:
     if c in df.columns:
@@ -170,6 +210,7 @@ if loy_active and {"Loyer Annuel Min","Loyer Annuel Max"}.issubset(filtered.colu
 
 st.sidebar.markdown(f"**Annonces sur la carte :** {len(filtered)}")
 
+# ---------- Map ----------
 if not filtered.empty:
     center_lat = float(filtered["Latitude"].mean())
     center_lon = float(filtered["Longitude"].mean())
@@ -192,10 +233,12 @@ def add_ref_marker(row):
                   icon=folium.DivIcon(html=html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15))
                  ).add_to(m)
 
-filtered.apply(add_ref_marker, axis=1)
+if not filtered.empty:
+    filtered.apply(add_ref_marker, axis=1)
 
 map_state = st_folium(m, height=700, width=None, returned_objects=["last_clicked"])
 
+# ---------- Click selection on filtered ----------
 if "selected_ref" not in st.session_state:
     st.session_state.selected_ref = None
 
@@ -210,6 +253,7 @@ if last_clicked and filtered.shape[0] > 0:
     else:
         st.session_state.selected_ref = None
 
+# ---------- Right Panel (always visible) ----------
 def google_maps_button(url):
     if not url or str(url).strip() in ["", "-", "/"]:
         return ""
@@ -230,7 +274,7 @@ if sel_ref:
 if row is not None:
     titre_ref = str(row.get("Référence annonce","")).replace(".0","")
     details_html.append(f"<p><strong>Référence : </strong>{titre_ref}</p>")
-    cols_slice = list(filtered.columns[6:34])  # G→AH (0-based inclusive)
+    cols_slice = list(filtered.columns[6:34])  # G→AH (0-based)
     table_rows = []
     for col in cols_slice:
         val = row.get(col, "")
