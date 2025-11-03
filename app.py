@@ -90,22 +90,24 @@ CUSTOM_CSS = f"""
     color: white !important; /* pour les labels en gras */
 }}
 
-/* ❌ Suppression de la flèche (bouton hamburger) pour maximiser l'espace */
+/* ❌ Suppression de la flèche (bouton hamburger) */
 [data-testid="stSidebar"] > div:first-child > div:first-child {{
     display: none !important;
 }}
 
-/* ⬆️ Remonte le contenu (le reste du volet) et ajuste le padding du logo */
+/* ⬆️ Marge Triple / Logo descendu */
 [data-testid="stSidebar"] > div:first-child {{
-    padding-top: 10px !important; /* Ajuste ce padding pour descendre un peu le logo */
+    /* Augmente le padding supérieur pour faire descendre le logo */
+    padding-top: 30px !important; 
 }}
-/* Réduit l'espace après le logo et remonte le reste du contenu */
+/* ⬆️ Remonte le bloc en dessous du logo (espace réduit) */
 .stImage {{
-    margin-bottom: 5px !important; /* Réduit l'espace après le logo */
+    /* Réduit la marge pour que le contenu remonte */
+    margin-bottom: 5px !important; 
+    margin-top: 0px !important; 
 }}
 
 /* 🎨 Style du Bouton Réinitialiser (Forcé en style SMBG Cuivré) */
-/* Cible le bouton généré par st.button qui a un style "secondary" par défaut */
 button[kind="secondary"] {{
     background-color: {COLOR_SMBG_COPPER} !important;
     border-color: {COLOR_SMBG_COPPER} !important;
@@ -117,7 +119,6 @@ button[kind="secondary"]:hover {{
     border-color: #A36437 !important;
     color: white !important;
 }}
-
 
 /* Styles du Bouton Google Maps (inchangé) */
 .maps-button {{ 
@@ -255,10 +256,10 @@ filtered_df = data_df.copy()
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
-    # 🎨 Logo avec ajustement de marge supérieure via le padding du parent et marge inférieure via stImage
+    # 🎨 Logo avec marge ajustée via CSS
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     
-    st.markdown("---")
+    # ⬆️ Remonte le bloc d'action
     st.info(f"Annonces chargées : **{len(data_df)}**") 
     
     # ➕ Bouton de réinitialisation des filtres (Style forcé par CSS)
@@ -442,8 +443,7 @@ with st.sidebar:
 # --- 3. Zone de la Carte (Corps Principal) --- 
 
 MAP_HEIGHT = 800 
-# ❌ Suppression du st.header("Carte des Lots Immobiliers")
-# st.header("Carte des Lots Immobiliers") 
+# Titre de la carte supprimé
 
 df_to_map = filtered_df
 
@@ -466,6 +466,7 @@ if not df_to_map.empty:
             fill_opacity=0.8, 
         ).add_to(m) 
 
+    # La carte prend 100% de la largeur du conteneur principal
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
     # --- Logique de détection de clic (inchangée) --- 
@@ -501,7 +502,7 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
-# Utilisation de l'URL brute pour le logo dans le panneau de détails
+# Le logo est toujours affiché
 html_content += f"""
     <img src="{LOGO_FILE_PATH_URL}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
 """
@@ -586,11 +587,8 @@ if show_details:
         html_content += "<p style='color: white;'>❌ Erreur: Référence non trouvée.</p>" 
         
 else: 
-    html_content += f""" 
-    <p style="font-weight: bold; margin-top: 10px; color: {COLOR_SMBG_COPPER};"> 
-        Cliquez sur un marqueur (cercle) sur la carte pour afficher ses détails ici. 
-    </p> 
-    """ 
+    # Le panneau est vide par défaut (sauf le logo)
+    pass 
 
 html_content += '</div>' 
 st.markdown(html_content, unsafe_allow_html=True) 
