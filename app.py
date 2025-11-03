@@ -3,25 +3,30 @@ import streamlit as st
 import folium 
 from streamlit_folium import st_folium 
 import numpy as np 
-from folium.features import DivIcon
+# --- Import optionnel si vous utilisez le chemin local ---
+# from pathlib import Path 
 
 # --- FICHIERS ET COULEURS ---
 COLOR_SMBG_BLUE = "#05263D" 
 COLOR_SMBG_COPPER = "#C67B42" 
-LOGO_FILE_PATH = 'Logo bleu crop.jpg' 
+
+# 🚨 CORRECTION DU CHEMIN D'ACCÈS POUR CHARGEMENT DIRECT DEPUIS UNE URL BRUTE GITHUB
+# C'est la méthode la plus fiable pour les images hébergées sur GitHub si elles ne sont pas dans le dépôt local.
+# J'utilise le PNG comme indiqué dans votre URL.
+LOGO_FILE_PATH_URL = 'https://raw.githubusercontent.com/guillaume-smbg/smbg-carte/main/assets/Logo%20bleu%20crop.png'
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
 # --------------------
 
 # --- 0. Configuration et Initialisation --- 
 st.set_page_config(layout="wide", page_title="Carte Interactive") 
 
-# Initialisation de la session state 
+# Initialisation de la session state (inchangée)
 if 'selected_ref' not in st.session_state: 
     st.session_state['selected_ref'] = None 
 if 'last_clicked_coords' not in st.session_state: 
     st.session_state['last_clicked_coords'] = (0, 0) 
 
-# --- Colonnes Essentielles --- 
+# --- Colonnes Essentielles (inchangées) --- 
 REF_COL = 'Référence annonce' 
 COL_REGION = 'Région'
 COL_DEPARTEMENT = 'Département'
@@ -31,7 +36,7 @@ COL_RESTAURATION = 'Restauration'
 COL_SURFACE = 'Surface GLA' 
 COL_LOYER = 'Loyer annuel' 
 
-# --- CSS / HTML pour le volet flottant et la barre latérale --- 
+# --- CSS / HTML pour le volet flottant et la barre latérale (inchangé) --- 
 CUSTOM_CSS = f""" 
 <style> 
 /* Style du Panneau de Détails Droit (inchangé et déjà en bleu SMBG) */
@@ -102,7 +107,7 @@ CUSTOM_CSS = f"""
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True) 
 # -------------------------------------------------------------------------
 
-# --- Fonctions utilitaires de formatage (inchangées) --- 
+# --- Fonctions utilitaires (inchangées) --- 
 
 def format_value(value, unit=""): 
     # ... (Fonction inchangée)
@@ -189,7 +194,7 @@ def load_data(file_path):
 # --- Chargement des données --- 
 data_df, error_message = load_data(EXCEL_FILE_PATH) 
 
-# --- 1. Préparation des variables de mise en page et de filtrage --- 
+# --- 1. Préparation des variables de mise en page et de filtrage (inchangée) --- 
 
 selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None 
 if selected_ref_clean == 'None': 
@@ -199,20 +204,19 @@ if selected_ref_clean == 'None':
 show_details = selected_ref_clean and not data_df[data_df[REF_COL].str.strip() == selected_ref_clean].empty 
 panel_class = "details-panel-open" if show_details else "details-panel-closed" 
 
-# **ÉTAT INITIAL :** Le DataFrame filtré est la copie complète du DataFrame initial.
 filtered_df = data_df.copy()
 
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
-    # 🎨 Ajout du logo en haut du volet de gauche
-    st.image(LOGO_FILE_PATH, use_column_width=True) 
+    # 🎨 Utilisation de l'URL brute pour charger le logo
+    st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     st.header("⚙️ Contrôles et Filtres") 
     
     st.info(f"Lots chargés : **{len(data_df)}**") 
     st.markdown("---") 
 
-    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT ---
+    # --- 2.1. FILTRE 1: RÉGION / DÉPARTEMENT (Logique d'union inchangée) ---
     
     selected_regions = []
     selected_depts = []
@@ -239,32 +243,23 @@ with st.sidebar:
                         if st.checkbox(label=f"{dept}", key=dept_key, value=False):
                             selected_depts.append(dept)
 
-        # ----------------------------------------------------------------------
-        # **LOGIQUE DE FILTRAGE GÉOGRAPHIQUE CORRIGÉE (Union des Régions/Départements) :**
-        # ----------------------------------------------------------------------
+        # LOGIQUE DE FILTRAGE GÉOGRAPHIQUE (Union des Régions/Départements) :
         if selected_regions or selected_depts:
-            # Indices des lots des régions sélectionnées
             region_indices = filtered_df[filtered_df[COL_REGION].isin(selected_regions)].index
-            
-            # Indices des lots des départements sélectionnés
             dept_indices = filtered_df[filtered_df[COL_DEPARTEMENT].isin(selected_depts)].index
             
-            # Union des indices : on prend tous les lots des régions ET des départements sélectionnés
             combined_geo_indices = region_indices.union(dept_indices)
             
             if not combined_geo_indices.empty:
                 filtered_df = filtered_df.loc[combined_geo_indices].copy()
             else:
-                # Si l'utilisateur a coché, mais qu'il n'y a aucun lot correspondant, on vide le DF
                 filtered_df = filtered_df.iloc[0:0] 
-        # Sinon (si rien n'est coché), filtered_df reste le DataFrame complet.
     
     st.markdown("---")
 
     # --- 2.2. FILTRES 2: CASES À COCHER INDIVIDUELLES (Emplacement, Typologie, Restauration) ---
     st.subheader("Caractéristiques du Lot")
     
-    # Dictionnaire pour stocker les options sélectionnées par colonne
     selected_charac_map = {
         COL_EMPLACEMENT: [],
         COL_TYPOLOGIE: [],
@@ -279,7 +274,7 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=f'emp_{option}', value=False):
                 selected_charac_map[COL_EMPLACEMENT].append(option)
     
-    # 2.2.2. Typologie du bien (Réintroduit et corrigé)
+    # 2.2.2. Typologie du bien
     if COL_TYPOLOGIE in data_df.columns:
         st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
@@ -295,23 +290,17 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=f'rest_{option}', value=False):
                 selected_charac_map[COL_RESTAURATION].append(option)
                 
-    # ----------------------------------------------------------------------
-    # **LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :**
-    # ----------------------------------------------------------------------
-    
+    # LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :
     for col, selected_options in selected_charac_map.items():
         if selected_options:
-            # On applique un filtre AND pour chaque catégorie non vide.
-            # Logique OR au sein de chaque catégorie (ex: Typologie = A OU B)
             filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
-
 
     st.markdown("---")
 
     # --- 2.3. FILTRES 3: SLIDERS (Surface GLA et Loyer) ---
     st.subheader("Valeurs Numériques")
     
-    # 2.3.1. Surface GLA (Les sliders sont réintroduits)
+    # 2.3.1. Surface GLA 
     if COL_SURFACE in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_SURFACE]):
         df_surface = data_df[data_df[COL_SURFACE].notna() & pd.to_numeric(data_df[COL_SURFACE], errors='coerce').notna()]
         
@@ -376,6 +365,7 @@ st.header("Carte des Lots Immobiliers")
 
 df_to_map = filtered_df
 
+# ... (Reste de la logique de la carte inchangée) ...
 if not df_to_map.empty: 
     centre_lat = df_to_map['Latitude'].mean() 
     centre_lon = df_to_map['Longitude'].mean() 
@@ -430,11 +420,11 @@ else:
 html_content = f""" 
 <div class="details-panel {panel_class}"> 
 """ 
-# Ajout du logo en haut du panneau
+# 🎨 Utilisation de l'URL brute pour le logo dans le panneau de détails
 html_content += f"""
-    <img src="{LOGO_FILE_PATH}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
+    <img src="{LOGO_FILE_PATH_URL}" style="width: 100%; height: auto; margin-bottom: 15px; background-color: white; padding: 5px; border-radius: 5px;">
 """
-
+# ... (Reste de la logique du panneau de détails inchangée) ...
 if show_details: 
     selected_data_series = data_df[data_df[REF_COL].str.strip() == selected_ref_clean] 
     
