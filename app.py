@@ -15,11 +15,9 @@ st.set_page_config(layout="wide", page_title="Carte Interactive SMBG")
 COLOR_SMBG_BLUE = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42"
 
-# Utilise tes assets locaux (tu les as déjà dans le repo)
-LOGO_FILE_PATH_URL = "assets/Logo bleu crop.png"
+LOGO_FILE_PATH_URL = "assets/Logo bleu crop.png"   # asset local
 EXCEL_FILE_PATH = "data/Liste des lots.xlsx"
 
-# Noms de colonnes (adapte si besoin aux intitulés exacts de ton Excel)
 REF_COL = "Référence annonce"
 COL_REGION = "Région"
 COL_DEPARTEMENT = "Département"
@@ -28,44 +26,29 @@ COL_TYPOLOGIE = "Typologie"
 COL_RESTAURATION = "Restauration"
 COL_SURFACE = "Surface GLA"
 COL_LOYER = "Loyer annuel"
-COL_NB_LOTS = "Nombre de lots"
 COL_SURFACES_LOTS = "Surfaces des lots"
-COL_LOYER_UNITAIRE = "Loyer en €/m²"
-
-# Champs calculés (si tu veux les réutiliser plus tard)
-COL_SURFACE_MIN = "Surface Min"
-COL_SURFACE_MAX = "Surface Max"
-COL_LOYER_MIN = "Loyer Annuel Min"
-COL_LOYER_MAX = "Loyer Annuel Max"
 
 # =============================================
 # POLICE FUTURA (depuis ./assets/*.ttf, embarquée en base64)
 # =============================================
 def _load_futura_css_from_assets():
-    """Lit quelques .ttf dans ./assets et crée des @font-face en base64."""
     assets_dir = "assets"
     if not os.path.isdir(assets_dir):
         return ""
-    # Quelques noms fréquents de Futura ; sinon, on prend *.ttf
     preferred = [
         "FuturaT-Book.ttf", "FuturaT.ttf", "FuturaT-Medium.ttf", "FuturaT-Bold.ttf",
         "FuturaL-Book.ttf", "FuturaL-Medium.ttf", "FuturaL-Bold.ttf"
     ]
-    files = []
-    for p in preferred:
-        fp = os.path.join(assets_dir, p)
-        if os.path.exists(fp):
-            files.append(fp)
+    files = [os.path.join(assets_dir, p) for p in preferred if os.path.exists(os.path.join(assets_dir, p))]
     if not files:
         files = glob.glob(os.path.join(assets_dir, "*.ttf"))
     css_blocks = []
-    for fp in files[:4]:  # 3–4 variantes suffisent
+    for fp in files[:4]:
         try:
             with open(fp, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("ascii")
             name = os.path.basename(fp).lower()
-            weight = "400"
-            style = "normal"
+            weight = "400"; style = "normal"
             if "bold" in name: weight = "700"
             if "medium" in name: weight = "500"
             if "light" in name: weight = "300"
@@ -84,7 +67,7 @@ def _load_futura_css_from_assets():
 # =============================================
 def reset_all_filters():
     for key in list(st.session_state.keys()):
-        if key.startswith(("reg_", "dept_", "emp_", "type_", "rest_")) or key in ("surface_range", "loyer_range"):
+        if key.startswith(("flt_",)) or key in ("selected_ref", "last_clicked_coords"):
             del st.session_state[key]
     st.session_state["selected_ref"] = None
     st.session_state["last_clicked_coords"] = (0, 0)
@@ -95,7 +78,6 @@ if "last_clicked_coords" not in st.session_state:
     st.session_state["last_clicked_coords"] = (0, 0)
 
 def format_value(value, unit=""):
-    """Arrondi 0 décimale + séparateur espace + unité (€ / m²) si pertinent."""
     val_str = str(value).strip()
     if val_str in ("N/A", "nan", "", "None", "None €", "None m²", "/"):
         return "Non renseigné"
@@ -106,68 +88,47 @@ def format_value(value, unit=""):
     except Exception:
         return val_str
 
-def extract_surface_bounds(row):
-    """Essaie d’extraire une plage de surface à partir de 'Surfaces des lots'."""
-    s = str(row.get(COL_SURFACES_LOTS, "")).lower().replace("m²", "").replace("m2", "").strip()
-    s = s.replace(",", ".").replace(" ", "")
-    m = re.search(r"(\d+\.?\d*)\s*(?:à|-|–)\s*(\d+\.?\d*)", s)
-    if m:
-        a, b = float(m.group(1)), float(m.group(2))
-        return pd.Series([min(a,b), max(a,b)])
-    parts = re.findall(r"\d+\.?\d*", s)
-    if parts:
-        nums = [float(x) for x in parts]
-        return pd.Series([min(nums), max(nums)])
-    gla = pd.to_numeric(row.get(COL_SURFACE, 0), errors="coerce")
-    if pd.notna(gla) and gla > 0:
-        return pd.Series([gla, gla])
-    return pd.Series([0.0, 0.0])
-
 @st.cache_data
 def load_data(file_path):
     df = pd.read_excel(file_path, dtype={REF_COL: str})
     df.columns = df.columns.str.strip()
-    # Référence propre (sans ".0")
     df[REF_COL] = df[REF_COL].astype(str).str.replace(".0", "").str.strip()
-    # Coords
     df["Latitude"]  = pd.to_numeric(df.get("Latitude", 0), errors="coerce")
     df["Longitude"] = pd.to_numeric(df.get("Longitude", 0), errors="coerce")
     df.dropna(subset=["Latitude","Longitude"], inplace=True)
+    # Loyer numérique pour slider
+    df["__LOYER_NUM__"] = pd.to_numeric(df.get(COL_LOYER, ""), errors="coerce")
     return df
 
 # =============================================
 # LOAD
 # =============================================
 data_df = load_data(EXCEL_FILE_PATH)
-filtered_df = data_df.copy()
 
 # =============================================
-# CSS GLOBAL + PANEL DROIT
+# CSS (réserve l’espace du volet droit + styles SMBG)
 # =============================================
 st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* Volet droit */
+/* Réserve 380px à droite pour que la carte ne soit pas recouverte */
+[data-testid="stAppViewContainer"] .main .block-container {{
+  padding-right: 380px;
+}}
+
 .details-panel {{
   position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
   background-color: {COLOR_SMBG_BLUE}; color: white; z-index: 1000;
   padding: 16px; box-shadow: -5px 0 15px rgba(0,0,0,0.35); overflow-y: auto;
 }}
-/* Sidebar SMBG */
 [data-testid="stSidebar"] {{ background-color: {COLOR_SMBG_BLUE}; color: white; }}
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{ color: {COLOR_SMBG_COPPER} !important; }}
-
-/* Supprimer le bouton d’agrandissement du logo */
-.stImage > button {{ display: none !important; }}
-
-/* Bouton lien Google Maps */
+.stImage > button {{ display: none !important; }} /* supprime l’agrandissement du logo */
 .maps-button {{
   width: 100%; padding: 9px; margin: 8px 0 14px 0; background-color: {COLOR_SMBG_COPPER};
   color: white; border: none; border-radius: 8px; cursor: pointer; text-align: center; font-weight: 700;
 }}
-
-/* Tableaux dans le volet droit */
 .details-panel table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
 .details-panel tr {{ border-bottom: 1px solid #304f65; }}
 .details-panel td {{ padding: 6px 0; max-width: 50%; overflow-wrap: break-word; }}
@@ -175,16 +136,60 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =============================================
-# SIDEBAR
+# SIDEBAR (filtres rétablis)
 # =============================================
 with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
-    st.markdown("---")
-    st.info(f"Annonces chargées : **{len(data_df)}**")
-    if st.button("Réinitialiser tous les filtres", use_container_width=True, type="secondary"):
-        reset_all_filters()
-        st.rerun()
-    st.markdown("---")
+    st.markdown("")
+
+    # Loyer slider
+    loyer_min = int(np.nanmin(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 0
+    loyer_max = int(np.nanmax(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 100000
+    lmin, lmax = st.slider(
+        "Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max,
+        value=(loyer_min, loyer_max), step=1000, key="flt_loyer"
+    )
+
+    # Emplacement / Typologie / Restauration
+    opts_emp  = sorted([x for x in data_df[COL_EMPLACEMENT].dropna().astype(str).unique() if x.strip()])
+    opts_typo = sorted([x for x in data_df[COL_TYPOLOGIE].dropna().astype(str).unique() if x.strip()])
+    opts_rest = sorted([x for x in data_df[COL_RESTAURATION].dropna().astype(str).unique() if x.strip()])
+
+    sel_emp  = st.multiselect("Emplacement", opts_emp, key="flt_emp")
+    sel_typo = st.multiselect("Typologie", opts_typo, key="flt_typo")
+    sel_rest = st.multiselect("Restauration", opts_rest, key="flt_rest")
+
+    st.markdown("")
+    st.info(f"Annonces sur la carte : **{len(data_df)}**")
+    st.button("Réinitialiser tous les filtres", key="flt_reset", use_container_width=True, on_click=reset_all_filters)
+
+# =============================================
+# APPLICATION DES FILTRES
+# =============================================
+filtered_df = data_df.copy()
+
+# Loyer
+filtered_df = filtered_df[
+    (filtered_df["__LOYER_NUM__"].isna()) |
+    ((filtered_df["__LOYER_NUM__"] >= lmin) & (filtered_df["__LOYER_NUM__"] <= lmax))
+]
+
+# Emplacement
+if sel_emp:
+    filtered_df = filtered_df[filtered_df[COL_EMPLACEMENT].astype(str).isin(sel_emp)]
+
+# Typologie
+if sel_typo:
+    filtered_df = filtered_df[filtered_df[COL_TYPOLOGIE].astype(str).isin(sel_typo)]
+
+# Restauration
+if sel_rest:
+    filtered_df = filtered_df[filtered_df[COL_RESTAURATION].astype(str).isin(sel_rest)]
+
+# Compteur après filtres
+with st.sidebar:
+    st.markdown("")
+    st.info(f"Annonces sur la carte : **{len(filtered_df)}**")
 
 # =============================================
 # CARTE
@@ -256,7 +261,6 @@ if st.session_state["selected_ref"]:
             s = str(val).strip()
             if s in ('', '-', '/'):
                 continue
-            # Colonne H -> bouton Google Maps
             if idx == 7 or champ.lower().strip() in ['lien google maps','google maps','lien google']:
                 html.append(
                     f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
@@ -271,12 +275,11 @@ if st.session_state["selected_ref"]:
             )
         html.append("</table>")
 
-        # --- Tableau complet (transposé) déplacé dans le volet droit ---
+        # --- Tableau complet (transposé) dans le volet droit ---
         df_full = rowset.copy()
         for c in ['distance_sq','__dist_sq']:
             if c in df_full.columns:
                 df_full.drop(columns=[c], inplace=True)
-
         tdf = df_full.T.reset_index()
         tdf.columns = ['Champ','Valeur']
 
@@ -301,6 +304,5 @@ if st.session_state["selected_ref"]:
                 f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{val}</td></tr>"
             )
         html.append("</table>")
-
 html.append("</div>")
 st.markdown("".join(html), unsafe_allow_html=True)
