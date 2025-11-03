@@ -12,7 +12,7 @@ COLOR_SMBG_BLUE = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42" 
 
 # Utilisation de l'URL brute pour charger le logo
-# NOTE : Remplacer par le chemin local si le fichier "Logo bleu crop.jpg" est utilisé localement
+# J'ai mis à jour le chemin pour utiliser la référence du fichier uploaded: "Logo bleu crop.jpg"
 LOGO_FILE_PATH_URL = 'https://raw.githubusercontent.com/guillaume-smbg/smbg-carte/main/assets/Logo%20bleu%20crop.png'
 # Pour le test, conservez l'emplacement de votre fichier Excel
 EXCEL_FILE_PATH = 'data/Liste des lots.xlsx' 
@@ -34,18 +34,22 @@ COL_RESTAURATION = 'Restauration'
 COL_SURFACE = 'Surface GLA' 
 COL_LOYER = 'Loyer annuel' 
 
-# COLONNES POUR L'INTERVALLE DE SURFACE
+# COLONNES POUR L'INTERVALLE DE SURFACE ET LOYER
 COL_NB_LOTS = 'Nombre de lots' 
 COL_SURFACES_LOTS = 'Surfaces des lots' # Colonne N
+COL_LOYER_UNITAIRE = 'Loyer en €/m²'   # Colonne T
+
+# Nouvelles colonnes de travail pour les bornes Min/Max
 COL_SURFACE_MIN = 'Surface Min' 
 COL_SURFACE_MAX = 'Surface Max'
+COL_LOYER_MIN = 'Loyer Annuel Min'
+COL_LOYER_MAX = 'Loyer Annuel Max'
 # ----------------------------------------------------------------------
 
 # --- Fonction de réinitialisation ---
 def reset_all_filters():
     """Réinitialise tous les états de session liés aux filtres."""
     for key in list(st.session_state.keys()):
-        # Supprime toutes les clés de filtre
         if key.startswith('reg_') or key.startswith('dept_') or \
            key.startswith('emp_') or key.startswith('type_') or \
            key.startswith('rest_') or key == 'surface_range' or key == 'loyer_range':
@@ -62,7 +66,7 @@ if RESET_KEY not in st.session_state:
     st.session_state[RESET_KEY] = False
 
 
-# --- Fonctions utilitaires de formatage (inchangées) --- 
+# --- Fonctions utilitaires de formatage --- 
 
 def format_value(value, unit=""): 
     val_str = str(value).strip() 
@@ -118,9 +122,9 @@ def format_monetary_value(row):
             pass 
     return val_str 
 
-# --- Fonction de prétraitement pour l'extraction des bornes ---
+# --- Fonction de prétraitement pour l'extraction des bornes de Surface (N) ---
 def extract_surface_bounds(row):
-    """Extrait les surfaces Min et Max à partir de 'Surfaces des lots' ou 'Surface GLA'."""
+    """Extrait les surfaces Min et Max à partir de 'Surfaces des lots' (N) ou 'Surface GLA' (L)."""
     surfaces_str = str(row.get(COL_SURFACES_LOTS, '')).lower().strip().replace('m2', '').replace('m²', '')
     
     # Remplacer la virgule des décimales par un point, et supprimer les espaces pour la conversion
@@ -140,7 +144,7 @@ def extract_surface_bounds(row):
         if numeric_surfaces:
             return pd.Series([min(numeric_surfaces), max(numeric_surfaces)])
             
-    # 3. Utiliser la Surface GLA (Lot unique ou valeur par défaut)
+    # 3. Utiliser la Surface GLA (Lot unique)
     gla = row.get(COL_SURFACE, 0)
     gla_val = pd.to_numeric(gla, errors='coerce')
     if pd.notna(gla_val) and gla_val > 0:
@@ -160,24 +164,44 @@ def load_data(file_path):
         df = df.rename(columns={
             'Typologie du bien': COL_TYPOLOGIE,
             'Nombre de lots': COL_NB_LOTS, 
-            'Surfaces des lots': COL_SURFACES_LOTS
+            'Surfaces des lots': COL_SURFACES_LOTS,
+            'Loyer en m² / an': COL_LOYER_UNITAIRE, # Supporte un autre nom commun
+            'Loyer au m²': COL_LOYER_UNITAIRE       # Supporte un autre nom commun
         }, errors='ignore')
             
-        required_cols = [REF_COL, 'Latitude', 'Longitude', COL_REGION, COL_DEPARTEMENT, COL_EMPLACEMENT, COL_TYPOLOGIE, COL_RESTAURATION, COL_SURFACE, COL_LOYER, COL_NB_LOTS, COL_SURFACES_LOTS]
+        required_cols = [REF_COL, 'Latitude', 'Longitude', COL_REGION, COL_DEPARTEMENT, COL_EMPLACEMENT, COL_TYPOLOGIE, COL_RESTAURATION, COL_SURFACE, COL_LOYER, COL_NB_LOTS, COL_SURFACES_LOTS, COL_LOYER_UNITAIRE]
         for col in required_cols:
             if col not in df.columns:
                 df[col] = np.nan
         
-        # Conversion des colonnes numériques
-        df[COL_SURFACE] = pd.to_numeric(df[COL_SURFACE], errors='coerce').fillna(0)
-        df[COL_LOYER] = pd.to_numeric(df[COL_LOYER], errors='coerce').fillna(0)
+        # --- 1. Conversion des loyers unitaires (T) ---
+        df[COL_LOYER_UNITAIRE] = pd.to_numeric(df[COL_LOYER_UNITAIRE], errors='coerce').fillna(0)
         
-        # --- CRÉATION DES BORNES MIN/MAX ---
-        # Applique la fonction pour remplir les colonnes de travail
+        # --- 2. CRÉATION DES BORNES MIN/MAX DE SURFACE (N) ---
         df[[COL_SURFACE_MIN, COL_SURFACE_MAX]] = df.apply(extract_surface_bounds, axis=1)
-        # -----------------------------------
+        df[COL_SURFACE_MIN] = pd.to_numeric(df[COL_SURFACE_MIN], errors='coerce').fillna(0)
+        df[COL_SURFACE_MAX] = pd.to_numeric(df[COL_SURFACE_MAX], errors='coerce').fillna(0)
         
-        # Finalisation du nettoyage
+        # --- 3. CRÉATION DES BORNES DE LOYER ANNUEL (Loyer Min/Max) ---
+        
+        # Calculer le loyer annuel minimum et maximum à partir de Loyer/m² * Surface
+        df[COL_LOYER_MIN] = df[COL_SURFACE_MIN] * df[COL_LOYER_UNITAIRE]
+        df[COL_LOYER_MAX] = df[COL_SURFACE_MAX] * df[COL_LOYER_UNITAIRE]
+        
+        # Pour les lots dont le loyer unitaire est nul, utiliser la colonne Loyer annuel (L) si elle est renseignée (lot unique)
+        mask_loyer_direct = (df[COL_LOYER_UNITAIRE] == 0) & (pd.to_numeric(df[COL_LOYER], errors='coerce').notna())
+        
+        loyer_annuel_numeric = pd.to_numeric(df[COL_LOYER], errors='coerce').fillna(0)
+        
+        # Si le loyer annuel (L) est renseigné et que le loyer unitaire (T) est vide, on utilise (L) pour Min et Max
+        df.loc[mask_loyer_direct, COL_LOYER_MIN] = loyer_annuel_numeric
+        df.loc[mask_loyer_direct, COL_LOYER_MAX] = loyer_annuel_numeric
+        
+        # Remplir les NaN restants (annonces sans surface ni loyer) par 0
+        df[COL_LOYER_MIN] = df[COL_LOYER_MIN].fillna(0)
+        df[COL_LOYER_MAX] = df[COL_LOYER_MAX].fillna(0)
+        
+        # --- 4. Nettoyage final pour la cartographie ---
         df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce') 
         df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce') 
         df[REF_COL] = df[REF_COL].astype(str).str.strip() 
@@ -291,7 +315,7 @@ button[kind="secondary"] {{
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True) 
 # -------------------------------------------------------------------------
 
-# --- 1. Préparation des variables de mise en page et de filtrage (inchangée) --- 
+# --- 1. Préparation des variables de mise en page et de filtrage --- 
 
 selected_ref_clean = st.session_state['selected_ref'].strip() if st.session_state['selected_ref'] else None 
 if selected_ref_clean == 'None': 
@@ -307,6 +331,7 @@ filtered_df = data_df.copy()
 
 with st.sidebar: 
     # 🎨 Logo 
+    # 
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     
     st.markdown("---")
@@ -340,7 +365,6 @@ with st.sidebar:
             if is_region_selected:
                 selected_regions.append(region)
             
-            # Affichage des départements si la région est cochée OU si au moins un département est déjà coché dans cette région
             departements = data_df[data_df[COL_REGION] == region][COL_DEPARTEMENT].dropna().unique()
             
             show_dept_list = is_region_selected or any(st.session_state.get(f"dept_{dept}", False) for dept in departements)
@@ -359,12 +383,10 @@ with st.sidebar:
                         if st.session_state[dept_key]:
                              selected_depts.append(dept)
 
-        # LOGIQUE DE FILTRAGE GÉOGRAPHIQUE
         if selected_regions or selected_depts:
             region_indices = data_df[data_df[COL_REGION].isin(selected_regions)].index
             dept_indices = data_df[data_df[COL_DEPARTEMENT].isin(selected_depts)].index
             
-            # Union (OR) : On prend tous les lots dans les régions sélectionnées ET tous les lots dans les départements sélectionnés
             combined_geo_indices = region_indices.union(dept_indices)
             
             filtered_df = filtered_df.loc[filtered_df.index.intersection(combined_geo_indices)].copy()
@@ -381,7 +403,6 @@ with st.sidebar:
         COL_RESTAURATION: []
     }
     
-    # Emplacement
     if COL_EMPLACEMENT in data_df.columns:
         st.markdown(f'**{COL_EMPLACEMENT} :**')
         options_emp = data_df[COL_EMPLACEMENT].dropna().unique()
@@ -391,7 +412,6 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=key_emp):
                 selected_charac_map[COL_EMPLACEMENT].append(option)
     
-    # Typologie (Colonne J corrigée)
     if COL_TYPOLOGIE in data_df.columns: 
         st.markdown(f'**{COL_TYPOLOGIE} :**')
         options_type = data_df[COL_TYPOLOGIE].dropna().unique()
@@ -401,7 +421,6 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=key_type):
                 selected_charac_map[COL_TYPOLOGIE].append(option)
 
-    # Restauration
     if COL_RESTAURATION in data_df.columns:
         st.markdown(f'**{COL_RESTAURATION} :**')
         options_restauration = data_df[COL_RESTAURATION].dropna().unique()
@@ -411,7 +430,6 @@ with st.sidebar:
             if st.checkbox(f'{option}', key=key_rest):
                 selected_charac_map[COL_RESTAURATION].append(option)
                 
-    # LOGIQUE DE FILTRAGE CASES À COCHER (AND entre catégories) :
     for col, selected_options in selected_charac_map.items():
         if selected_options and not filtered_df.empty:
             filtered_df = filtered_df[filtered_df[col].isin(selected_options)]
@@ -419,16 +437,17 @@ with st.sidebar:
     st.markdown("---")
 
     # --- 2.3. FILTRES 3: SLIDERS (Surface GLA et Loyer) ---
-    st.subheader("Valeurs Numériques")
+    st.subheader("Valeurs Numériques (Filtre par Intervalle)")
     
     # 2.3.1. Surface GLA (Filtrage par chevauchement d'intervalle)
     if COL_SURFACE_MIN in data_df.columns and COL_SURFACE_MAX in data_df.columns:
         
-        df_surface = data_df[data_df[COL_SURFACE_MAX] > 0]
+        # On utilise uniquement les lignes qui ont une Surface Max > 0 pour les bornes du slider
+        df_surface_valid = data_df[data_df[COL_SURFACE_MAX] > 0]
         
-        if not df_surface.empty:
-            min_s_total = float(df_surface[COL_SURFACE_MIN].min()) 
-            max_s_total = float(df_surface[COL_SURFACE_MAX].max())
+        if not df_surface_valid.empty:
+            min_s_total = float(df_surface_valid[COL_SURFACE_MIN].min()) 
+            max_s_total = float(df_surface_valid[COL_SURFACE_MAX].max())
 
             if 'surface_range' not in st.session_state:
                  st.session_state['surface_range'] = (min_s_total, max_s_total)
@@ -444,7 +463,6 @@ with st.sidebar:
                     key='surface_range'
                 )
                 
-                # --- LOGIQUE DE FILTRAGE PAR CHEVAUCHEMENT (Intersection d'intervalles) ---
                 filtre_min_user = surface_range[0]
                 filtre_max_user = surface_range[1]
                 
@@ -453,22 +471,23 @@ with st.sidebar:
                     (filtered_df[COL_SURFACE_MIN] <= filtre_max_user) & 
                     (filtered_df[COL_SURFACE_MAX] >= filtre_min_user)
                 ]
-                # --------------------------------------------------------------------------
 
-    # 2.3.2. Loyer Annuel 
-    if COL_LOYER in data_df.columns and pd.api.types.is_numeric_dtype(data_df[COL_LOYER]):
-        df_loyer = data_df[data_df[COL_LOYER] > 0]
+    # 2.3.2. Loyer Annuel (Filtrage par chevauchement d'intervalle)
+    if COL_LOYER_MIN in data_df.columns and COL_LOYER_MAX in data_df.columns:
         
-        if not df_loyer.empty:
-            min_l_total = float(df_loyer[COL_LOYER].min())
-            max_l_total = float(df_loyer[COL_LOYER].max())
+        # On utilise uniquement les lignes qui ont un Loyer Annuel Max > 0 pour les bornes du slider
+        df_loyer_valid = data_df[data_df[COL_LOYER_MAX] > 0]
+        
+        if not df_loyer_valid.empty:
+            min_l_total = float(df_loyer_valid[COL_LOYER_MIN].min()) 
+            max_l_total = float(df_loyer_valid[COL_LOYER_MAX].max())
 
             if 'loyer_range' not in st.session_state:
                  st.session_state['loyer_range'] = (min_l_total, max_l_total)
 
             if min_l_total < max_l_total:
                 loyer_range = st.slider(
-                    f'{COL_LOYER} (€)',
+                    f'Loyer Annuel disponible (€)',
                     min_value=min_l_total,
                     max_value=max_l_total,
                     value=st.session_state['loyer_range'],
@@ -476,11 +495,16 @@ with st.sidebar:
                     format="%.0f €",
                     key='loyer_range'
                 )
+                
+                filtre_min_user = loyer_range[0]
+                filtre_max_user = loyer_range[1]
+                
+                # Condition pour l'inclusion : (Lot_Min <= Filtre_Max) ET (Lot_Max >= Filtre_Min)
                 filtered_df = filtered_df[
-                    (filtered_df[COL_LOYER] >= loyer_range[0]) & 
-                    (filtered_df[COL_LOYER] <= loyer_range[1])
+                    (filtered_df[COL_LOYER_MIN] <= filtre_max_user) & 
+                    (filtered_df[COL_LOYER_MAX] >= filtre_min_user)
                 ]
-
+                
     st.markdown("---")
     st.info(f"Annonces filtrées : **{len(filtered_df)}**")
     
@@ -506,18 +530,32 @@ if not df_to_map.empty:
         lat = row['Latitude'] 
         lon = row['Longitude'] 
         
+        # Popup text: Afficher l'intervalle de loyer et de surface
+        surface_min_disp = format_value(row[COL_SURFACE_MIN], unit="m²")
+        surface_max_disp = format_value(row[COL_SURFACE_MAX], unit="m²")
+        
+        loyer_min_disp = format_value(row[COL_LOYER_MIN], unit="€")
+        loyer_max_disp = format_value(row[COL_LOYER_MAX], unit="€")
+
+        popup_html = f"""
+        <b>Réf. {row[REF_COL]}</b><br>
+        Surface : {surface_min_disp} à {surface_max_disp}<br>
+        Loyer Annuel : {loyer_min_disp} à {loyer_max_disp}
+        """
+
         folium.CircleMarker( 
             location=[lat, lon], 
             radius=10, 
             color=COLOR_SMBG_BLUE, 
             fill=True, 
             fill_color=COLOR_SMBG_BLUE, 
-            fill_opacity=0.8, 
+            fill_opacity=0.8,
+            popup=folium.Popup(popup_html, max_width=300)
         ).add_to(m) 
 
     map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
-    # --- Logique de détection de clic (inchangée) --- 
+    # --- Logique de détection de clic --- 
     if map_output and map_output.get("last_clicked"): 
         clicked_coords = map_output["last_clicked"] 
         current_coords = (clicked_coords['lat'], clicked_coords['lng']) 
@@ -600,12 +638,12 @@ if show_details:
         
         html_content += '<h5 style="color: white; margin-top: 20px; margin-bottom: 10px;">📋 Annonce du Lot Sélectionné</h5>'
         
-        # COLONNES À EXCLURE : colonnes de travail ou redondantes
+        # Colonnes à exclure du panneau de détail flottant
         cols_to_exclude = [
             REF_COL, 'Latitude', 'Longitude', 'Lien Google Maps', 'Adresse', 
             'Code Postal', 'Ville', 'distance_sq', 'Photos annonce', 'Actif', 
             'Valeur BP', 'Contact', 'Page Web', 'Typologie du bien', 
-            COL_SURFACE_MIN, COL_SURFACE_MAX # <- EXCLUSION des colonnes de travail
+            COL_SURFACE_MIN, COL_SURFACE_MAX, COL_LOYER_MIN, COL_LOYER_MAX # <- EXCLUSION des colonnes de travail
         ]
         all_cols = data_df.columns.tolist()
         
@@ -654,7 +692,6 @@ with dataframe_container:
         selected_row_df = data_df[data_df[REF_COL].str.strip() == selected_ref_clean].copy() 
         
         if not selected_row_df.empty: 
-            # ... (Logique pour le lien Maps et affichage)
             if 'distance_sq' in selected_row_df.columns: 
                 display_df = selected_row_df.drop(columns=['distance_sq']) 
             else: 
@@ -663,14 +700,14 @@ with dataframe_container:
             all_cols = display_df.columns.tolist() 
             
             # Exclusion des colonnes de travail et des redondances pour le tableau du bas
-            cols_to_remove_from_bottom_table = ['Typologie du bien', COL_SURFACE_MIN, COL_SURFACE_MAX, 'Lien Google Maps']
+            cols_to_remove_from_bottom_table = ['Typologie du bien', COL_SURFACE_MIN, COL_SURFACE_MAX, COL_LOYER_MIN, COL_LOYER_MAX, 'Lien Google Maps']
             for col in cols_to_remove_from_bottom_table:
                 if col in all_cols:
                     all_cols.remove(col)
                     
             display_df = display_df[all_cols]
             
-            # Logique pour centrer les informations (si possible)
+            # Tentative de centrage sur les informations clés
             try: 
                 adresse_index = all_cols.index('Adresse') 
                 commentaires_index = all_cols.index('Commentaires') 
