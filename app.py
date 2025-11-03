@@ -91,15 +91,17 @@ CUSTOM_CSS = f"""
 }}
 
 /* ❌ Suppression de la flèche (bouton hamburger) pour maximiser l'espace */
-/* Note: Ceci cache le bouton, mais le volet reste rétractable par l'utilisateur */
 [data-testid="stSidebar"] > div:first-child > div:first-child {{
     display: none !important;
-    padding-top: 0 !important; /* Supprime le padding pour remonter le logo */
 }}
 
-/* ⬆️ Remonte le contenu (le reste du volet) */
+/* ⬆️ Remonte le contenu (le reste du volet) et ajuste le padding du logo */
 [data-testid="stSidebar"] > div:first-child {{
-    padding-top: 5px !important; 
+    padding-top: 10px !important; /* Ajuste ce padding pour descendre un peu le logo */
+}}
+/* Réduit l'espace après le logo et remonte le reste du contenu */
+.stImage {{
+    margin-bottom: 5px !important; /* Réduit l'espace après le logo */
 }}
 
 /* 🎨 Style du Bouton Réinitialiser (Forcé en style SMBG Cuivré) */
@@ -253,7 +255,7 @@ filtered_df = data_df.copy()
 # --- 2. Panneau de Contrôle Gauche (Dans le st.sidebar) --- 
 
 with st.sidebar: 
-    # 🎨 Logo remonté tout en haut
+    # 🎨 Logo avec ajustement de marge supérieure via le padding du parent et marge inférieure via stImage
     st.image(LOGO_FILE_PATH_URL, use_column_width=True) 
     
     st.markdown("---")
@@ -440,7 +442,8 @@ with st.sidebar:
 # --- 3. Zone de la Carte (Corps Principal) --- 
 
 MAP_HEIGHT = 800 
-st.header("Carte des Lots Immobiliers") 
+# ❌ Suppression du st.header("Carte des Lots Immobiliers")
+# st.header("Carte des Lots Immobiliers") 
 
 df_to_map = filtered_df
 
