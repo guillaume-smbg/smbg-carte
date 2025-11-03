@@ -545,25 +545,17 @@ if not df_to_map.empty:
         lon = row['Longitude'] 
         
         # --- CORRECTION : Suppression du popup ---
-        
-# --- PINS BLEUS SMBG AVEC NUMÉRO DE RÉFÉRENCE ---
-try:
-    ref_disp = str(int(row[REF_COL]))
-except Exception:
-    ref_disp = str(row[REF_COL])
-html_pin = f"""
-<div style="width:30px;height:30px;border-radius:50%;
-            background:{COLOR_SMBG_BLUE};
-            display:flex;align-items:center;justify-content:center;
-            color:#fff;font-weight:700;font-size:12px;border:1px solid #001a27;">
-    {ref_disp}
-</div>
-"""
-folium.Marker(
-    location=[lat, lon],
-    icon=folium.DivIcon(html=html_pin, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15))
-).add_to(m)
-map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
+        folium.CircleMarker( 
+            location=[lat, lon], 
+            radius=10, 
+            color=COLOR_SMBG_BLUE, 
+            fill=True, 
+            fill_color=COLOR_SMBG_BLUE, 
+            fill_opacity=0.8
+            # Pas de popup pour forcer l'utilisation du volet de droite
+        ).add_to(m) 
+
+    map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=['last_clicked'], key="main_map") 
 
     # --- Logique de détection de clic --- 
     if map_output and map_output.get("last_clicked"): 
@@ -657,7 +649,7 @@ if show_details:
         ]
         all_cols = data_df.columns.tolist()
         
-        temp_cols = all_cols[6:34] if len(all_cols) >= 34 else all_cols[6:]
+        temp_cols = [c for c in all_cols if c not in cols_to_exclude]
         
         html_content += """
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
