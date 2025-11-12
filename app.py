@@ -62,7 +62,7 @@ def _load_futura_css_from_assets():
             )
         except Exception:
             pass
-    css.append("*{font-family:'Futura SMBG', Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif;}")
+    css.append("*{{font-family:'Futura SMBG', Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif;}}")
     return "\n".join(css)
 
 # -------------------- Helpers --------------------
@@ -111,6 +111,9 @@ def reset_all():
     st.session_state["loyer_bounds"]   = None
     st.experimental_rerun()
 
+if "selected_ref" not in st.session_state:
+    st.session_state["selected_ref"] = None
+
 # -------------------- Data --------------------
 @st.cache_data
 def load_data(path):
@@ -150,8 +153,8 @@ st.markdown(f"""
 .details-panel table {{ width:100%; border-collapse:collapse; font-size:13px; }}
 .details-panel tr {{ border-bottom:1px solid #304f65; }}
 .details-panel td {{ padding:6px 0; max-width:50%; overflow-wrap:break-word; }}
-/* On cache visuellement les popups Folium pour éviter l'effet "bulle", tout en gardant l'événement clic */
-.leaflet-popup { display:none !important; }
+/* On cache visuellement les popups Folium pour capter le clic marker sans bulle */
+.leaflet-popup {{ display:none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -160,7 +163,7 @@ with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
-    # Régions -> Départements imbriqués (cases)
+    # Régions -> Départements imbriqués
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
     selected_regions = []
@@ -171,7 +174,6 @@ with st.sidebar:
         rchecked = st.checkbox(reg, key=rkey)
         if rchecked:
             selected_regions.append(reg)
-        # Afficher les départements de CETTE région, avec indentation
         pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
         depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
         for d in depts:
@@ -181,7 +183,7 @@ with st.sidebar:
                 selected_depts.append(d)
     st.markdown("---")
 
-    # Sliders (bornes stockées pour reset dur)
+    # Sliders (bornes stockées pour reset)
     surf_min = int(np.nanmin(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 0
     surf_max = int(np.nanmax(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 1000
     if "surface_bounds" not in st.session_state:
@@ -221,7 +223,6 @@ filtered = data_df.copy()
 # REG/DEP = UNION logique : (région ∈ R) OU (département ∈ D)
 cond_reg = filtered[REGION_COL].astype(str).isin(selected_regions) if selected_regions else pd.Series([False]*len(filtered))
 cond_dep = filtered[DEPT_COL].astype(str).isin(selected_depts)     if selected_depts   else pd.Series([False]*len(filtered))
-
 if selected_regions or selected_depts:
     filtered = filtered[ cond_reg | cond_dep ]
 
@@ -258,7 +259,7 @@ else:
 m = folium.Map(location=[center_lat, center_lon], zoom_start=6, control_scale=True)
 
 def add_pin(lat, lon, label, ref_value):
-    # On met une popup *technique* (capturée par st_folium) et on la rend invisible par CSS
+    # Popup technique invisible pour capter le clic marker
     popup_html = f"<div data-ref='{ref_value}'>{ref_value}</div>"
     icon_html = f"""
     <div style="width:30px;height:30px;border-radius:50%;
@@ -270,7 +271,7 @@ def add_pin(lat, lon, label, ref_value):
     folium.Marker(
         location=[lat, lon],
         icon=folium.DivIcon(html=icon_html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15)),
-        popup=popup_html  # permet de capter le clic marker via last_object_clicked
+        popup=popup_html
     ).add_to(m)
 
 if not pins_df.empty:
@@ -281,14 +282,12 @@ if not pins_df.empty:
 # On NE capte PAS le clic carte ; uniquement le clic marker
 map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked"], key="map")
 
-# last_object_clicked -> contient la popup du marker cliqué
+# last_object_clicked -> popup du marker cliqué
 if map_output and map_output.get("last_object_clicked"):
     obj = map_output["last_object_clicked"]
-    # Selon versions, la popup est sous 'popup' ou 'popup_html'
     ref_guess = None
     for k in ("popup", "popup_html"):
         if k in obj and obj[k]:
-            # extraire la référence depuis data-ref ou le texte
             txt = str(obj[k])
             mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
             ref_guess = mref.group(1) if mref else re.sub(r"<.*?>", "", txt).strip()
