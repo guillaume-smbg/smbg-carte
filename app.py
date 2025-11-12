@@ -102,14 +102,13 @@ def jitter_group(df, lat_col, lon_col, base_radius_m=12.0, step_m=4.0):
     return pd.DataFrame(out) if out else df
 
 def reset_all():
-    # remet TOUS les checkboxes et sliders à l'état initial
+    # Remet tous les checkboxes & sliders à l'état initial + efface la sélection
     for k in list(st.session_state.keys()):
-        if k.startswith(("chk_", "slider_", "sel_", "selected_ref")):
+        if k.startswith(("chk_", "slider_", "sel_")) or k in ("selected_ref", "surface_bounds", "loyer_bounds"):
             del st.session_state[k]
     st.session_state["selected_ref"] = None
-    st.session_state["surface_bounds"] = None
-    st.session_state["loyer_bounds"]   = None
-    st.experimental_rerun()
+    # Redémarre proprement avec l'état par défaut
+    st.rerun()
 
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"] = None
@@ -163,7 +162,7 @@ with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
-    # Régions -> Départements imbriqués
+    # Régions -> Départements imbriqués (indentés)
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
     selected_regions = []
@@ -178,10 +177,12 @@ with st.sidebar:
         depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
         for d in depts:
             dkey = f"chk_dept_{reg}_{d}"
-            dchecked = st.checkbox(f"    {d}", key=dkey)  # indentation visuelle
+            # indentation visuelle (espaces insécables)
+            dlabel = f"&nbsp;&nbsp;&nbsp;{d}"
+            dchecked = st.checkbox(dlabel, key=dkey)
             if dchecked:
                 selected_depts.append(d)
-    st.markdown("---")
+    st.markdown("---", unsafe_allow_html=True)
 
     # Sliders (bornes stockées pour reset)
     surf_min = int(np.nanmin(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 0
