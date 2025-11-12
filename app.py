@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-import os, base64, glob, math
+import os, base64, glob, math, re
 import pandas as pd
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import numpy as np
-import re
 
 # =============================================
 # CONFIG
@@ -31,6 +30,15 @@ LOYER_COL         = "Loyer annuel"
 LAT_COL           = "Latitude"
 LON_COL           = "Longitude"
 ACTIF_COL         = "Actif"  # "oui"/"non"
+
+# Affichage du panneau droit : colonnes G -> AL inclus
+INDEX_START = 6    # G
+INDEX_END_EXCL = 38  # AL (slice exclut la fin -> 38)
+
+# Zoom seuil (base pin vs pins détaillés)
+ZOOM_THRESHOLD = 12
+ZOOM_STEP = 3
+MAX_ZOOM = 16
 
 # =============================================
 # POLICE FUTURA (depuis ./assets/*.ttf)
@@ -76,6 +84,7 @@ def reset_all_filters():
     st.session_state["selected_ref"] = None
     st.session_state["last_clicked_coords"] = (0, 0)
     st.session_state["map_zoom"] = 6
+    st.session_state["map_center"] = (46.5, 2.5)
 
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"] = None
@@ -83,11 +92,13 @@ if "last_clicked_coords" not in st.session_state:
     st.session_state["last_clicked_coords"] = (0, 0)
 if "map_zoom" not in st.session_state:
     st.session_state["map_zoom"] = 6
+if "map_center" not in st.session_state:
+    st.session_state["map_center"] = (46.5, 2.5)
 
 def format_value(value, unit=""):
     s = str(value).strip()
-    if s in ("N/A", "nan", "", "None", "None €", "None m²", "/"):
-        return "Non renseigné"
+    if s.lower() in ("n/a", "nan", "", "none", "none €", "none m²", "néant", "-", "/"):
+        return ""
     try:
         num = float(s.replace("€","").replace("m²","").replace("m2","").replace(" ", "").replace(",", "."))
         txt = f"{num:,.0f}".replace(",", " ")
@@ -110,7 +121,7 @@ def parse_ref_display(ref_str):
         return re.sub(r"^0+", "", s) or "0"
 
 def base_ref(ref_str):
-    """'0005.1' -> '0005' (partie base avant le point), '0003' -> '0003'."""
+    """'0005.1' -> '0005' ; '0003' -> '0003'"""
     s = str(ref_str).strip()
     return s.split(".")[0]
 
@@ -120,8 +131,8 @@ def meters_to_deg_lat(m):
 def meters_to_deg_lon(m, lat_deg):
     return m / (111_320.0 * max(0.2, math.cos(math.radians(lat_deg))))
 
-def jitter_group(df, lat_col, lon_col, base_radius_m=12.0, step_m=4.0):
-    """Décale légèrement les points d’un même groupe autour du centre."""
+def jitter_group(df, lat_col, lon_col, base_radius_m=14.0, step_m=5.0):
+    """Décale légèrement les points d’un même groupe autour du centre (spirale angle d’or)."""
     golden_angle = math.pi * (3 - math.sqrt(5))
     out = []
     for i, (_, r) in enumerate(df.iterrows()):
@@ -136,12 +147,30 @@ def jitter_group(df, lat_col, lon_col, base_radius_m=12.0, step_m=4.0):
         out.append(rr)
     return pd.DataFrame(out) if out else df
 
+def checkbox_group(title, options, key_prefix):
+    """Affiche une liste de cases à cocher et renvoie la liste sélectionnée."""
+    selected = []
+    if not options:
+        st.write("—")
+        return selected
+    with st.expander(title, expanded=False):
+        cols = st.columns(2)
+        for i, opt in enumerate(options):
+            col = cols[i % 2]
+            checked = col.checkbox(str(opt), key=f"{key_prefix}_{opt}")
+            if checked:
+                selected.append(opt)
+    return selected
+
+# =============================================
+# DATA
+# =============================================
 @st.cache_data
 def load_data(file_path):
     df = pd.read_excel(file_path, dtype={REF_COL: str})
     df.columns = df.columns.str.strip()
     # normalisation de la référence
-    df[REF_COL] = df[REF_COL].astype(str).str.replace(".0", "").str.strip()
+    df[REF_COL] = df[REF_COL].astype(str).str.replace(".0", "", regex=False).str.strip()
     # numériques
     df[LAT_COL] = pd.to_numeric(df.get(LAT_COL, ""), errors="coerce")
     df[LON_COL] = pd.to_numeric(df.get(LON_COL, ""), errors="coerce")
@@ -155,9 +184,6 @@ def load_data(file_path):
     df.reset_index(drop=True, inplace=True)
     return df
 
-# =============================================
-# CHARGEMENT
-# =============================================
 data_df = load_data(EXCEL_FILE_PATH)
 
 # =============================================
@@ -192,23 +218,22 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =============================================
-# SIDEBAR — Filtres
+# SIDEBAR — Filtres (cases à cocher) + sliders
 # =============================================
 with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
-    # Région
+    # Région -> Département (imbriqués, cases à cocher)
     regions = sorted([x for x in data_df.get(REGION_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    region_sel = st.multiselect("Région", regions, key="flt_region")
+    region_sel = checkbox_group("Région", regions, "flt_region")
 
-    # Département (dépend des régions sélectionnées, sinon tous)
     if region_sel:
         depts_pool = data_df[data_df[REGION_COL].astype(str).isin(region_sel)]
     else:
         depts_pool = data_df
     depts = sorted([x for x in depts_pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    dept_sel = st.multiselect("Département", depts, key="flt_dept")
+    dept_sel = checkbox_group("Département", depts, "flt_dept")
 
     # Sliders Surface & Loyer
     surf_min = int(np.nanmin(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 0
@@ -221,13 +246,13 @@ with st.sidebar:
     lmin, lmax = st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max,
                            value=(loyer_min, loyer_max), step=1000, key="flt_loyer")
 
-    # Cases à cocher (multisélection)
+    # Cases à cocher : Emplacement, Typologie, Extraction, Restauration
     def _opts(col):
         return sorted([x for x in data_df.get(col, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    emp_sel  = st.multiselect("Emplacement", _opts(EMPL_COL), key="flt_emp")
-    typo_sel = st.multiselect("Typologie",  _opts(TYPO_COL), key="flt_typo")
-    ext_sel  = st.multiselect("Extraction", _opts(EXTRACTION_COL), key="flt_ext")
-    rest_sel = st.multiselect("Restauration", _opts(RESTAURATION_COL), key="flt_rest")
+    emp_sel  = checkbox_group("Emplacement", _opts(EMPL_COL), "flt_emp")
+    typo_sel = checkbox_group("Typologie",  _opts(TYPO_COL), "flt_typo")
+    ext_sel  = checkbox_group("Extraction", _opts(EXTRACTION_COL), "flt_ext")
+    rest_sel = checkbox_group("Restauration", _opts(RESTAURATION_COL), "flt_rest")
 
     st.markdown("")
     st.info(f"Annonces chargées : **{len(data_df)}**")
@@ -261,30 +286,28 @@ if rest_sel:
     filtered_df = filtered_df[filtered_df[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
 # =============================================
-# Logique de zoom (un pin = base_ref à zoom global ; pins détaillés à zoom rapproché)
+# Logique de zoom & pins (base vs détaillés)
 # =============================================
-# On construit les marqueurs selon st.session_state["map_zoom"] connu
-ZOOM_THRESHOLD = 12
 render_mode = "base" if st.session_state["map_zoom"] < ZOOM_THRESHOLD else "lot"
 
-# Prépare le DF pour les pins
 pins_df = filtered_df.copy()
 pins_df["__ref_display__"] = pins_df[REF_COL].apply(parse_ref_display)
 pins_df["__base_ref__"]    = pins_df[REF_COL].apply(base_ref)
 
 if render_mode == "base":
-    # 1 pin par base_ref (ex. 0005 -> "5"), coords = moyenne
-    grp = pins_df.groupby("__base_ref__", as_index=False).agg({
-        LAT_COL: "mean", LON_COL: "mean"
-    })
+    # 1 pin par base_ref (moyenne des coords)
+    grp = pins_df.groupby("__base_ref__", as_index=False).agg({LAT_COL: "mean", LON_COL: "mean"})
     grp["__ref_display__"] = grp["__base_ref__"].apply(lambda s: re.sub(r"^0+", "", str(s).strip()) or "0")
-    pins_df = grp.rename(columns={LAT_COL: "__lat__", LON_COL: "__lon__"})
+    pins_base_df = grp.rename(columns={LAT_COL: "__lat__", LON_COL: "__lon__"})
+    pins_detail_df = None
 else:
-    # 1 pin par lot + léger jitter pour éviter le recouvrement
-    pins_df["__lat__"] = pins_df[LAT_COL]
-    pins_df["__lon__"] = pins_df[LON_COL]
-    pins_df = jitter_group(
-        pins_df.sort_values([LAT_COL, LON_COL, REF_COL]),
+    pins_base_df = None
+    # Pins détaillés + jitter
+    tmp = pins_df.copy()
+    tmp["__lat__"] = tmp[LAT_COL]
+    tmp["__lon__"] = tmp[LON_COL]
+    pins_detail_df = jitter_group(
+        tmp.sort_values([LAT_COL, LON_COL, REF_COL]),
         lat_col="__lat__", lon_col="__lon__", base_radius_m=14.0, step_m=5.0
     )
 
@@ -292,15 +315,8 @@ else:
 # Carte
 # =============================================
 MAP_HEIGHT = 800
-if not pins_df.empty:
-    center_lat = pins_df["__lat__"].mean()
-    center_lon = pins_df["__lon__"].mean()
-else:
-    center_lat, center_lon = 46.5, 2.5  # France
 
-m = folium.Map(location=[center_lat, center_lon], zoom_start=st.session_state["map_zoom"], control_scale=True)
-
-def add_pin(lat, lon, label):
+def add_pin(m, lat, lon, label):
     html_pin = f"""
     <div style="width:30px;height:30px;border-radius:50%;
                 background:{COLOR_SMBG_BLUE};
@@ -314,50 +330,60 @@ def add_pin(lat, lon, label):
                             icon_size=(30,30), icon_anchor=(15,15))
     ).add_to(m)
 
-if not pins_df.empty:
-    if render_mode == "base":
-        for _, r in pins_df.iterrows():
-            add_pin(r["__lat__"], r["__lon__"], r["__ref_display__"])
-    else:
-        for _, r in pins_df.iterrows():
-            add_pin(r["__jlat"], r["__jlon"], r["__ref_display__"])
+# centre de la carte
+if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+    center_lat = pins_base_df["__lat__"].mean()
+    center_lon = pins_base_df["__lon__"].mean()
+elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
+    center_lat = pins_detail_df["__jlat"].mean()
+    center_lon = pins_detail_df["__jlon"].mean()
+else:
+    center_lat, center_lon = st.session_state["map_center"]
 
-# Render & récupérer le zoom/clic
+m = folium.Map(location=[center_lat, center_lon], zoom_start=st.session_state["map_zoom"], control_scale=True)
+
+# Ajout des pins
+if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+    for _, r in pins_base_df.iterrows():
+        add_pin(m, r["__lat__"], r["__lon__"], r["__ref_display__"])
+elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
+    for _, r in pins_detail_df.iterrows():
+        add_pin(m, r["__jlat"], r["__jlon"], r["__ref_display__"])
+
+# Render & récupérer interactions
 map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_clicked", "zoom"], key="map")
 
-# Met à jour zoom -> déclenche re-rendu au prochain run
+# Gérer zoom (mise à jour live)
 if map_output and "zoom" in map_output:
     new_zoom = int(map_output["zoom"])
     if new_zoom != st.session_state.get("map_zoom", 6):
         st.session_state["map_zoom"] = new_zoom
-        st.rerun()
 
-# Clic -> sélectionner la réf la plus proche
+# Clic sur la carte
 if map_output and map_output.get("last_clicked"):
     clicked = map_output["last_clicked"]
     clat, clon = clicked["lat"], clicked["lng"]
-    if render_mode == "base":
-        # closest base pin -> trouve une ligne de cette base pour le panneau
-        pins_df["__dist_sq"] = (pins_df["__lat__"] - clat)**2 + (pins_df["__lon__"] - clon)**2
-        row = pins_df.loc[pins_df["__dist_sq"].idxmin()]
-        # choisit une première réf complète correspondante
-        base_id = str(row["__base_ref__"])
-        sel_row = filtered_df[filtered_df[REF_COL].str.startswith(base_id + ".") | filtered_df[REF_COL].eq(base_id)]
-        if not sel_row.empty:
-            st.session_state["selected_ref"] = sel_row.iloc[0][REF_COL]
-    else:
-        # closest detailed pin -> modèle direct par lot
-        pins_df["__dist_sq"] = (pins_df["__jlat"] - clat)**2 + (pins_df["__jlon__"] - clon)**2 if "__jlon__" in pins_df.columns else (pins_df["__lon__"] - clon)**2
-        row = pins_df.loc[pins_df["__dist_sq"].idxmin()]
+
+    if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+        # Trouver la base_ref la plus proche, zoomer vers elle (progressif), sans encore ouvrir l'annonce
+        pins_base_df["__dist_sq"] = (pins_base_df["__lat__"] - clat)**2 + (pins_base_df["__lon__"] - clon)**2
+        row = pins_base_df.loc[pins_base_df["__dist_sq"].idxmin()]
+        # centre + zoom progressif
+        st.session_state["map_center"] = (float(row["__lat__"]), float(row["__lon__"]))
+        st.session_state["map_zoom"] = min(MAX_ZOOM, st.session_state["map_zoom"] + ZOOM_STEP)
+        # ne pas définir selected_ref ici (on attend le clic sur un pin détaillé après zoom)
+        st.rerun()
+
+    elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
+        # Sélectionner la réf (lot) la plus proche et ouvrir le panneau
+        pins_detail_df["__dist_sq"] = (pins_detail_df["__jlat"] - clat)**2 + (pins_detail_df["__jlon"] - clon)**2
+        row = pins_detail_df.loc[pins_detail_df["__dist_sq"].idxmin()]
         st.session_state["selected_ref"] = row[REF_COL] if REF_COL in row else None
 
 # =============================================
-# Volet droit — Colonnes G → AL (H = bouton), valeurs arrondies
+# Volet droit — G → AL (H = bouton), seulement si selected_ref
+# Masquer les lignes vides / "néant" / "/" / "-"
 # =============================================
-# G (index 6) ... AL (index 37) inclus
-INDEX_START = 6
-INDEX_END_EXCL = 38  # python slice exclut la fin -> 38 = AL inclus
-
 html = [f"<div class='details-panel'>"]
 if st.session_state["selected_ref"]:
     sel = str(st.session_state["selected_ref"]).strip()
@@ -375,21 +401,25 @@ if st.session_state["selected_ref"]:
         html.append("<table>")
         for idx, champ in enumerate(cols_slice, start=INDEX_START):
             val = r.get(champ, '')
-            s = str(val).strip()
-            if s in ('', '-', '/'):
+            sraw = str(val).strip()
+            slow = sraw.lower()
+            if slow in ("", "néant", "-", "/"):
                 continue
-            # Colonne H -> bouton Google Maps (index 7 si G=6)
+            # Colonne H (index 7 si G=6) -> bouton Google Maps
             if idx == (INDEX_START + 1) or champ.lower().strip() in ['lien google maps','google maps','lien google']:
                 html.append(
                     f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
-                    f"<td><a class='maps-button' href='{s}' target='_blank'>Cliquer ici</a></td></tr>"
+                    f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>"
                 )
                 continue
             unit = '€' if any(k in champ for k in ['Loyer','Charges','garantie','Taxe','Marketing','Gestion','BP','annuel','Mensuel','foncière','Honoraires']) \
                    else ('m²' if any(k in champ for k in ['Surface','GLA','utile','Vitrine','Linéaire']) else '')
+            sval = format_value(sraw, unit)
+            if not sval:  # vide après formatage
+                continue
             html.append(
                 f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td>"
-                f"<td>{format_value(s, unit)}</td></tr>"
+                f"<td>{sval}</td></tr>"
             )
         html.append("</table>")
 
