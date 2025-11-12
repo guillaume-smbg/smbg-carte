@@ -17,7 +17,7 @@ COLOR_SMBG_COPPER = "#C67B42"
 LOGO_FILE_PATH_URL = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH = "data/Liste des lots.xlsx"
 
-# Noms attendus (adapter si besoin aux entêtes exactes)
+# Noms attendus (adapter si besoin)
 REF_COL           = "Référence annonce"
 REGION_COL        = "Région"
 DEPT_COL          = "Département"
@@ -32,11 +32,12 @@ LON_COL           = "Longitude"
 ACTIF_COL         = "Actif"  # "oui"/"non"
 
 # Affichage du panneau droit : colonnes G -> AL inclus
-INDEX_START = 6    # G
-INDEX_END_EXCL = 38  # AL (slice exclut la fin -> 38)
+INDEX_START = 6      # G
+INDEX_END_EXCL = 38  # AL (slice exclut la fin)
 
-# Zoom seuil (base pin vs pins détaillés)
-ZOOM_THRESHOLD = 12
+# Zoom seuils (hystérésis pour molette)
+BASE_TO_LOT_HIGH = 13  # passer en mode "détaillé" si zoom >= 13
+LOT_TO_BASE_LOW  = 11  # revenir en mode "base" si zoom <= 11
 ZOOM_STEP = 3
 MAX_ZOOM = 16
 
@@ -79,25 +80,28 @@ def _load_futura_css_from_assets():
 # =============================================
 def reset_all_filters():
     for k in list(st.session_state.keys()):
-        if k.startswith(("flt_", "map_")) or k in ("selected_ref", "last_clicked_coords"):
+        if k.startswith(("chk_", "all_", "map_")) or k in ("selected_ref", "pending_base_center", "map_mode"):
             del st.session_state[k]
     st.session_state["selected_ref"] = None
-    st.session_state["last_clicked_coords"] = (0, 0)
     st.session_state["map_zoom"] = 6
     st.session_state["map_center"] = (46.5, 2.5)
+    st.session_state["map_mode"] = "base"  # "base" ou "lot"
+    st.session_state["pending_base_center"] = None
 
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"] = None
-if "last_clicked_coords" not in st.session_state:
-    st.session_state["last_clicked_coords"] = (0, 0)
 if "map_zoom" not in st.session_state:
     st.session_state["map_zoom"] = 6
 if "map_center" not in st.session_state:
     st.session_state["map_center"] = (46.5, 2.5)
+if "map_mode" not in st.session_state:
+    st.session_state["map_mode"] = "base"
+if "pending_base_center" not in st.session_state:
+    st.session_state["pending_base_center"] = None
 
 def format_value(value, unit=""):
     s = str(value).strip()
-    if s.lower() in ("n/a", "nan", "", "none", "none €", "none m²", "néant", "-", "/"):
+    if s.lower() in ("n/a", "nan", "", "none", "néant", "-", "/"):
         return ""
     try:
         num = float(s.replace("€","").replace("m²","").replace("m2","").replace(" ", "").replace(",", "."))
@@ -107,11 +111,6 @@ def format_value(value, unit=""):
         return s
 
 def parse_ref_display(ref_str):
-    """
-    '0003' -> '3'
-    '0005.1' -> '5.1'
-    '0005.10' -> '5.10'
-    """
     s = str(ref_str).strip()
     if "." in s:
         left, right = s.split(".", 1)
@@ -121,7 +120,6 @@ def parse_ref_display(ref_str):
         return re.sub(r"^0+", "", s) or "0"
 
 def base_ref(ref_str):
-    """'0005.1' -> '0005' ; '0003' -> '0003'"""
     s = str(ref_str).strip()
     return s.split(".")[0]
 
@@ -132,7 +130,6 @@ def meters_to_deg_lon(m, lat_deg):
     return m / (111_320.0 * max(0.2, math.cos(math.radians(lat_deg))))
 
 def jitter_group(df, lat_col, lon_col, base_radius_m=14.0, step_m=5.0):
-    """Décale légèrement les points d’un même groupe autour du centre (spirale angle d’or)."""
     golden_angle = math.pi * (3 - math.sqrt(5))
     out = []
     for i, (_, r) in enumerate(df.iterrows()):
@@ -147,19 +144,43 @@ def jitter_group(df, lat_col, lon_col, base_radius_m=14.0, step_m=5.0):
         out.append(rr)
     return pd.DataFrame(out) if out else df
 
-def checkbox_group(title, options, key_prefix):
-    """Affiche une liste de cases à cocher et renvoie la liste sélectionnée."""
-    selected = []
+def add_pin(m, lat, lon, label):
+    html_pin = f"""
+    <div style="width:30px;height:30px;border-radius:50%;
+                background:{COLOR_SMBG_BLUE};
+                display:flex;align-items:center;justify-content:center;
+                color:#fff;font-weight:700;font-size:12px;border:1px solid #001a27;">
+        {label}
+    </div>"""
+    folium.Marker(
+        location=[lat, lon],
+        icon=folium.DivIcon(html=html_pin, class_name="smbg-divicon",
+                            icon_size=(30,30), icon_anchor=(15,15))
+    ).add_to(m)
+
+def checkbox_block(title, options, key_prefix):
+    """Cases à cocher visibles (sans liste déroulante), avec Tout sél./Tout décocher."""
+    st.markdown(f"**{title}**")
     if not options:
-        st.write("—")
-        return selected
-    with st.expander(title, expanded=False):
-        cols = st.columns(2)
-        for i, opt in enumerate(options):
-            col = cols[i % 2]
-            checked = col.checkbox(str(opt), key=f"{key_prefix}_{opt}")
-            if checked:
-                selected.append(opt)
+        st.caption("—")
+        return []
+    # Boutons groupés
+    k_all_on  = f"all_on_{key_prefix}"
+    k_all_off = f"all_off_{key_prefix}"
+    col_a, col_b = st.columns(2)
+    if col_a.button("Tout sélectionner", key=k_all_on):
+        for opt in options:
+            st.session_state[f"chk_{key_prefix}_{opt}"] = True
+    if col_b.button("Tout décocher", key=k_all_off):
+        for opt in options:
+            st.session_state[f"chk_{key_prefix}_{opt}"] = False
+    # Liste de cases
+    selected = []
+    for opt in options:
+        checked = st.checkbox(str(opt), key=f"chk_{key_prefix}_{opt}")
+        if checked:
+            selected.append(opt)
+    st.markdown("---")
     return selected
 
 # =============================================
@@ -169,17 +190,16 @@ def checkbox_group(title, options, key_prefix):
 def load_data(file_path):
     df = pd.read_excel(file_path, dtype={REF_COL: str})
     df.columns = df.columns.str.strip()
-    # normalisation de la référence
     df[REF_COL] = df[REF_COL].astype(str).str.replace(".0", "", regex=False).str.strip()
-    # numériques
+
     df[LAT_COL] = pd.to_numeric(df.get(LAT_COL, ""), errors="coerce")
     df[LON_COL] = pd.to_numeric(df.get(LON_COL, ""), errors="coerce")
     df["__SURF_NUM__"]  = pd.to_numeric(df.get(SURFACE_COL, ""), errors="coerce")
     df["__LOYER_NUM__"] = pd.to_numeric(df.get(LOYER_COL, ""), errors="coerce")
-    # filtre actif
+
     if ACTIF_COL in df.columns:
         df = df[df[ACTIF_COL].astype(str).str.lower().eq("oui")]
-    # drop coords vides
+
     df.dropna(subset=[LAT_COL, LON_COL], inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
@@ -218,44 +238,43 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =============================================
-# SIDEBAR — Filtres (cases à cocher) + sliders
+# SIDEBAR — Cases à cocher + sliders
 # =============================================
 with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
-    # Région -> Département (imbriqués, cases à cocher)
+    # Région -> Département (imbriqués)
     regions = sorted([x for x in data_df.get(REGION_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    region_sel = checkbox_group("Région", regions, "flt_region")
+    region_sel = checkbox_block("Région", regions, "region")
 
     if region_sel:
-        depts_pool = data_df[data_df[REGION_COL].astype(str).isin(region_sel)]
+        pool = data_df[data_df[REGION_COL].astype(str).isin(region_sel)]
     else:
-        depts_pool = data_df
-    depts = sorted([x for x in depts_pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    dept_sel = checkbox_group("Département", depts, "flt_dept")
+        pool = data_df
+    depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
+    dept_sel = checkbox_block("Département", depts, "dept")
 
-    # Sliders Surface & Loyer
+    # Sliders
     surf_min = int(np.nanmin(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 0
     surf_max = int(np.nanmax(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 1000
     smin, smax = st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max,
-                           value=(surf_min, surf_max), step=1, key="flt_surface")
+                           value=(surf_min, surf_max), step=1, key="slider_surface")
 
     loyer_min = int(np.nanmin(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 0
     loyer_max = int(np.nanmax(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 100000
     lmin, lmax = st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max,
-                           value=(loyer_min, loyer_max), step=1000, key="flt_loyer")
+                           value=(loyer_min, loyer_max), step=1000, key="slider_loyer")
 
-    # Cases à cocher : Emplacement, Typologie, Extraction, Restauration
+    # Cases Emplacement / Typologie / Extraction / Restauration
     def _opts(col):
         return sorted([x for x in data_df.get(col, pd.Series()).dropna().astype(str).unique() if x.strip()])
-    emp_sel  = checkbox_group("Emplacement", _opts(EMPL_COL), "flt_emp")
-    typo_sel = checkbox_group("Typologie",  _opts(TYPO_COL), "flt_typo")
-    ext_sel  = checkbox_group("Extraction", _opts(EXTRACTION_COL), "flt_ext")
-    rest_sel = checkbox_group("Restauration", _opts(RESTAURATION_COL), "flt_rest")
 
-    st.markdown("")
-    st.info(f"Annonces chargées : **{len(data_df)}**")
+    emp_sel  = checkbox_block("Emplacement", _opts(EMPL_COL), "emp")
+    typo_sel = checkbox_block("Typologie",  _opts(TYPO_COL), "typo")
+    ext_sel  = checkbox_block("Extraction", _opts(EXTRACTION_COL), "ext")
+    rest_sel = checkbox_block("Restauration", _opts(RESTAURATION_COL), "rest")
+
     st.button("Réinitialiser tous les filtres", use_container_width=True, on_click=reset_all_filters)
 
 # =============================================
@@ -263,19 +282,16 @@ with st.sidebar:
 # =============================================
 filtered_df = data_df.copy()
 
-# Région / Département (imbriqués)
 if region_sel:
     filtered_df = filtered_df[filtered_df[REGION_COL].astype(str).isin(region_sel)]
 if dept_sel:
     filtered_df = filtered_df[filtered_df[DEPT_COL].astype(str).isin(dept_sel)]
 
-# Surface & Loyer
 filtered_df = filtered_df[
     (filtered_df["__SURF_NUM__"].isna()  | ((filtered_df["__SURF_NUM__"]  >= smin) & (filtered_df["__SURF_NUM__"]  <= smax))) &
     (filtered_df["__LOYER_NUM__"].isna() | ((filtered_df["__LOYER_NUM__"] >= lmin) & (filtered_df["__LOYER_NUM__"] <= lmax)))
 ]
 
-# Emplacement / Typologie / Extraction / Restauration
 if emp_sel:
     filtered_df = filtered_df[filtered_df[EMPL_COL].astype(str).isin(emp_sel)]
 if typo_sel:
@@ -286,15 +302,22 @@ if rest_sel:
     filtered_df = filtered_df[filtered_df[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
 # =============================================
-# Logique de zoom & pins (base vs détaillés)
+# Logique de mode carte (hystérésis) + pins
 # =============================================
-render_mode = "base" if st.session_state["map_zoom"] < ZOOM_THRESHOLD else "lot"
+# Déterminer le mode cible selon le zoom courant
+z = st.session_state["map_zoom"]
+current_mode = st.session_state["map_mode"]
+if current_mode == "base" and z >= BASE_TO_LOT_HIGH:
+    st.session_state["map_mode"] = "lot"
+elif current_mode == "lot" and z <= LOT_TO_BASE_LOW:
+    st.session_state["map_mode"] = "base"
+mode = st.session_state["map_mode"]
 
 pins_df = filtered_df.copy()
 pins_df["__ref_display__"] = pins_df[REF_COL].apply(parse_ref_display)
 pins_df["__base_ref__"]    = pins_df[REF_COL].apply(base_ref)
 
-if render_mode == "base":
+if mode == "base":
     # 1 pin par base_ref (moyenne des coords)
     grp = pins_df.groupby("__base_ref__", as_index=False).agg({LAT_COL: "mean", LON_COL: "mean"})
     grp["__ref_display__"] = grp["__base_ref__"].apply(lambda s: re.sub(r"^0+", "", str(s).strip()) or "0")
@@ -302,7 +325,6 @@ if render_mode == "base":
     pins_detail_df = None
 else:
     pins_base_df = None
-    # Pins détaillés + jitter
     tmp = pins_df.copy()
     tmp["__lat__"] = tmp[LAT_COL]
     tmp["__lon__"] = tmp[LON_COL]
@@ -316,73 +338,60 @@ else:
 # =============================================
 MAP_HEIGHT = 800
 
-def add_pin(m, lat, lon, label):
-    html_pin = f"""
-    <div style="width:30px;height:30px;border-radius:50%;
-                background:{COLOR_SMBG_BLUE};
-                display:flex;align-items:center;justify-content:center;
-                color:#fff;font-weight:700;font-size:12px;border:1px solid #001a27;">
-        {label}
-    </div>"""
-    folium.Marker(
-        location=[lat, lon],
-        icon=folium.DivIcon(html=html_pin, class_name="smbg-divicon",
-                            icon_size=(30,30), icon_anchor=(15,15))
-    ).add_to(m)
-
-# centre de la carte
-if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
-    center_lat = pins_base_df["__lat__"].mean()
-    center_lon = pins_base_df["__lon__"].mean()
-elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
-    center_lat = pins_detail_df["__jlat"].mean()
-    center_lon = pins_detail_df["__jlon"].mean()
+# centre par données, sinon état
+if mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+    center_lat = float(pins_base_df["__lat__"].mean())
+    center_lon = float(pins_base_df["__lon__"].mean())
+elif mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
+    center_lat = float(pins_detail_df["__jlat"].mean())
+    center_lon = float(pins_detail_df["__jlon"].mean())
 else:
     center_lat, center_lon = st.session_state["map_center"]
 
-m = folium.Map(location=[center_lat, center_lon], zoom_start=st.session_state["map_zoom"], control_scale=True)
+# priorité à un centrage demandé par clic base
+if st.session_state["pending_base_center"]:
+    center_lat, center_lon = st.session_state["pending_base_center"]
+
+m = folium.Map(location=[center_lat, center_lon], zoom_start=z, control_scale=True)
 
 # Ajout des pins
-if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+if mode == "base" and pins_base_df is not None and not pins_base_df.empty:
     for _, r in pins_base_df.iterrows():
         add_pin(m, r["__lat__"], r["__lon__"], r["__ref_display__"])
-elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
+elif mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
     for _, r in pins_detail_df.iterrows():
         add_pin(m, r["__jlat"], r["__jlon"], r["__ref_display__"])
 
-# Render & récupérer interactions
 map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_clicked", "zoom"], key="map")
 
-# Gérer zoom (mise à jour live)
+# Mettre à jour le zoom courant (sans switch immédiat de mode — la bascule se fera au prochain run via hystérésis)
 if map_output and "zoom" in map_output:
-    new_zoom = int(map_output["zoom"])
-    if new_zoom != st.session_state.get("map_zoom", 6):
-        st.session_state["map_zoom"] = new_zoom
+    st.session_state["map_zoom"] = int(map_output["zoom"])
+    st.session_state["map_center"] = (center_lat, center_lon)
 
 # Clic sur la carte
 if map_output and map_output.get("last_clicked"):
     clicked = map_output["last_clicked"]
     clat, clon = clicked["lat"], clicked["lng"]
 
-    if render_mode == "base" and pins_base_df is not None and not pins_base_df.empty:
-        # Trouver la base_ref la plus proche, zoomer vers elle (progressif), sans encore ouvrir l'annonce
+    if mode == "base" and pins_base_df is not None and not pins_base_df.empty:
+        # Aller vers le centre de la base la plus proche + zoom progressif
         pins_base_df["__dist_sq"] = (pins_base_df["__lat__"] - clat)**2 + (pins_base_df["__lon__"] - clon)**2
         row = pins_base_df.loc[pins_base_df["__dist_sq"].idxmin()]
-        # centre + zoom progressif
-        st.session_state["map_center"] = (float(row["__lat__"]), float(row["__lon__"]))
+        st.session_state["pending_base_center"] = (float(row["__lat__"]), float(row["__lon__"]))
+        st.session_state["map_center"] = st.session_state["pending_base_center"]
         st.session_state["map_zoom"] = min(MAX_ZOOM, st.session_state["map_zoom"] + ZOOM_STEP)
-        # ne pas définir selected_ref ici (on attend le clic sur un pin détaillé après zoom)
+        # on ne sélectionne pas encore d'annonce (il faut cliquer un pin détaillé ensuite)
         st.rerun()
 
-    elif render_mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
-        # Sélectionner la réf (lot) la plus proche et ouvrir le panneau
+    elif mode == "lot" and pins_detail_df is not None and not pins_detail_df.empty:
         pins_detail_df["__dist_sq"] = (pins_detail_df["__jlat"] - clat)**2 + (pins_detail_df["__jlon"] - clon)**2
         row = pins_detail_df.loc[pins_detail_df["__dist_sq"].idxmin()]
         st.session_state["selected_ref"] = row[REF_COL] if REF_COL in row else None
+        st.session_state["pending_base_center"] = None  # reset
 
 # =============================================
-# Volet droit — G → AL (H = bouton), seulement si selected_ref
-# Masquer les lignes vides / "néant" / "/" / "-"
+# Volet droit — G → AL (H = bouton), afficher seulement après clic
 # =============================================
 html = [f"<div class='details-panel'>"]
 if st.session_state["selected_ref"]:
@@ -415,7 +424,7 @@ if st.session_state["selected_ref"]:
             unit = '€' if any(k in champ for k in ['Loyer','Charges','garantie','Taxe','Marketing','Gestion','BP','annuel','Mensuel','foncière','Honoraires']) \
                    else ('m²' if any(k in champ for k in ['Surface','GLA','utile','Vitrine','Linéaire']) else '')
             sval = format_value(sraw, unit)
-            if not sval:  # vide après formatage
+            if not sval:
                 continue
             html.append(
                 f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td>"
@@ -423,7 +432,6 @@ if st.session_state["selected_ref"]:
             )
         html.append("</table>")
 
-        # Photos (placeholder pour l’instant)
         html.append("<hr style='border:1px solid #eee;margin:12px 0;'>")
         html.append("<h5 style='margin:6px 0 8px;'>📷 Photos</h5>")
         html.append("<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>")
