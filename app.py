@@ -111,7 +111,7 @@ st.markdown(f"""
 
 /* Sidebar : marge haute 25px, aucun bouton collapse, fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
-[data-testid="stSidebar"] .block-container {{ padding-top:25px !important; }}
+[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
 
 /* Indentation départements 15px */
@@ -146,13 +146,22 @@ st.markdown(f"""
 
 # ===== SIDEBAR =====
 with st.sidebar:
+    # marge fixe de 25 px en haut
+    st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+
     # Logo via base64 (aucun bouton d’agrandissement)
     b64 = logo_base64()
     if b64:
-        st.markdown(f"<img src='data:image/png;base64,{b64}' style='width:100%;height:auto;display:block;'>", unsafe_allow_html=True)
+        st.markdown(
+            f"<img src='data:image/png;base64,{b64}' "
+            f"style='width:100%;height:auto;display:block;margin:0;'>",
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
-    st.markdown("")
+
+    # petite marge de 10 px sous le logo, pas plus
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
