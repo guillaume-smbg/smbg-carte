@@ -14,7 +14,7 @@ COLOR_SMBG_COPPER = "#C67B42"
 LOGO_FILE_PATH_URL = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH    = "data/Liste des lots.xlsx"
 
-# Noms de colonnes attendus
+# Colonnes
 REF_COL          = "Référence annonce"
 REGION_COL       = "Région"
 DEPT_COL         = "Département"
@@ -92,10 +92,11 @@ def jitter_group(df, lat_col, lon_col, base_radius_m=12.0, step_m=4.0):
     return pd.DataFrame(out) if out else df
 
 def reset_all():
-    st.session_state.clear()   # reset dur: TOUT repart à zéro
+    # Reset dur: toutes les clés d'état (filtres, sliders, sélection)
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
     st.rerun()
 
-# Etat sélection
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"] = None
 
@@ -117,25 +118,25 @@ def load_data(path):
 
 data_df = load_data(EXCEL_FILE_PATH)
 
-# =============== CSS (sidebar fixe, logo en haut, pas de chevron, panneau droit) ===============
+# =============== CSS (sidebar fixe, logo en haut, pas de popups, suppression du collapse) ===============
 st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* Panneau droit réservé */
+/* Réserve la place du panneau droit */
 [data-testid="stAppViewContainer"] .main .block-container {{ padding-right: 380px; }}
 
-/* Sidebar fixe + marge haute 25px + suppression des contrôles de rétractation */
+/* Sidebar fixe, marge haute 25px, logo collé en haut, suppression VRAIE du bouton collapse */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 [data-testid="stSidebar"] .block-container {{ padding-top:25px !important; }}
-/* Cache divers boutons de rétractation/overflow éventuels dans la sidebar */
-[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {{ display:none !important; }}
-[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] {{ display:none !important; }}
+/* Supprime complètement le bouton de rétractation */
+button[kind="headerNoPadding"] {{ display:none !important; }}
+[data-testid="stSidebarCollapseButton"] {{ display:none !important; }}
 
 /* Titres cuivre */
 [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{ color:{COLOR_SMBG_COPPER} !important; }}
 
-/* Supprimer bouton d'agrandissement sur le logo */
+/* Supprimer bouton d'agrandissement du logo */
 .stImage > button {{ display:none !important; }}
 
 /* Panneau droit */
@@ -151,11 +152,15 @@ st.markdown(f"""
 .details-panel table {{ width:100%; border-collapse:collapse; font-size:13px; }}
 .details-panel tr {{ border-bottom:1px solid #304f65; }}
 .details-panel td {{ padding:6px 0; max-width:50%; overflow-wrap:break-word; }}
+
+/* Masque TOUTES les popups Leaflet (aucun affichage visuel) */
+.leaflet-popup {{ display:none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
 # =============== SIDEBAR ===============
 with st.sidebar:
+    # Logo en premier, marge haute 25px assurée par CSS
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
@@ -165,19 +170,20 @@ with st.sidebar:
     selected_regions, selected_depts = [], []
 
     for reg in regions:
-        # Région
         rkey = f"chk_region_{reg}"
-        if st.checkbox(reg, key=rkey):
+        rchecked = st.checkbox(reg, key=rkey)
+        if rchecked:
             selected_regions.append(reg)
-            # Départements (affichés UNIQUEMENT si la région est cochée) avec décalage ≈15px
+            # Afficher les départements de CETTE région uniquement si cochée, avec décalage ~15px
             pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
             depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
             for d in depts:
                 dkey = f"chk_dept_{reg}_{d}"
-                # Décalage via deux colonnes: col_indent ~15px, col_box prend le reste
-                c1, c2 = st.columns([0.06, 0.94])  # ~15px sur sidebar ~360px
-                with c1: st.markdown("&nbsp;", unsafe_allow_html=True)
-                with c2:
+                # Spacer 15px via colonnes (approx. fixe)
+                c_spacer, c_box = st.columns([0.06, 0.94])
+                with c_spacer:
+                    st.markdown("&nbsp;", unsafe_allow_html=True)
+                with c_box:
                     if st.checkbox(d, key=dkey):
                         selected_depts.append(d)
 
@@ -209,15 +215,13 @@ with st.sidebar:
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
-# =============== FILTRES (logique corrigée) ===============
+# =============== FILTRES (union REG ∪ DEP) ===============
 filtered = data_df.copy()
 
-# Si au moins un département est coché -> filtre PAR DÉPARTEMENT.
-# Sinon, s'il n'y a que des régions cochées -> filtre PAR RÉGION.
-if selected_depts:
-    filtered = filtered[ filtered[DEPT_COL].astype(str).isin(selected_depts) ]
-elif selected_regions:
-    filtered = filtered[ filtered[REGION_COL].astype(str).isin(selected_regions) ]
+if selected_regions or selected_depts:
+    cond_reg = filtered[REGION_COL].astype(str).isin(selected_regions) if selected_regions else False
+    cond_dep = filtered[DEPT_COL].astype(str).isin(selected_depts)     if selected_depts   else False
+    filtered = filtered[ (cond_reg) | (cond_dep) ]
 
 # Sliders
 filtered = filtered[
@@ -225,13 +229,13 @@ filtered = filtered[
     (filtered["__LOYER_NUM__"].isna() | ((filtered["__LOYER_NUM__"] >= lmin) & (filtered["__LOYER_NUM__"] <= lmax)))
 ]
 
-# Cases simples
+# Cases
 if emp_sel:  filtered = filtered[filtered[EMPL_COL].astype(str).isin(emp_sel)]
 if typo_sel: filtered = filtered[filtered[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  filtered = filtered[filtered[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: filtered = filtered[filtered[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# =============== CARTE (tous les pins, clic précis, sans popup) ===============
+# =============== CARTE (tous pins, clic exact sur pin, pas de popup visible) ===============
 tmp = filtered.copy()
 tmp["__lat__"], tmp["__lon__"] = tmp[LAT_COL], tmp[LON_COL]
 jittered = []
@@ -247,7 +251,8 @@ else:
 
 m = folium.Map(location=[center_lat, center_lon], zoom_start=6, control_scale=True)
 
-def add_pin(lat, lon, label):
+def add_pin(lat, lon, label, ref_value):
+    # Icône visuelle
     html_pin = f"""
     <div style="width:30px;height:30px;border-radius:50%;
                 background:{COLOR_SMBG_BLUE};
@@ -260,33 +265,34 @@ def add_pin(lat, lon, label):
         icon=folium.DivIcon(html=html_pin, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15))
     ).add_to(m)
 
+    # Cible cliquable invisible exactement sur le pin (rayon ≈ 15 px en mètres converti par Leaflet automatiquement)
+    # On lui associe une "popup technique" contenant la Réf (les popups sont masquées par CSS -> invisible)
+    folium.CircleMarker(
+        location=[lat, lon],
+        radius=15,  # px
+        color="#00000000", fill=True, fill_color="#00000000", fill_opacity=0.0, opacity=0.0,
+        popup=f"<div data-ref='{ref_value}'>{ref_value}</div>"
+    ).add_to(m)
+
 if not pins_df.empty:
     pins_df["__ref_display__"] = pins_df[REF_COL].apply(parse_ref_display)
     for _, r in pins_df.iterrows():
-        add_pin(float(r["__jlat"]), float(r["__jlon"]), r["__ref_display__"])
+        add_pin(float(r["__jlat"]), float(r["__jlon"]), r["__ref_display__"], r[REF_COL])
 
-map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_clicked","zoom"], key="map")
+# On écoute uniquement l'objet cliqué (circle invisible sur le pin) — aucun clic carte
+map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked"], key="map")
 
-# Clic strict sur le pin: rayon 12 px -> conversion en mètres -> test haversine
-def choose_pin_by_click(last_clicked, zoom):
-    if not last_clicked or pins_df.empty: return None
-    clat, clon = float(last_clicked["lat"]), float(last_clicked["lng"])
-    meters_per_pixel = 156543.03392 * math.cos(math.radians(clat)) / (2 ** max(zoom, 1))
-    hit_radius_m = 12 * meters_per_pixel  # 12 px -> clic précis
-    R = 6371000.0
-    def haversine_m(lat1, lon1, lat2, lon2):
-        dlat = math.radians(lat2-lat1); dlon = math.radians(lon2-lon1)
-        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
-        return 2*R*math.asin(math.sqrt(a))
-    pins_df["__dist_m"] = pins_df.apply(lambda rr: haversine_m(clat, clon, rr["__jlat"], rr["__jlon"]), axis=1)
-    row = pins_df.loc[pins_df["__dist_m"].idxmin()]
-    return row if float(row["__dist_m"]) <= hit_radius_m else None
-
-if map_output:
-    zoom = int(map_output.get("zoom", 6))
-    chosen = choose_pin_by_click(map_output.get("last_clicked"), zoom)
-    if chosen is not None:
-        st.session_state["selected_ref"] = chosen[REF_COL]
+if map_output and map_output.get("last_object_clicked"):
+    obj = map_output["last_object_clicked"]
+    ref_guess = None
+    for k in ("popup", "popup_html"):
+        if k in obj and obj[k]:
+            txt = str(obj[k])
+            mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
+            ref_guess = mref.group(1) if mref else re.sub(r"<.*?>", "", txt).strip()
+            break
+    if ref_guess:
+        st.session_state["selected_ref"] = ref_guess
 
 # =============== VOLET DROIT (G->AL, H bouton, masque vides) ===============
 html = [f"<div class='details-panel'>"]
