@@ -107,7 +107,6 @@ def reset_all():
         if k.startswith(("chk_", "slider_", "sel_")) or k in ("selected_ref", "surface_bounds", "loyer_bounds"):
             del st.session_state[k]
     st.session_state["selected_ref"] = None
-    # Redémarre proprement avec l'état par défaut
     st.rerun()
 
 if "selected_ref" not in st.session_state:
@@ -131,7 +130,7 @@ def load_data(path):
 
 data_df = load_data(EXCEL_FILE_PATH)
 
-# -------------------- CSS (panneau droit + popup invisible + Futura) --------------------
+# -------------------- CSS (panneau droit + Futura) --------------------
 st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
@@ -152,8 +151,6 @@ st.markdown(f"""
 .details-panel table {{ width:100%; border-collapse:collapse; font-size:13px; }}
 .details-panel tr {{ border-bottom:1px solid #304f65; }}
 .details-panel td {{ padding:6px 0; max-width:50%; overflow-wrap:break-word; }}
-/* On cache visuellement les popups Folium pour capter le clic marker sans bulle */
-.leaflet-popup {{ display:none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -162,7 +159,7 @@ with st.sidebar:
     st.image(LOGO_FILE_PATH_URL, use_column_width=True)
     st.markdown("")
 
-    # Régions -> Départements imbriqués (indentés)
+    # Régions -> Départements imbriqués (les départements n'apparaissent QUE si la région est cochée)
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
     selected_regions = []
@@ -173,15 +170,16 @@ with st.sidebar:
         rchecked = st.checkbox(reg, key=rkey)
         if rchecked:
             selected_regions.append(reg)
-        pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
-        depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
-        for d in depts:
-            dkey = f"chk_dept_{reg}_{d}"
-            # indentation visuelle (espaces insécables)
-            dlabel = f"&nbsp;&nbsp;&nbsp;{d}"
-            dchecked = st.checkbox(dlabel, key=dkey)
-            if dchecked:
-                selected_depts.append(d)
+            # Afficher les départements de CETTE région uniquement si la région est cochée
+            pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
+            depts = sorted([x for x in pool.get(DEPT_COL, pd.Series()).dropna().astype(str).unique() if x.strip()])
+            for d in depts:
+                dkey = f"chk_dept_{reg}_{d}"
+                # indentation visuelle par nbsp
+                dlabel = f"&nbsp;&nbsp;&nbsp;{d}"
+                dchecked = st.checkbox(dlabel, key=dkey)
+                if dchecked:
+                    selected_depts.append(d)
     st.markdown("---", unsafe_allow_html=True)
 
     # Sliders (bornes stockées pour reset)
@@ -222,10 +220,10 @@ with st.sidebar:
 filtered = data_df.copy()
 
 # REG/DEP = UNION logique : (région ∈ R) OU (département ∈ D)
-cond_reg = filtered[REGION_COL].astype(str).isin(selected_regions) if selected_regions else pd.Series([False]*len(filtered))
-cond_dep = filtered[DEPT_COL].astype(str).isin(selected_depts)     if selected_depts   else pd.Series([False]*len(filtered))
 if selected_regions or selected_depts:
-    filtered = filtered[ cond_reg | cond_dep ]
+    cond_reg = filtered[REGION_COL].astype(str).isin(selected_regions) if selected_regions else False
+    cond_dep = filtered[DEPT_COL].astype(str).isin(selected_depts)     if selected_depts   else False
+    filtered = filtered[ (cond_reg) | (cond_dep) ]
 
 # Sliders
 filtered = filtered[
@@ -243,7 +241,7 @@ if ext_sel:
 if rest_sel:
     filtered = filtered[filtered[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# -------------------- Carte : tous les pins, clic pin uniquement --------------------
+# -------------------- Carte : tous les pins, clic pin uniquement (pas de popup) --------------------
 tmp = filtered.copy()
 tmp["__lat__"] = tmp[LAT_COL]; tmp["__lon__"] = tmp[LON_COL]
 jittered = []
@@ -259,10 +257,8 @@ else:
 
 m = folium.Map(location=[center_lat, center_lon], zoom_start=6, control_scale=True)
 
-def add_pin(lat, lon, label, ref_value):
-    # Popup technique invisible pour capter le clic marker
-    popup_html = f"<div data-ref='{ref_value}'>{ref_value}</div>"
-    icon_html = f"""
+def add_pin(lat, lon, label):
+    html_pin = f"""
     <div style="width:30px;height:30px;border-radius:50%;
                 background:{COLOR_SMBG_BLUE};
                 display:flex;align-items:center;justify-content:center;
@@ -271,30 +267,43 @@ def add_pin(lat, lon, label, ref_value):
     </div>"""
     folium.Marker(
         location=[lat, lon],
-        icon=folium.DivIcon(html=icon_html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15)),
-        popup=popup_html
+        icon=folium.DivIcon(html=html_pin, class_name="smbg-divicon",
+                            icon_size=(30,30), icon_anchor=(15,15))
     ).add_to(m)
 
 if not pins_df.empty:
     pins_df["__ref_display__"] = pins_df[REF_COL].apply(parse_ref_display)
     for _, r in pins_df.iterrows():
-        add_pin(float(r["__jlat"]), float(r["__jlon"]), r["__ref_display__"], r[REF_COL])
+        add_pin(float(r["__jlat"]), float(r["__jlon"]), r["__ref_display__"])
 
-# On NE capte PAS le clic carte ; uniquement le clic marker
-map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked"], key="map")
+# Rendu + capture clic (carte uniquement, pas de popup)
+map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_clicked","zoom"], key="map")
 
-# last_object_clicked -> popup du marker cliqué
-if map_output and map_output.get("last_object_clicked"):
-    obj = map_output["last_object_clicked"]
-    ref_guess = None
-    for k in ("popup", "popup_html"):
-        if k in obj and obj[k]:
-            txt = str(obj[k])
-            mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
-            ref_guess = mref.group(1) if mref else re.sub(r"<.*?>", "", txt).strip()
-            break
-    if ref_guess:
-        st.session_state["selected_ref"] = ref_guess
+# Clic précis sur un marker : on convertit un rayon en pixels -> seuil en degrés
+def pick_pin_by_click(last_clicked, zoom):
+    if not last_clicked or pins_df.empty:
+        return None
+    clat, clon = float(last_clicked["lat"]), float(last_clicked["lng"])
+    # approx WebMercator: mètres par pixel
+    meters_per_pixel = 156543.03392 * math.cos(math.radians(clat)) / (2 ** max(zoom, 1))
+    # rayon visuel du pin ~15px -> seuil mètres
+    hit_radius_m = 25 * meters_per_pixel
+    # distance (m) approx
+    def haversine_m(lat1, lon1, lat2, lon2):
+        R = 6371000.0
+        dlat = math.radians(lat2-lat1)
+        dlon = math.radians(lon2-lon1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlon/2)**2
+        return 2*R*math.asin(math.sqrt(a))
+    pins_df["__dist_m"] = pins_df.apply(lambda rr: haversine_m(clat, clon, rr["__jlat"], rr["__jlon"]), axis=1)
+    row = pins_df.loc[pins_df["__dist_m"].idxmin()]
+    return row if float(row["__dist_m"]) <= hit_radius_m else None
+
+if map_output:
+    zoom = int(map_output.get("zoom", 6))
+    chosen = pick_pin_by_click(map_output.get("last_clicked"), zoom)
+    if chosen is not None:
+        st.session_state["selected_ref"] = chosen[REF_COL]
 
 # -------------------- VOLET DROIT --------------------
 html = [f"<div class='details-panel'>"]
