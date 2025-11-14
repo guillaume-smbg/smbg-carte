@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Code inchangé) =====
+# ===== CSS global (Mise à jour pour la marge de 25px) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -120,9 +120,13 @@ st.markdown(f"""
     padding-right: {right_padding + 20}px; 
 }}
 
-/* Sidebar : marge haute 25px, aucun bouton collapse, fond bleu, titres cuivre */
+/* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
-[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
+
+/* AJUSTEMENT : Marge haute de 25px pour le logo et les filtres */
+[data-testid="stSidebar"] .block-container {{ padding-top:25px !important; }}
+
+/* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
 
 /* Indentation départements 15px */
@@ -155,9 +159,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Code inchangé) =====
+# ===== SIDEBAR (Retrait du div de 25px, car géré par CSS) =====
 with st.sidebar:
-    st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+    # Retiré : st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
     b64 = logo_base64()
     if b64:
@@ -256,7 +260,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Logique de détection de clic améliorée) =====
+# ===== CARTE (Logique de détection de clic améliorée - Code inchangé) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -309,10 +313,12 @@ if map_output:
     # 2. Tenter par les coordonnées de l'objet cliqué (le marqueur lui-même)
     if map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
-        coords_to_check.append({
-            "lat": obj.get("lat"),
-            "lng": obj.get("lng")
-        })
+        # Ajout des coordonnées du marqueur ou objet cliqué
+        if obj.get("lat") is not None and obj.get("lng") is not None:
+             coords_to_check.append({
+                "lat": obj.get("lat"),
+                "lng": obj.get("lng")
+            })
 
     # 3. Vérifier les coordonnées trouvées dans le DataFrame filtré
     for coords in coords_to_check:
