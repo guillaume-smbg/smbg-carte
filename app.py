@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour la marge de 10px) =====
+# ===== CSS global (Mise à jour pour la marge de 25px) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -123,8 +123,8 @@ st.markdown(f"""
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* AJUSTEMENT : Marge haute de 10px pour le logo et les filtres */
-[data-testid="stSidebar"] .block-container {{ padding-top:10px !important; }}
+/* AJUSTEMENT : Marge haute de 25px pour le logo et les filtres */
+[data-testid="stSidebar"] .block-container {{ padding-top:25px !important; }}
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
@@ -159,9 +159,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Retrait du div de 10px, car géré par CSS) =====
+# ===== SIDEBAR (Retrait du div de 25px, car géré par CSS) =====
 with st.sidebar:
-    # Retiré : st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    # Retiré : st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
     b64 = logo_base64()
     if b64:
