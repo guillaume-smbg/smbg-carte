@@ -211,8 +211,6 @@ if 'selected_lot_key' not in st.session_state:
 
 # --- 4. CSS D'INJECTION (Layout et Style CRITIQUE) ---
 
-# ... (Reste du CSS inchangé, car il n'était pas la cause de l'erreur) ...
-
 # Fonction pour injecter le CSS critique
 def inject_custom_css():
     css = f"""
@@ -588,6 +586,10 @@ def create_folium_map():
     """Crée la carte Folium avec les pins personnalisés et la logique de clic."""
     df_map = st.session_state.filtered_data
     
+    # --- CORRECTION CRITIQUE: Initialiser geojson_layer ---
+    # Ceci empêche le TypeError/NameError lorsque df_map est vide.
+    geojson_layer = None
+    
     if df_map.empty or df_map['Latitude'].isnull().all():
         # Centre par défaut si aucune donnée filtrée
         m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, control_scale=True)
@@ -605,84 +607,84 @@ def create_folium_map():
              pass
 
 
-    # 7. Pins sur la carte: ABSOLUMENT AUCUN POPUP, style personnalisé
-    
-    # Création du GeoJson pour gérer le clic sans popup
-    geojson_data = {
-        "type": "FeatureCollection",
-        "features": []
-    }
-
-    for index, row in df_map.iterrows():
-        lat, lon = row['Latitude'], row['Longitude']
-        ref = row['Ref Formatée']
-        lot_key = row['lot_key']
-
-        # Utilisation d'un cercle (CircleMarker) pour le pin
-        # J'ajoute le lot_key dans les propriétés pour le récupérer via st_folium
-        feature = {
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [lon, lat] 
-            },
-            "properties": {
-                "lot_key": lot_key,
-                "ref": ref
-            }
-        }
-        geojson_data["features"].append(feature)
-
-    # Style pour le CircleMarker (le cercle)
-    def style_function(feature):
-        return {
-            'fillColor': SMBG_BLUE,
-            'color': '#333333',  # Contour fin sombre
-            'weight': 1,
-            'fillOpacity': 0.8,
-            'radius': 10  # Taille du cercle
-        }
-
-    # Style pour le hover (curseur main)
-    highlight_function = lambda x: {'fillOpacity': 1, 'weight': 2, 'color': SMBG_COPPER}
-
-    # GeoJson pour le marquage (le point cliquable)
-    geojson_layer = folium.GeoJson(
-        geojson_data,
-        name="Lots",
-        style_function=style_function,
-        highlight_function=highlight_function,
-        tooltip=False, # Désactiver le tooltip
-        popup=False # Désactiver le popup
-    ).add_to(m)
-
-    # Ajout des marqueurs Textes (pour afficher la référence)
-    for index, row in df_map.iterrows():
-        lat, lon = row['Latitude'], row['Longitude']
-        ref = row['Ref Formatée']
-
-        # Utilisation d'un DivIcon pour afficher le texte au centre du cercle
-        html = f"""
-        <div style="
-            font-family: Futura, {FONT_FALLBACK};
-            color: white; 
-            font-size: 10px; 
-            font-weight: bold;
-            line-height: 20px;
-            text-align: center;
-            width: 20px;
-            height: 20px;
-            pointer-events: none; /* Important pour laisser le clic passer au GeoJson */
-        ">{ref}</div>
-        """
-        icon = folium.DivIcon(html=html, icon_size=(20, 20), icon_anchor=(10, 10))
+        # 7. Pins sur la carte: ABSOLUMENT AUCUN POPUP, style personnalisé
         
-        folium.Marker(
-            location=[lat, lon],
-            icon=icon,
-            tooltip=False,
-            popup=False
+        # Création du GeoJson pour gérer le clic sans popup
+        geojson_data = {
+            "type": "FeatureCollection",
+            "features": []
+        }
+
+        for index, row in df_map.iterrows():
+            lat, lon = row['Latitude'], row['Longitude']
+            ref = row['Ref Formatée']
+            lot_key = row['lot_key']
+
+            # Utilisation d'un cercle (CircleMarker) pour le pin
+            # J'ajoute le lot_key dans les propriétés pour le récupérer via st_folium
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat] 
+                },
+                "properties": {
+                    "lot_key": lot_key,
+                    "ref": ref
+                }
+            }
+            geojson_data["features"].append(feature)
+
+        # Style pour le CircleMarker (le cercle)
+        def style_function(feature):
+            return {
+                'fillColor': SMBG_BLUE,
+                'color': '#333333',  # Contour fin sombre
+                'weight': 1,
+                'fillOpacity': 0.8,
+                'radius': 10  # Taille du cercle
+            }
+
+        # Style pour le hover (curseur main)
+        highlight_function = lambda x: {'fillOpacity': 1, 'weight': 2, 'color': SMBG_COPPER}
+
+        # GeoJson pour le marquage (le point cliquable)
+        geojson_layer = folium.GeoJson(
+            geojson_data,
+            name="Lots",
+            style_function=style_function,
+            highlight_function=highlight_function,
+            tooltip=False, # Désactiver le tooltip
+            popup=False # Désactiver le popup
         ).add_to(m)
+
+        # Ajout des marqueurs Textes (pour afficher la référence)
+        for index, row in df_map.iterrows():
+            lat, lon = row['Latitude'], row['Longitude']
+            ref = row['Ref Formatée']
+
+            # Utilisation d'un DivIcon pour afficher le texte au centre du cercle
+            html = f"""
+            <div style="
+                font-family: Futura, {FONT_FALLBACK};
+                color: white; 
+                font-size: 10px; 
+                font-weight: bold;
+                line-height: 20px;
+                text-align: center;
+                width: 20px;
+                height: 20px;
+                pointer-events: none; /* Important pour laisser le clic passer au GeoJson */
+            ">{ref}</div>
+            """
+            icon = folium.DivIcon(html=html, icon_size=(20, 20), icon_anchor=(10, 10))
+            
+            folium.Marker(
+                location=[lat, lon],
+                icon=icon,
+                tooltip=False,
+                popup=False
+            ).add_to(m)
 
     return m, geojson_layer
 
@@ -804,6 +806,7 @@ def main():
     st.markdown('<div id="map_container">', unsafe_allow_html=True)
     
     # --- 7. Rendu de la Carte (Zone B) ---
+    # Ici, m est garanti d'être un folium.Map, et geojson_layer est garanti d'être défini (ou None)
     m, geojson_layer = create_folium_map()
     
     # Rendre la carte et récupérer l'état du clic
