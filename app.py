@@ -429,18 +429,18 @@ def reset_filters():
     """Réinitialise tous les filtres et ferme le panneau droit."""
     
     # 8. Réinitialiser: décocher toutes les cases
-    for region in st.session_state.data['Région'].unique():
-        st.session_state.region_checks[region] = False
-        if region in st.session_state.dept_checks:
+    if 'region_checks' in st.session_state:
+        for region in st.session_state.region_checks.keys():
+            st.session_state.region_checks[region] = False
+    if 'dept_checks' in st.session_state:
+        for region in st.session_state.dept_checks.keys():
             for dept in st.session_state.dept_checks[region].keys():
                 st.session_state.dept_checks[region][dept] = False
                 
-    for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
-        if col_name in st.session_state.data.columns:
-            for value in st.session_state.data[col_name].unique():
-                # On utilise .get() pour gérer le cas où la clé n'existe pas encore dans other_checks
-                if col_name in st.session_state.other_checks and value in st.session_state.other_checks[col_name]:
-                    st.session_state.other_checks[col_name][value] = False
+    if 'other_checks' in st.session_state:
+        for col_name in st.session_state.other_checks.keys():
+            for value in st.session_state.other_checks[col_name].keys():
+                st.session_state.other_checks[col_name][value] = False
 
     # 8. Réinitialiser: réinitialiser les sliders
     st.session_state.gla_range = st.session_state.gla_min_max
@@ -583,12 +583,12 @@ def render_sidebar():
 # --- 7. RENDU DE LA CARTE (ZONE CENTRALE) ---
 
 def create_folium_map():
-    """Crée la carte Folium avec les pins personnalisés et la logique de clic."""
-    df_map = st.session_state.filtered_data
+    """Crée la carte Folium avec les pins personnalisés et la logique de clic.
     
-    # --- CORRECTION CRITIQUE: Initialiser geojson_layer ---
-    # Ceci empêche le TypeError/NameError lorsque df_map est vide.
-    geojson_layer = None
+    REMARQUE IMPORTANTE : La variable geojson_layer n'est plus retournée car
+    elle n'est pas nécessaire pour st_folium et était une source potentielle de TypeError/sérialisation.
+    """
+    df_map = st.session_state.filtered_data
     
     if df_map.empty or df_map['Latitude'].isnull().all():
         # Centre par défaut si aucune donnée filtrée
@@ -649,7 +649,7 @@ def create_folium_map():
         highlight_function = lambda x: {'fillOpacity': 1, 'weight': 2, 'color': SMBG_COPPER}
 
         # GeoJson pour le marquage (le point cliquable)
-        geojson_layer = folium.GeoJson(
+        folium.GeoJson(
             geojson_data,
             name="Lots",
             style_function=style_function,
@@ -686,7 +686,8 @@ def create_folium_map():
                 popup=False
             ).add_to(m)
 
-    return m, geojson_layer
+    # CORRECTION : Retourne uniquement la carte 'm'
+    return m 
 
 
 # --- 8. RENDU DU PANNEAU DE DÉTAILS (VOLET DROIT) ---
@@ -775,11 +776,8 @@ def handle_map_click(map_result):
             st.rerun()
             return
             
-    # 7. Interaction: Clic sur carte hors pin → fermeture du panneau droit
-    # Cela est géré par la logique du clic sur la carte elle-même.
-    # st_folium renvoie aussi les coordonnées du clic sur la carte.
-    # Si on arrive ici et qu'un lot était sélectionné, on le ferme.
-    if st.session_state.selected_lot_key:
+    # Traitement du clic sur carte (hors pin) via le callback JS (custom_event)
+    if map_result and map_result.get('custom_event') == 'close_panel_requested' and st.session_state.selected_lot_key:
         st.session_state.selected_lot_key = None
         st.rerun()
 
@@ -806,8 +804,8 @@ def main():
     st.markdown('<div id="map_container">', unsafe_allow_html=True)
     
     # --- 7. Rendu de la Carte (Zone B) ---
-    # Ici, m est garanti d'être un folium.Map, et geojson_layer est garanti d'être défini (ou None)
-    m, geojson_layer = create_folium_map()
+    # CORRECTION : Uniquement la carte 'm' est retournée et décompressée
+    m = create_folium_map()
     
     # Rendre la carte et récupérer l'état du clic
     map_result = st_folium(
@@ -838,15 +836,8 @@ def main():
     
     # --- 9. Post-traitement du clic sur la carte ---
     
-    # 1. Traiter le clic sur un pin via 'last_object_clicked'
-    if map_result and map_result.get('last_object_clicked'):
-        # handle_map_click s'occupe de l'ouverture
-        handle_map_click(map_result) 
-        
-    # 2. Traiter le clic de fermeture (clic sur la carte hors pin) via le callback JS
-    if map_result and map_result.get('custom_event') == 'close_panel_requested' and st.session_state.selected_lot_key:
-        st.session_state.selected_lot_key = None
-        st.rerun()
+    # Gérer le clic sur la carte, qu'il s'agisse d'un pin ou d'un clic de fermeture
+    handle_map_click(map_result)
 
 
 if __name__ == "__main__":
