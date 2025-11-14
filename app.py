@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour l'indentation et nettoyage des anciennes règles) =====
+# ===== CSS global (Mise à jour pour l'indentation renforcée) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -126,8 +126,22 @@ st.markdown(f"""
 /* Fix du padding Streamlit (revert partiel) */
 [data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
 
-/* AJUSTEMENT : Indentation départements à 30px pour un meilleur décalage */
-.dept-wrap {{ margin-left:30px !important; }}
+/* AJUSTEMENT RENFORCÉ : Indentation départements à 30px */
+.dept-wrap {{ 
+    margin-left: 30px !important; 
+}}
+
+/* Neutralise le padding interne des cases à cocher Streamlit pour les forcer à respecter le margin-left du .dept-wrap */
+.dept-wrap [data-testid="stBlock"] {{ 
+    margin-left: 0px !important; 
+    padding-left: 0px !important; 
+}}
+/* Cible l'ancienne classe Streamlit au cas où */
+.dept-wrap .stCheckbox {{
+    padding-left: 0px !important;
+    margin-left: 0px !important;
+}}
+
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
@@ -159,9 +173,8 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Nettoyage de l'ancienne marge supérieure) =====
+# ===== SIDEBAR (Code inchangé) =====
 with st.sidebar:
-    # Suppression de la marge de 20px demandée précédemment
     
     b64 = logo_base64()
     if b64:
@@ -367,7 +380,7 @@ if sel_ref:
         cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
         for idx,champ in enumerate(cols_slice, start=INDEX_START):
             sraw=str(r.get(champ,"")).strip()
-            if sraw.lower() in ("","néant","-","/"): continue
+            if sraw.lower() in ("","néant","-","/") or (pd.isna(value) and isinstance(value, float)): continue
             if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
                 html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
                             f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
