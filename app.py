@@ -35,6 +35,10 @@ DETAIL_COLUMNS_KEYS = [
 # Colonne spéciale Google Maps (colonne H)
 MAPS_URL_COLUMN = 'Lien Google Maps'
 
+# Valeurs par défaut de sécurité pour les sliders
+DEFAULT_GLA_RANGE = (0.0, 1000.0)
+DEFAULT_LOYER_RANGE = (0.0, 100000.0)
+
 # --- 2. FONCTIONS UTILITAIRES DE DONNÉES ---
 
 def format_reference(ref):
@@ -89,10 +93,13 @@ def format_value(key, value):
     return str(value)
 
 def load_and_prepare_data():
-    """Charge le fichier Excel (simulé) et prépare le DataFrame."""
+    """Charge le fichier Excel (simulé) et prépare le DataFrame, avec gestion robuste des min/max."""
+    df = pd.DataFrame() # Initialiser à vide
+
     try:
         # Tente de charger le vrai fichier si possible
         df = pd.read_excel('data/Liste des lots.xlsx')
+        st.info("Fichier Excel chargé avec succès.")
     except (FileNotFoundError, ValueError):
         # Simulation des données si le fichier n'est pas trouvé
         data = {
@@ -122,11 +129,20 @@ def load_and_prepare_data():
         df = pd.DataFrame(data)
         st.warning("⚠️ **Mode de démonstration :** Le fichier Excel `data/Liste des lots.xlsx` n'a pas été trouvé. Les données sont simulées.")
 
+    if df.empty:
+        # En cas d'échec de chargement ou de DataFrame vide
+        st.error("Aucune donnée lot valide n'a pu être chargée.")
+        st.session_state.gla_min_max = DEFAULT_GLA_RANGE
+        st.session_state.loyer_min_max = DEFAULT_LOYER_RANGE
+        return pd.DataFrame()
+
     # Assurer que les colonnes critiques existent et sont du bon type
     required_map_cols = ['Latitude', 'Longitude', 'Référence annonce']
     for col in required_map_cols:
         if col not in df.columns:
             st.error(f"La colonne essentielle '{col}' est manquante dans les données.")
+            st.session_state.gla_min_max = DEFAULT_GLA_RANGE
+            st.session_state.loyer_min_max = DEFAULT_LOYER_RANGE
             return pd.DataFrame()
 
     df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
@@ -144,31 +160,58 @@ def load_and_prepare_data():
     # Créer une clé unique pour le GeoJson
     df['lot_key'] = 'Lot_' + df['Ref Formatée'].astype(str)
     
-    # Stocker les min/max pour les sliders
+    # --- GESTION ROBUSTE DES MIN/MAX POUR LES SLIDERS (Fix du bug) ---
+    
     if 'Surface GLA' in df.columns and 'Loyer annuel' in df.columns:
-        st.session_state.gla_min_max = (df['Surface GLA'].min(), df['Surface GLA'].max())
-        st.session_state.loyer_min_max = (df['Loyer annuel'].min(), df['Loyer annuel'].max())
+        # Assurer que les colonnes sont numériques et gérer les NaN
+        gla_series = pd.to_numeric(df['Surface GLA'], errors='coerce').dropna()
+        loyer_series = pd.to_numeric(df['Loyer annuel'], errors='coerce').dropna()
+
+        # Calculer les min/max robustement
+        if not gla_series.empty:
+            min_gla = float(gla_series.min())
+            max_gla = float(gla_series.max())
+            st.session_state.gla_min_max = (min_gla, max_gla)
+        else:
+            st.session_state.gla_min_max = DEFAULT_GLA_RANGE
+
+        if not loyer_series.empty:
+            min_loyer = float(loyer_series.min())
+            max_loyer = float(loyer_series.max())
+            st.session_state.loyer_min_max = (min_loyer, max_loyer)
+        else:
+            st.session_state.loyer_min_max = DEFAULT_LOYER_RANGE
+    else:
+        # Si les colonnes de slider sont manquantes
+        st.session_state.gla_min_max = DEFAULT_GLA_RANGE
+        st.session_state.loyer_min_max = DEFAULT_LOYER_RANGE
 
     return df
 
-# --- 3. GESTION DES ÉTATS ET INITIALISATION ---
+# --- 3. GESTION DES ÉTATS ET INITIALISATION (Fix du bug) ---
 
-if 'data' not in st.session_state:
+# S'assurer que les valeurs min/max de la plage existent toujours avant toute autre initialisation
+if 'gla_min_max' not in st.session_state or 'loyer_min_max' not in st.session_state:
+    # Charger les données initiales et calculer les min/max robustes
     st.session_state.data = load_and_prepare_data()
 
+# Initialiser les plages de valeurs du slider avec les bornes max/min par défaut
+if 'gla_range' not in st.session_state:
+    st.session_state.gla_range = st.session_state.gla_min_max
+
+if 'loyer_range' not in st.session_state:
+    st.session_state.loyer_range = st.session_state.loyer_min_max
+
+# Initialisation des autres états
 if 'filtered_data' not in st.session_state:
     st.session_state.filtered_data = st.session_state.data.copy()
 
 if 'selected_lot_key' not in st.session_state:
     st.session_state.selected_lot_key = None
 
-if 'gla_range' not in st.session_state and 'gla_min_max' in st.session_state:
-    st.session_state.gla_range = st.session_state.gla_min_max
-
-if 'loyer_range' not in st.session_state and 'loyer_min_max' in st.session_state:
-    st.session_state.loyer_range = st.session_state.loyer_min_max
-
 # --- 4. CSS D'INJECTION (Layout et Style CRITIQUE) ---
+
+# ... (Reste du CSS inchangé, car il n'était pas la cause de l'erreur) ...
 
 # Fonction pour injecter le CSS critique
 def inject_custom_css():
@@ -365,20 +408,22 @@ def filter_data():
 
     # --- 2. Filtre Sliders (Surface GLA) ---
     min_gla, max_gla = st.session_state.gla_range
+    # Utiliser les données non nulles pour le filtrage
     if 'Surface GLA' in df.columns:
-        df = df[(df['Surface GLA'] >= min_gla) & (df['Surface GLA'] <= max_gla)]
+        df = df[pd.to_numeric(df['Surface GLA'], errors='coerce').between(min_gla, max_gla, inclusive='both')]
         
     # --- 3. Filtre Sliders (Loyer annuel) ---
     min_loyer, max_loyer = st.session_state.loyer_range
     if 'Loyer annuel' in df.columns:
-        df = df[(df['Loyer annuel'] >= min_loyer) & (df['Loyer annuel'] <= max_loyer)]
+        df = df[pd.to_numeric(df['Loyer annuel'], errors='coerce').between(min_loyer, max_loyer, inclusive='both')]
+
 
     # --- 4. Autres cases à cocher (Emplacement, Typologie, Extraction, Restauration) ---
     for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
         if col_name in df.columns:
             selected_values = [v for v, checked in st.session_state.other_checks.get(col_name, {}).items() if checked]
             if selected_values:
-                df = df[df[col_name].isin(selected_values)]
+                df = df[df[col_name].astype(str).isin(map(str, selected_values))]
 
     st.session_state.filtered_data = df
 
@@ -395,13 +440,13 @@ def reset_filters():
     for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
         if col_name in st.session_state.data.columns:
             for value in st.session_state.data[col_name].unique():
-                st.session_state.other_checks.get(col_name, {})[value] = False
+                # On utilise .get() pour gérer le cas où la clé n'existe pas encore dans other_checks
+                if col_name in st.session_state.other_checks and value in st.session_state.other_checks[col_name]:
+                    st.session_state.other_checks[col_name][value] = False
 
     # 8. Réinitialiser: réinitialiser les sliders
-    if 'gla_min_max' in st.session_state:
-        st.session_state.gla_range = st.session_state.gla_min_max
-    if 'loyer_min_max' in st.session_state:
-        st.session_state.loyer_range = st.session_state.loyer_min_max
+    st.session_state.gla_range = st.session_state.gla_min_max
+    st.session_state.loyer_range = st.session_state.loyer_min_max
     
     # 8. Réinitialiser: refermer le panneau droit
     st.session_state.selected_lot_key = None
@@ -429,7 +474,11 @@ def render_sidebar():
     # --- 8.1 Filtres Région / Département imbriqués ---
     st.markdown("#### Région / Département")
 
-    unique_regions = st.session_state.data['Région'].unique()
+    # Utiliser st.session_state.data pour récupérer les régions, car elles sont statiques
+    if not st.session_state.data.empty:
+        unique_regions = st.session_state.data['Région'].unique()
+    else:
+        unique_regions = []
     
     # Initialisation des states si nécessaire
     if 'region_checks' not in st.session_state:
@@ -447,6 +496,7 @@ def render_sidebar():
 
         # Affichage des Départements si la Région est cochée
         if st.session_state.region_checks[region]:
+            # Utiliser la copie des données originales pour les départements
             region_df = st.session_state.data[st.session_state.data['Région'] == region]
             unique_departments = region_df['Département'].unique()
 
@@ -455,43 +505,49 @@ def render_sidebar():
             
             for dept in unique_departments:
                 # Checkbox Département (avec indentation via CSS)
+                # On utilise st.markdown pour injecter le HTML/CSS de l'indentation
+                st.markdown(
+                    f'<div class="department-checkbox">', unsafe_allow_html=True
+                )
                 st.session_state.dept_checks[region][dept] = st.checkbox(
                     dept, 
                     value=st.session_state.dept_checks[region].get(dept, False), 
                     key=f"dept_check_{region}_{dept}",
-                    # Utilisation d'un sélecteur CSS spécifique pour l'indentation
-                    help=f'<div class="department-checkbox"></div>'
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
     # --- 8.2 Filtres Sliders ---
     
+    min_gla_all, max_gla_all = st.session_state.gla_min_max
+    min_loyer_all, max_loyer_all = st.session_state.loyer_min_max
+    
     # Surface GLA
     st.markdown("#### Surface GLA (m²)")
-    if 'gla_min_max' in st.session_state:
-        min_gla_all, max_gla_all = st.session_state.gla_min_max
-        st.session_state.gla_range = st.slider(
-            "Sélectionnez la plage",
-            min_value=float(min_gla_all),
-            max_value=float(max_gla_all),
-            value=st.session_state.gla_range,
-            key='gla_range_slider',
-            label_visibility="collapsed"
-        )
+    # Le type doit être Float pour éviter les erreurs de conversion avec float()
+    st.session_state.gla_range = st.slider(
+        "Sélectionnez la plage",
+        min_value=float(min_gla_all),
+        max_value=float(max_gla_all),
+        value=st.session_state.gla_range,
+        step=1.0, # Assure que le pas est float
+        key='gla_range_slider',
+        label_visibility="collapsed"
+    )
     
     # Loyer annuel
     st.markdown("#### Loyer annuel (€)")
-    if 'loyer_min_max' in st.session_state:
-        min_loyer_all, max_loyer_all = st.session_state.loyer_min_max
-        st.session_state.loyer_range = st.slider(
-            "Sélectionnez la plage",
-            min_value=float(min_loyer_all),
-            max_value=float(max_loyer_all),
-            value=st.session_state.loyer_range,
-            key='loyer_range_slider',
-            label_visibility="collapsed"
-        )
+    # Le type doit être Float pour éviter les erreurs de conversion avec float()
+    st.session_state.loyer_range = st.slider(
+        "Sélectionnez la plage",
+        min_value=float(min_loyer_all),
+        max_value=float(max_loyer_all),
+        value=st.session_state.loyer_range,
+        step=1.0, # Assure que le pas est float
+        key='loyer_range_slider',
+        label_visibility="collapsed"
+    )
         
     st.markdown("---")
 
@@ -511,10 +567,15 @@ def render_sidebar():
                 st.session_state.other_checks[col_name] = {v: False for v in unique_values}
                 
             for value in unique_values:
-                st.session_state.other_checks[col_name][value] = st.checkbox(
-                    str(value),
-                    value=st.session_state.other_checks[col_name].get(value, False),
-                    key=f"other_check_{col_name}_{value}"
+                # Assurer que la clé est une chaîne de caractères pour la compatibilité
+                str_value = str(value) 
+                if str_value not in st.session_state.other_checks[col_name]:
+                    st.session_state.other_checks[col_name][str_value] = False
+
+                st.session_state.other_checks[col_name][str_value] = st.checkbox(
+                    str_value,
+                    value=st.session_state.other_checks[col_name].get(str_value, False),
+                    key=f"other_check_{col_name}_{str_value}"
                 )
 
     # Déclencher le filtrage après toutes les interactions
@@ -527,7 +588,7 @@ def create_folium_map():
     """Crée la carte Folium avec les pins personnalisés et la logique de clic."""
     df_map = st.session_state.filtered_data
     
-    if df_map.empty:
+    if df_map.empty or df_map['Latitude'].isnull().all():
         # Centre par défaut si aucune donnée filtrée
         m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, control_scale=True)
     else:
@@ -535,10 +596,14 @@ def create_folium_map():
         center_lat = df_map['Latitude'].mean()
         center_lon = df_map['Longitude'].mean()
         m = folium.Map(location=[center_lat, center_lon], zoom_start=10, control_scale=True)
-        # Ajuster le zoom pour contenir tous les points si trop peu de points
-        if len(df_map) > 0:
+        # Ajuster le zoom pour contenir tous les points
+        try:
              m.fit_bounds([[df_map['Latitude'].min(), df_map['Longitude'].min()], 
                            [df_map['Latitude'].max(), df_map['Longitude'].max()]])
+        except ValueError:
+             # Gère le cas où un seul point est présent ou les min/max sont identiques
+             pass
+
 
     # 7. Pins sur la carte: ABSOLUMENT AUCUN POPUP, style personnalisé
     
@@ -635,7 +700,13 @@ def render_detail_panel():
         st.html(js_update)
         
         # Trouver le lot sélectionné
-        selected_lot = st.session_state.data[st.session_state.data['lot_key'] == lot_key].iloc[0]
+        selected_lot_df = st.session_state.data[st.session_state.data['lot_key'] == lot_key]
+        if selected_lot_df.empty:
+            # Cas rare où le lot est désactivé entre le clic et l'affichage
+            st.session_state.selected_lot_key = None
+            return 
+            
+        selected_lot = selected_lot_df.iloc[0]
         
         # Début du conteneur HTML fixe (Volet C)
         st.markdown('<div id="detail-panel">', unsafe_allow_html=True)
@@ -742,21 +813,14 @@ def main():
         height='100%', 
         key="smbg_map", 
         # Propriétés importantes pour le clic (éviter les popups)
-        returned_objects=["last_object_clicked", "last_click"], 
+        returned_objects=["last_object_clicked", "last_click", "custom_event"], 
         # Déclencher le JS pour gérer la fermeture du panneau au clic sur la carte
-        # sans affecter la carte elle-même.
         js_callback="""
             function(e) { 
                 if (e.last_click && !e.last_object_clicked) {
                     // Clic sur la carte (hors pin)
-                    if (window.stPanelState === 'visible') {
-                        // Simuler la fermeture du panneau via Streamlit
-                        Streamlit.set
-                        Streamlit.setComponentValue({
-                            'action': 'close_panel' 
-                        });
-                        return 'close_panel_event';
-                    }
+                    // On ne peut pas modifier la session_state directement, on passe par un custom_event
+                    return {'custom_event': 'close_panel_requested'};
                 }
                 return e; 
             }
@@ -776,9 +840,8 @@ def main():
         # handle_map_click s'occupe de l'ouverture
         handle_map_click(map_result) 
         
-    # 2. Traiter le clic de fermeture (clic sur la carte hors pin) via 'last_click' ou le callback JS
-    # Si le callback JS a été déclenché, il envoie un objet spécial
-    if map_result and map_result.get('action') == 'close_panel' and st.session_state.selected_lot_key:
+    # 2. Traiter le clic de fermeture (clic sur la carte hors pin) via le callback JS
+    if map_result and map_result.get('custom_event') == 'close_panel_requested' and st.session_state.selected_lot_key:
         st.session_state.selected_lot_key = None
         st.rerun()
 
