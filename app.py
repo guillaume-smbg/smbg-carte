@@ -159,9 +159,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Retrait du div de 25px, car géré par CSS) =====
+# ===== SIDEBAR (Retrait du div de 10px, car géré par CSS) =====
 with st.sidebar:
-    # Retiré : st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+    # Retiré : st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     b64 = logo_base64()
     if b64:
