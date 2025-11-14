@@ -17,9 +17,11 @@ COPPER_SMBG = "#C67B42"
 BG_COLOR = BLUE_SMBG # Couleur de fond pour les sidebars
 
 # Chemins des assets (Simulés pour le déploiement sur Streamlit Cloud)
-LOGO_PATH = "assets/Logo bleu crop.png"
-# CORRECTION: Utilisation du chemin conforme au cahier des charges /data/
-DATA_FILE_PATH = "data/Liste des lots.xlsx - Tableau recherche.csv" 
+# Utilisation de l'image de secours si le chemin n'est pas trouvé
+LOGO_PATH = "assets/Logo bleu crop.png" 
+
+# CORRECTION: Utilisation du nom de fichier exact du fichier uploadé.
+DATA_FILE_PATH = "Liste des lots.xlsx - Tableau recherche.csv" 
 
 # Configuration de la page Streamlit
 st.set_page_config(
@@ -106,7 +108,9 @@ def is_value_displayable(value):
         return False
     try:
         # Vérifie si c'est un zéro numérique après conversion
-        if float(re.sub(r'[^\d\.\,]', '', value_str).replace(',', '.')) == 0.0:
+        # On utilise une vérification moins stricte pour les strings qui contiennent du texte
+        numeric_part = re.sub(r'[^\d\.\,]', '', value_str).replace(',', '.')
+        if numeric_part and float(numeric_part) == 0.0:
              return False
     except ValueError:
         pass # Pas un nombre, on continue
@@ -143,7 +147,8 @@ def load_data():
             # Essayer avec le séparateur point-virgule (courant en France)
             df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
         except FileNotFoundError:
-            st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier le chemin et le nom du fichier.")
+            # Si le fichier uploadé n'est pas trouvé (par exemple si le nom n'est pas exact)
+            st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier le nom du fichier.")
             # Création d'un DataFrame vide de secours
             return pd.DataFrame(), {}
         except Exception as e:
@@ -154,89 +159,95 @@ def load_data():
         return pd.DataFrame(), {}
     
     # 2. Normalisation des noms de colonnes (CRITIQUE pour le KeyError)
-    original_cols = {col: normalize_column_name(col) for col in df.columns}
-    df.columns = original_cols.values()
-    
-    # 3. Définition des mappings internes et d'affichage
-    
-    # Mapping des noms normalisés aux noms d'affichage désirés
-    # Ces noms internes DOIVENT correspondre aux noms normalisés dans le DF
+    # Mapping des noms originaux normalisés aux noms d'affichage désirés (simplifiés)
     INTERNAL_COLUMNS_MAP = {
-        'reference_annonce': 'Ref_Annonce',
-        'lien_google_maps': 'Lien_GMaps',
-        'surface_gla': 'Surface_GLA',
-        'loyer_annuel': 'Loyer_Annuel',
-        'charges_annuelles': 'Charges_Annuelles',
-        'taxe_fonciere': 'Taxe_Fonciere',
-        'emplacement': 'Emplacement',
-        'typologie': 'Typologie',
-        'extraction': 'Extraction',
-        'restauration': 'Restauration',
-        'latitude': 'Latitude',
-        'longitude': 'Longitude',
-        'actif': 'Actif',
-        'region': 'Region',
-        'departement': 'Departement',
-        'honoraires': 'Honoraires',
-        # Ajouter d'autres colonnes utilisées pour les détails ici
-        'ville': 'Ville',
-        'adresse': 'Adresse',
-        'repartition_surface_gla': 'Répartition surface GLA',
-        'surface_utile': 'Surface utile',
-        'repartition_surface_utile': 'Répartition surface utile',
-        'loyer_mensuel': 'Loyer Mensuel',
-        'loyer_m2': 'Loyer €/m²',
-        'loyer_variable': 'Loyer Variable',
-        'charges_mensuelles': 'Charges Mensuelles',
-        'charges_m2': 'Charges €/m²',
-        'taxe_fonciere_m2': 'Taxe Foncière €/m²',
-        'marketing': 'Marketing',
-        'marketing_m2': 'Marketing €/m²',
-        'total_l_c_m': 'Total (L+C+M)',
-        'depot_de_garantie': 'Dépôt de garantie',
-        'gapd': 'GAPD',
-        'gestion': 'Gestion',
-        'etat_de_livraison': 'Etat de livraison',
-        'environnement_commercial': 'Environnement Commercial',
-        'commentaires': 'Commentaires',
+        # Format: normalized_name_from_file: Simplified_Internal_Name
+        normalize_column_name('Référence annonce'): 'Ref_Annonce',
+        normalize_column_name('Lien Google Maps'): 'Lien_GMaps',
+        normalize_column_name('Surface GLA'): 'Surface_GLA',
+        normalize_column_name('Loyer annuel'): 'Loyer_Annuel',
+        normalize_column_name('Charges annuelles'): 'Charges_Annuelles',
+        normalize_column_name('Taxe foncière'): 'Taxe_Fonciere',
+        normalize_column_name('Emplacement'): 'Emplacement',
+        normalize_column_name('Typologie'): 'Typologie',
+        normalize_column_name('Extraction'): 'Extraction',
+        normalize_column_name('Restauration'): 'Restauration',
+        normalize_column_name('Latitude'): 'Latitude',
+        normalize_column_name('Longitude'): 'Longitude',
+        normalize_column_name('Actif'): 'Actif',
+        normalize_column_name('Région'): 'Region',
+        normalize_column_name('Département'): 'Departement',
+        normalize_column_name('Honoraires'): 'Honoraires',
+        
+        # Colonnes de détails
+        normalize_column_name('Ville'): 'Ville',
+        normalize_column_name('Adresse'): 'Adresse',
+        normalize_column_name('Répartition surface GLA'): 'Répartition surface GLA',
+        normalize_column_name('Surface utile'): 'Surface utile',
+        normalize_column_name('Répartition surface utile'): 'Répartition surface utile',
+        normalize_column_name('Loyer Mensuel'): 'Loyer Mensuel',
+        normalize_column_name('Loyer €/m²'): 'Loyer €/m²',
+        normalize_column_name('Loyer variable'): 'Loyer Variable',
+        normalize_column_name('Charges Mensuelles'): 'Charges Mensuelles',
+        normalize_column_name('Charges €/m²'): 'Charges €/m²',
+        normalize_column_name('Taxe foncière €/m²'): 'Taxe Foncière €/m²',
+        normalize_column_name('Marketing'): 'Marketing',
+        normalize_column_name('Marketing €/m²'): 'Marketing €/m²',
+        normalize_column_name('Total (L+C+M)'): 'Total (L+C+M)',
+        normalize_column_name('Dépôt de garantie'): 'Dépôt de garantie',
+        normalize_column_name('GAPD'): 'GAPD',
+        normalize_column_name('Gestion'): 'Gestion',
+        normalize_column_name('Etat de livraison'): 'Etat de livraison',
+        normalize_column_name('Environnement Commercial'): 'Environnement Commercial',
+        normalize_column_name('Commentaires'): 'Commentaires',
+        # N° Département n'est pas utilisé dans l'app, mais on le garde pour le mapping
+        normalize_column_name('N° Département'): 'N° Département', 
     }
-
-    # Création du Dictionnaire de mapping pour l'affichage des détails
-    DETAIL_COLUMNS_MAPPING = {}
-    for internal_key, display_name in INTERNAL_COLUMNS_MAP.items():
-        if internal_key in df.columns:
-            # On utilise le nom interne (Ref_Annonce, Region...) comme clé dans le DF final
-            # et le nom d'affichage comme valeur
-            DETAIL_COLUMNS_MAPPING[INTERNAL_COLUMNS_MAP.get(internal_key, internal_key)] = display_name
     
-    # Renommage des colonnes du DF pour utiliser les clés internes simplifiées (Ref_Annonce, Region...)
-    df = df.rename(columns={
-        normalized_name: simplified_name 
+    # 3. Renommage des colonnes du DF pour utiliser les clés internes simplifiées (Ref_Annonce, Region...)
+    df_normalized_cols = {col: normalize_column_name(col) for col in df.columns}
+    
+    rename_dict = {}
+    
+    for original_col, normalized_col in df_normalized_cols.items():
+        if normalized_col in INTERNAL_COLUMNS_MAP:
+            # Assigner le nom interne simplifié au nom original du DF
+            rename_dict[original_col] = INTERNAL_COLUMNS_MAP[normalized_col]
+        # Sinon, on garde le nom original de la colonne si non critique
+
+    df = df.rename(columns=rename_dict)
+    
+    # Création du Dictionnaire de mapping pour l'affichage des détails (Nom interne: Nom d'affichage)
+    DETAIL_COLUMNS_MAPPING = {
+        simplified_name: display_name 
         for normalized_name, simplified_name in INTERNAL_COLUMNS_MAP.items() 
-        if normalized_name in df.columns
-    })
+        for display_name in [simplified_name]
+        if simplified_name in df.columns
+    }
     
     # Liste des colonnes critiques attendues (simplifiées)
-    REQUIRED_COLS = ['Region', 'Departement', 'Latitude', 'Longitude', 'Ref_Annonce', 'Actif']
+    REQUIRED_COLS = ['Region', 'Departement', 'Latitude', 'Longitude', 'Ref_Annonce', 'Actif', 'Surface_GLA', 'Loyer_Annuel']
     
     # 4. Vérification des colonnes critiques
     missing_cols = [col for col in REQUIRED_COLS if col not in df.columns]
     if missing_cols:
-        st.error(f"Erreur de données: Colonnes manquantes après normalisation: {', '.join(missing_cols)}. (Colonnes trouvées: {', '.join(df.columns)})")
+        st.error(f"Erreur de données: Colonnes critiques manquantes après normalisation. Vérifiez que les noms originaux sont exacts et non vides. Colonnes manquantes: {', '.join(missing_cols)}. (Colonnes trouvées: {', '.join(df.columns)})")
         return pd.DataFrame(), {}
 
 
     # 5. Filtrer uniquement les lots 'Actif'
-    if 'Actif' in df.columns:
-        df = df[df['Actif'].astype(str).str.lower().str.strip() == 'oui'].copy()
+    df = df[df['Actif'].astype(str).str.lower().str.strip() == 'oui'].copy()
     
     # 6. S'assurer que les colonnes clés sont présentes et nettoyer les NaNs
-    df = df.dropna(subset=['Latitude', 'Longitude'])
     df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
     df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
     
+    # Convertir les valeurs numériques pour les sliders
+    df['Surface_GLA'] = pd.to_numeric(df['Surface_GLA'], errors='coerce')
+    df['Loyer_Annuel'] = pd.to_numeric(df['Loyer_Annuel'], errors='coerce')
+    
     # Supprimer les lignes avec des coordonnées non valides
-    df = df.dropna(subset=['Latitude', 'Longitude', 'Ref_Annonce'])
+    df = df.dropna(subset=['Latitude', 'Longitude', 'Ref_Annonce', 'Surface_GLA', 'Loyer_Annuel'])
     
     # Appliquer le formatage de référence une fois
     df['Ref_Format'] = df['Ref_Annonce'].apply(format_reference)
@@ -251,10 +262,55 @@ def load_data():
              # Ajouter une colonne par défaut si elle est manquante pour éviter KeyError dans les filtres
              df[col] = 'N/A' 
              
-    # Mise à jour du DETAIL_COLUMNS_MAPPING pour garantir l'ordre des détails
-    # Ne garder que les colonnes existantes
+    # Rétablir l'ordre pour les détails: on itère sur la liste figée des noms simplifiés
+    ordered_detail_mapping = {
+        'Ref_Annonce': 'Référence annonce',
+        'Ville': 'Ville',
+        'Adresse': 'Adresse',
+        'Region': 'Région',
+        'Departement': 'Département',
+        'Emplacement': 'Emplacement',
+        'Typologie': 'Typologie',
+        'Type': 'Type',
+        'Etat de livraison': 'Etat de livraison',
+        'Extraction': 'Extraction',
+        'Restauration': 'Restauration',
+        
+        # Surfaces
+        'Surface_GLA': 'Surface GLA',
+        'Répartition surface GLA': 'Répartition surface GLA',
+        'Surface utile': 'Surface utile',
+        'Répartition surface utile': 'Répartition surface utile',
+
+        # Coûts
+        'Loyer_Annuel': 'Loyer annuel',
+        'Loyer Mensuel': 'Loyer Mensuel',
+        'Loyer €/m²': 'Loyer €/m²',
+        'Loyer Variable': 'Loyer Variable',
+        'Charges_Annuelles': 'Charges annuelles',
+        'Charges Mensuelles': 'Charges Mensuelles',
+        'Charges €/m²': 'Charges €/m²',
+        'Taxe_Fonciere': 'Taxe foncière',
+        'Taxe Foncière €/m²': 'Taxe foncière €/m²',
+        'Marketing': 'Marketing',
+        'Marketing €/m²': 'Marketing €/m²',
+        'Total (L+C+M)': 'Total (L+C+M)',
+        'Honoraires': 'Honoraires',
+        'Dépôt de garantie': 'Dépôt de garantie',
+        'GAPD': 'GAPD',
+        'Gestion': 'Gestion',
+        
+        # Commentaires / Environnement
+        'Environnement Commercial': 'Environnement Commercial',
+        'Commentaires': 'Commentaires',
+        
+        # Lien
+        'Lien_GMaps': 'Lien Google Maps',
+    }
+    
+    # Ne garder que les colonnes existantes dans le DF final
     final_detail_mapping = {
-        key: value for key, value in DETAIL_COLUMNS_MAPPING.items() if key in df.columns
+        key: value for key, value in ordered_detail_mapping.items() if key in df.columns
     }
 
     return df, final_detail_mapping
@@ -263,50 +319,64 @@ def load_data():
 df_data, DETAIL_COLUMNS_MAPPING = load_data()
 
 # Définir les valeurs min/max initiales
-MIN_SURFACE = df_data['Surface_GLA'].min() if not df_data.empty and 'Surface_GLA' in df_data.columns else 0
-MAX_SURFACE = df_data['Surface_GLA'].max() if not df_data.empty and 'Surface_GLA' in df_data.columns else 100
-MIN_LOYER = df_data['Loyer_Annuel'].min() if not df_data.empty and 'Loyer_Annuel' in df_data.columns else 0
-MAX_LOYER = df_data['Loyer_Annuel'].max() if not df_data.empty and 'Loyer_Annuel' in df_data.columns else 100000
+# Utilisez min/max uniquement des données après NaN/0 removal pour des sliders pertinents
+MIN_SURFACE = df_data['Surface_GLA'].min() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 0
+MAX_SURFACE = df_data['Surface_GLA'].max() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 100
+MIN_LOYER = df_data['Loyer_Annuel'].min() if not df_data.empty and 'Loyer_Annuel' in df_data.columns and not df_data['Loyer_Annuel'].empty else 0
+MAX_LOYER = df_data['Loyer_Annuel'].max() if not df_data.empty and 'Loyer_Annuel' in df_data.columns and not df_data['Loyer_Annuel'].empty else 100000
 
+# Pour éviter les problèmes si min == max
+if MIN_SURFACE == MAX_SURFACE and MIN_SURFACE != 0: MAX_SURFACE += 1
+if MIN_LOYER == MAX_LOYER and MIN_LOYER != 0: MAX_LOYER += 1
+    
 # Définir l'état initial des filtres pour le bouton Réinitialiser
 if 'filters' not in st.session_state:
+    # Si les données ne sont pas chargées, les ensembles seront vides
+    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns else set()
+    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns else set()
+    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns else set()
+    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns else set()
+    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns else set()
+    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns else set()
+    
     st.session_state.filters = {
-        'selected_regions': set(df_data['Region'].unique()) if not df_data.empty else set(),
-        'selected_departments': set(df_data['Departement'].unique()) if not df_data.empty else set(),
+        'selected_regions': unique_regions_init,
+        'selected_departments': unique_departments_init,
         'surface_range': (MIN_SURFACE, MAX_SURFACE),
         'loyer_range': (MIN_LOYER, MAX_LOYER),
-        'emplacement': set(df_data['Emplacement'].unique()) if not df_data.empty else set(),
-        'typologie': set(df_data['Typologie'].unique()) if not df_data.empty else set(),
-        'extraction': set(df_data['Extraction'].unique()) if not df_data.empty else set(),
-        'restauration': set(df_data['Restauration'].unique()) if not df_data.empty else set(),
+        'emplacement': unique_emplacement_init,
+        'typologie': unique_typologie_init,
+        'extraction': unique_extraction_init,
+        'restauration': unique_restauration_init,
         'selected_lot_ref': None, # Réf. du lot sélectionné pour le panneau droit
         'show_detail_panel': False # État du panneau droit
     }
-    
-    # Pour le cas où le DataFrame est vide
-    if df_data.empty:
-        st.session_state.filters['surface_range'] = (0, 1)
-        st.session_state.filters['loyer_range'] = (0, 1)
 
 
 # Fonction de réinitialisation complète
 def reset_filters():
     """Réinitialise tous les filtres à l'état initial (tout sélectionné/min-max) et ferme le panneau."""
+    
+    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns else set()
+    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns else set()
+    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns else set()
+    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns else set()
+    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns else set()
+    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns else set()
+    
     st.session_state.filters = {
-        'selected_regions': set(df_data['Region'].unique()) if not df_data.empty else set(),
-        'selected_departments': set(df_data['Departement'].unique()) if not df_data.empty else set(),
+        'selected_regions': unique_regions_init,
+        'selected_departments': unique_departments_init,
         'surface_range': (MIN_SURFACE, MAX_SURFACE),
         'loyer_range': (MIN_LOYER, MAX_LOYER),
-        'emplacement': set(df_data['Emplacement'].unique()) if not df_data.empty else set(),
-        'typologie': set(df_data['Typologie'].unique()) if not df_data.empty else set(),
-        'extraction': set(df_data['Extraction'].unique()) if not df_data.empty else set(),
-        'restauration': set(df_data['Restauration'].unique()) if not df_data.empty else set(),
+        'emplacement': unique_emplacement_init,
+        'typologie': unique_typologie_init,
+        'extraction': unique_extraction_init,
+        'restauration': unique_restauration_init,
         'selected_lot_ref': None,
         'show_detail_panel': False
     }
-    if df_data.empty:
-        st.session_state.filters['surface_range'] = (0, 1)
-        st.session_state.filters['loyer_range'] = (0, 1)
+
     # Rétablir les inputs de clic pour permettre le nouveau clic après réinitialisation
     st.session_state.lot_click_handler_key = ""
     st.session_state.map_click_handler_key = ""
@@ -554,7 +624,10 @@ def apply_filters(df):
     
     final_allowed_deps = set()
     
-    for region in df_data['Region'].unique():
+    # Itérer sur TOUTES les régions disponibles dans le DF
+    unique_regions_all = df_data['Region'].unique() if 'Region' in df_data.columns else []
+
+    for region in unique_regions_all:
         # S'assurer que 'Region' existe dans regions_df_unique avant d'appeler .unique()
         deps_in_region = set(regions_df_unique[regions_df_unique['Region'] == region]['Departement'].unique())
         
@@ -570,20 +643,14 @@ def apply_filters(df):
             else:
                 # Région cochée + aucun département cochée spécifiquement -> tous les lots de cette région
                 final_allowed_deps.update(deps_in_region)
+        # else: Région non cochée, on n'ajoute rien
 
-    # Si la liste finale est vide, on ne filtre rien sur la géographie
-    if final_allowed_deps:
-        filtered_df = filtered_df[filtered_df['Departement'].isin(final_allowed_deps)]
-    else:
-        # Si aucune région n'est cochée MAIS des régions existent dans le DF, on ne filtre rien.
-        # Si le DF est vide, ça passe.
-        pass
-    
     # 2. Filtres Sliders (Surface GLA et Loyer annuel)
     min_surface, max_surface = st.session_state.filters['surface_range']
     min_loyer, max_loyer = st.session_state.filters['loyer_range']
 
     if 'Surface_GLA' in filtered_df.columns:
+        # Filtrage sur le résultat de la sélection géographique
         filtered_df = filtered_df[
             (filtered_df['Surface_GLA'] >= min_surface) & (filtered_df['Surface_GLA'] <= max_surface)
         ]
@@ -592,6 +659,12 @@ def apply_filters(df):
         filtered_df = filtered_df[
             (filtered_df['Loyer_Annuel'] >= min_loyer) & (filtered_df['Loyer_Annuel'] <= max_loyer)
         ]
+    
+    # Appliquer le filtre géographique après les filtres numériques
+    if final_allowed_deps:
+        filtered_df = filtered_df[filtered_df['Departement'].isin(final_allowed_deps)]
+    # Si filtered_df est vide à ce stade, les filtres ne sont pas applicables (ex: surface invalide)
+    # ou tous les lots sont filtrés.
 
     # 3. Autres filtres cases à cocher
     for filter_col in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
@@ -658,6 +731,7 @@ with st.sidebar:
             checkbox_key_reg = f"region_{region}"
             is_region_checked = region in temp_regions
             
+            # Utiliser la valeur de l'état pour l'état initial
             if st.checkbox(label=region, value=is_region_checked, key=checkbox_key_reg):
                 temp_regions.add(region)
             else:
@@ -665,14 +739,14 @@ with st.sidebar:
 
             # Affichage des départements si la région est cochée
             if region in temp_regions:
-                # S'assurer que le filtre fonctionne même si la colonne est 'N/A'
+                # Filtrer les départements pour cette région
                 departments_in_region = sorted(df_data[df_data['Region'] == region]['Departement'].unique().tolist())
                 
                 for dep in departments_in_region:
                     # Checkbox Département avec indentation
                     st.markdown(f'<div class="department-checkbox">', unsafe_allow_html=True)
                     
-                    checkbox_key_dep = f"dep_{dep}"
+                    checkbox_key_dep = f"dep_{dep}_{region}" # Clé unique par département/région
                     is_dep_checked = dep in temp_departments
                     
                     if st.checkbox(label=dep, value=is_dep_checked, key=checkbox_key_dep):
@@ -692,32 +766,41 @@ with st.sidebar:
     st.markdown("<h2>Filtres Numériques</h2>", unsafe_allow_html=True)
     
     # Surface GLA
-    if 'Surface_GLA' in df_data.columns:
+    if 'Surface_GLA' in df_data.columns and MIN_SURFACE < MAX_SURFACE:
         initial_gla_range = st.session_state.filters['surface_range']
         
+        # S'assurer que les valeurs d'état sont comprises entre min et max globaux
+        current_min_gla = max(MIN_SURFACE, min(initial_gla_range[0], MAX_SURFACE))
+        current_max_gla = min(MAX_SURFACE, max(initial_gla_range[1], MIN_SURFACE))
+
         new_gla_range = st.slider(
             "Surface GLA (m²)",
             min_value=float(MIN_SURFACE),
             max_value=float(MAX_SURFACE),
-            value=initial_gla_range,
+            value=(current_min_gla, current_max_gla),
             step=1.0,
             key="surface_slider",
-            disabled=disabled_reset
+            disabled=disabled_reset,
+            format="%i m²"
         )
         st.session_state.filters['surface_range'] = new_gla_range
     else:
-         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Surface GLA non disponible</p>", unsafe_allow_html=True)
+         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Surface GLA non disponible ou données min/max identiques.</p>", unsafe_allow_html=True)
 
 
     # Loyer annuel
-    if 'Loyer_Annuel' in df_data.columns:
+    if 'Loyer_Annuel' in df_data.columns and MIN_LOYER < MAX_LOYER:
         initial_loyer_range = st.session_state.filters['loyer_range']
+        
+        # S'assurer que les valeurs d'état sont comprises entre min et max globaux
+        current_min_loyer = max(MIN_LOYER, min(initial_loyer_range[0], MAX_LOYER))
+        current_max_loyer = min(MAX_LOYER, max(initial_loyer_range[1], MIN_LOYER))
 
         new_loyer_range = st.slider(
             "Loyer annuel (€)",
             min_value=float(MIN_LOYER),
             max_value=float(MAX_LOYER),
-            value=initial_loyer_range,
+            value=(current_min_loyer, current_max_loyer),
             step=1000.0,
             key="loyer_slider",
             format="%i €",
@@ -725,7 +808,7 @@ with st.sidebar:
         )
         st.session_state.filters['loyer_range'] = new_loyer_range
     else:
-         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Loyer annuel non disponible</p>", unsafe_allow_html=True)
+         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Loyer annuel non disponible ou données min/max identiques.</p>", unsafe_allow_html=True)
 
 
     st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
@@ -737,6 +820,7 @@ with st.sidebar:
     
     for filter_col in checkbox_filters:
         if filter_col in df_data.columns:
+            # S'assurer que l'ensemble des options est trié
             unique_options = sorted(df_data[filter_col].unique().tolist())
             st.markdown(f"**{filter_col}**", unsafe_allow_html=True)
             
@@ -886,12 +970,17 @@ js_injection = f"""
                         break;
                     }}
                     // S'assurer que le clic vient bien de la carte et non d'un autre composant streamlit
+                    // et qu'on ne clique pas sur le panneau de détails
+                    if (target.classList && target.classList.contains('detail-panel')) {{
+                        isPinClick = true; // Empêche la fermeture si on clique DANS le panneau
+                        break; 
+                    }}
                     if (target === mapContainer) break; 
                     target = target.parentNode;
                 }}
 
                 if (!isPinClick) {{
-                    // Si le clic n'est pas un pin, envoyer le signal de fermeture
+                    // Si le clic n'est pas un pin ni le panneau de détails, envoyer le signal de fermeture
                     var msg = {{
                         type: 'streamlit:setComponentValue',
                         componentName: 'map_click_handler',
@@ -956,8 +1045,6 @@ if st.session_state.filters['selected_lot_ref'] and not df_data.empty:
         
         # Les colonnes à afficher (selon DETAIL_COLUMNS_MAPPING)
         for col_internal, col_display in DETAIL_COLUMNS_MAPPING.items():
-            if col_internal == 'Lien_GMaps': # La colonne H est traitée séparément
-                continue
             
             # S'assurer que la colonne existe dans la ligne de données
             if col_internal not in lot_data:
@@ -978,13 +1065,12 @@ if st.session_state.filters['selected_lot_ref'] and not df_data.empty:
             elif 'Surface' in col_display and 'Répartition' not in col_display:
                 # Surfaces (sauf répartition)
                 formatted_value = format_surface(value)
-            
-            # Pour d'autres valeurs numériques non monétaires/surfaces, forcer à str si ce n'est pas déjà formaté
-            if formatted_value is None:
+            elif col_internal == 'Lien_GMaps': # Traitement du lien à part
                 continue
             
-            # Remplacement de N/A par tiret si la valeur était présente mais n'a pas été formatée
-            if formatted_value == 'N/A': formatted_value = '-'
+            # Si le formatage a retourné None, c'est que la valeur n'est pas affichable (0, néant, etc.)
+            if formatted_value is None:
+                continue
 
             table_html += f"""
             <tr>
