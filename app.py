@@ -69,8 +69,6 @@ def reset_all():
     st.session_state.clear()
     st.rerun()
 
-# Fonction toggle_details a été supprimée
-
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"]=None
 
@@ -108,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour un panneau fixe) =====
+# ===== CSS global (Code inchangé) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -146,7 +144,6 @@ st.markdown(f"""
   position: fixed; top: 0; right: 0; width: {DETAILS_PANEL_WIDTH}px; height: 100vh;
   background:{COLOR_SMBG_BLUE}; color:#fff; z-index:1000;
   padding:16px; box-shadow:-5px 0 15px rgba(0,0,0,0.35); overflow-y:auto;
-  /* La transformation et la transition sont retirées */
 }}
 .maps-button {{
   width:100%; padding:9px; margin:8px 0 14px; background:{COLOR_SMBG_COPPER};
@@ -158,7 +155,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Suppression du bouton de contrôle du volet) =====
+# ===== SIDEBAR (Code inchangé) =====
 with st.sidebar:
     st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
@@ -228,7 +225,6 @@ with st.sidebar:
     ext_sel[:]  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
     rest_sel[:] = draw_checks("Restauration",RESTAURATION_COL, "rest")
     
-    # --- Contrôle du volet ---
     st.markdown("---")
     
     if st.button("Réinitialiser", use_container_width=True):
@@ -260,7 +256,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Mise à jour pour ne plus toucher à show_details) =====
+# ===== CARTE (Mise à jour de la détection de clic) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -291,25 +287,55 @@ if not pins_df.empty:
     for _,r in pins_df.iterrows():
         add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
 
-map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked"], key="map")
+# On demande à Streamlit non seulement le dernier objet cliqué (last_object_clicked), 
+# mais aussi les coordonnées du dernier clic (last_click), qui sont plus fiables.
+map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked", "last_click"], key="map")
 
-if map_output and map_output.get("last_object_clicked"):
-    obj=map_output["last_object_clicked"]
-    ref_guess=None
-    for k in ("popup","popup_html"):
-        if k in obj and obj[k]:
-            txt=str(obj[k]); mref=re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
-            ref_guess=mref.group(1) if mref else re.sub(r"<.*?>","",txt).strip()
-            break
+ref_guess = None
+
+if map_output:
+    # --- 1. Tentative par coordonnées (La plus fiable) ---
+    if map_output.get("last_click"):
+        click_coords = map_output["last_click"]
+        clicked_lat = click_coords.get("lat")
+        clicked_lon = click_coords.get("lng")
+        
+        if clicked_lat is not None and clicked_lon is not None:
+            # Chercher le pin le plus proche dans pins_df (tolérance d'arrondi à 5 décimales)
+            clicked_rows = pins_df[
+                (pins_df[LAT_COL].astype(float).round(5) == round(clicked_lat, 5)) &
+                (pins_df[LON_COL].astype(float).round(5) == round(clicked_lon, 5))
+            ]
+            
+            if not clicked_rows.empty:
+                ref_guess = clicked_rows.iloc[0][REF_COL]
+
+    # --- 2. Tentative par last_object_clicked (Solution de secours) ---
+    if ref_guess is None and map_output.get("last_object_clicked"):
+        obj = map_output["last_object_clicked"]
+        
+        for k in ("popup", "popup_html"):
+            if k in obj and obj[k]:
+                txt = str(obj[k])
+                # Recherche de l'attribut data-ref
+                mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
+                if mref:
+                    ref_guess = mref.group(1)
+                    break
+                # Fallback sur le texte (seulement si la référence est propre)
+                text_content = re.sub(r"<.*?>","",txt).strip()
+                if text_content:
+                    ref_guess = text_content
+                    break
+    
+    # Mise à jour de l'état si une référence a été trouvée
     if ref_guess:
-        st.session_state["selected_ref"]=ref_guess
-        # Suppression des lignes st.session_state["show_details"] = True et st.rerun()
+        st.session_state["selected_ref"] = ref_guess
 
-# ===== VOLET DROIT (Toujours affiché) =====
+
+# ===== VOLET DROIT (Code inchangé) =====
 html=[f"<div class='details-panel'>"]
 sel_ref=st.session_state.get("selected_ref")
-
-# Le bouton de fermeture a été retiré, le volet est fixe.
 
 if sel_ref:
     # Contenu détaillé
