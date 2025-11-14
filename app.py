@@ -145,10 +145,11 @@ def load_and_prepare_data():
             st.session_state.loyer_min_max = DEFAULT_LOYER_RANGE
             return pd.DataFrame()
 
+    # IMPORTANT: Coercition en numérique pour la carte
     df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
     df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
     
-    # Filtrer les lots non actifs et les coordonnées invalides
+    # Filtrer les lots non actifs et les coordonnées invalides (NaN initial)
     df = df[df['Actif'].astype(str).str.lower() == 'oui']
     df = df.dropna(subset=['Latitude', 'Longitude'])
     df = df[(df['Latitude'] >= -90) & (df['Latitude'] <= 90)]
@@ -583,28 +584,35 @@ def render_sidebar():
 # --- 7. RENDU DE LA CARTE (ZONE CENTRALE) ---
 
 def create_folium_map():
-    """Crée la carte Folium avec les pins personnalisés et la logique de clic.
+    """Crée la carte Folium avec les pins personnalisés et la logique de clic."""
     
-    REMARQUE IMPORTANTE : La variable geojson_layer n'est plus retournée car
-    elle n'est pas nécessaire pour st_folium et était une source potentielle de TypeError/sérialisation.
-    """
     df_map = st.session_state.filtered_data
     
-    if df_map.empty or df_map['Latitude'].isnull().all():
-        # Centre par défaut si aucune donnée filtrée
+    # Sécurité ultime: ne conserver que les lignes avec des coordonnées finies
+    df_map = df_map[
+        np.isfinite(df_map['Latitude']) & 
+        np.isfinite(df_map['Longitude'])
+    ]
+    
+    if df_map.empty:
+        # Cas A: Centre par défaut si aucune donnée filtrée ou valide
         m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, control_scale=True)
     else:
+        # Cas B: Carte avec données
+        
         # Calculer le centre de la carte en fonction des lots filtrés
         center_lat = df_map['Latitude'].mean()
         center_lon = df_map['Longitude'].mean()
         m = folium.Map(location=[center_lat, center_lon], zoom_start=10, control_scale=True)
-        # Ajuster le zoom pour contenir tous les points
-        try:
-             m.fit_bounds([[df_map['Latitude'].min(), df_map['Longitude'].min()], 
-                           [df_map['Latitude'].max(), df_map['Longitude'].max()]])
-        except ValueError:
-             # Gère le cas où un seul point est présent ou les min/max sont identiques
-             pass
+        
+        # Ajuster le zoom pour contenir tous les points, seulement s'il y a plus d'un point
+        if len(df_map) > 1:
+            try:
+                 m.fit_bounds([[df_map['Latitude'].min(), df_map['Longitude'].min()], 
+                               [df_map['Latitude'].max(), df_map['Longitude'].max()]])
+            except ValueError:
+                 # Gère le cas où un seul point est présent ou les min/max sont identiques
+                 pass
 
 
         # 7. Pins sur la carte: ABSOLUMENT AUCUN POPUP, style personnalisé
@@ -686,7 +694,7 @@ def create_folium_map():
                 popup=False
             ).add_to(m)
 
-    # CORRECTION : Retourne uniquement la carte 'm'
+    # Retourne uniquement la carte 'm'
     return m 
 
 
@@ -773,7 +781,8 @@ def handle_map_click(map_result):
         if 'properties' in clicked_data and 'lot_key' in clicked_data['properties']:
             lot_key = clicked_data['properties']['lot_key']
             st.session_state.selected_lot_key = lot_key
-            st.rerun()
+            # Note: pas besoin de rerun si on utilise la logique JS/CSS pour afficher
+            st.rerun() 
             return
             
     # Traitement du clic sur carte (hors pin) via le callback JS (custom_event)
@@ -803,11 +812,11 @@ def main():
     # Je force la carte à prendre la place avec un div 100vh
     st.markdown('<div id="map_container">', unsafe_allow_html=True)
     
-    # --- 7. Rendu de la Carte (Zone B) ---
-    # CORRECTION : Uniquement la carte 'm' est retournée et décompressée
+    # --- Rendu de la Carte ---
     m = create_folium_map()
     
     # Rendre la carte et récupérer l'état du clic
+    # Ligne 811
     map_result = st_folium(
         m, 
         width='100%', 
@@ -830,11 +839,11 @@ def main():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- 8. Rendu du Panneau de Détails (Zone C) ---
+    # --- Rendu du Panneau de Détails (Zone C) ---
     # Le panneau est un élément en position fixe géré par HTML/CSS
     render_detail_panel()
     
-    # --- 9. Post-traitement du clic sur la carte ---
+    # --- Post-traitement du clic sur la carte ---
     
     # Gérer le clic sur la carte, qu'il s'agisse d'un pin ou d'un clic de fermeture
     handle_map_click(map_result)
