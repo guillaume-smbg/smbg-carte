@@ -65,7 +65,7 @@ def format_reference(ref):
 # Fonction pour formater les valeurs monétaires
 def format_currency(value):
     """Formate les nombres en € avec séparateur de milliers et arrondi."""
-    if pd.isna(value) or value == 0 or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
+    if pd.isna(value) or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
         return None
     try:
         # Tenter de convertir en nombre (gestion des strings avec virgule)
@@ -77,6 +77,10 @@ def format_currency(value):
         # Arrondir à l'entier le plus proche
         rounded_value = int(round(value))
         
+        # Retourner None si la valeur est effectivement zéro après conversion
+        if rounded_value == 0:
+            return None
+            
         # Utiliser la locale française pour le séparateur de milliers (espace)
         return f"{rounded_value:,.0f} €".replace(",", " ")
     except:
@@ -85,7 +89,7 @@ def format_currency(value):
 # Fonction pour formater les surfaces
 def format_surface(value):
     """Formate les surfaces en m²."""
-    if pd.isna(value) or value == 0 or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
+    if pd.isna(value) or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
         return None
     try:
         # Tenter de convertir en nombre
@@ -95,6 +99,10 @@ def format_surface(value):
         
         rounded_value = int(round(value))
         
+        # Retourner None si la valeur est effectivement zéro après conversion
+        if rounded_value == 0:
+            return None
+            
         # Utiliser la locale française pour le séparateur de milliers (espace)
         return f"{rounded_value:,.0f} m²".replace(",", " ")
     except:
@@ -105,17 +113,19 @@ def is_value_displayable(value):
     """Vérifie si la valeur est vide, 'néant', '-', '/', '0' (texte ou nombre)"""
     if pd.isna(value):
         return False
+    
     value_str = str(value).strip().lower()
-    if value_str in ["", "néant", "-", "/", "0", "0.0"]:
+    if value_str in ["", "nan", "néant", "-", "/"]:
         return False
+    
     try:
-        # Vérifie si c'est un zéro numérique après conversion
-        # On utilise une vérification moins stricte pour les strings qui contiennent du texte
+        # Vérifie si c'est un zéro numérique (y compris les strings "0" ou "0.0")
         numeric_part = re.sub(r'[^\d\.\,]', '', value_str).replace(',', '.')
         if numeric_part and float(numeric_part) == 0.0:
              return False
     except ValueError:
         pass # Pas un nombre, on continue
+        
     return True
 
 # Fonction pour normaliser les noms de colonnes
@@ -295,7 +305,7 @@ def load_data():
         'Taxe_Fonciere': 'Taxe foncière',
         'Taxe Foncière €/m²': 'Taxe foncière €/m²',
         'Marketing': 'Marketing',
-        'Marketing €/m²', 'Marketing €/m²',
+        'Marketing €/m²': 'Marketing €/m²', # Correction de la syntaxe
         'Total (L+C+M)': 'Total (L+C+M)',
         'Honoraires': 'Honoraires',
         'Dépôt de garantie': 'Dépôt de garantie',
@@ -932,36 +942,40 @@ function onClick(ref) {
 if not df_filtered.empty:
     for index, row in df_filtered.iterrows():
         # Créer le Popup HTML pour chaque marqueur
-        popup_html = f"""
+        
+        # NOTE: On utilise une fonction de popup pour contourner le manque d'événement Marker Click
+        
+        # Référence pour le panneau de détail (on utilise ici le Lot Référence pour l'instant)
+        lot_ref = row['Ref_Format']
+        
+        # Création du contenu du Popup
+        popup_content = f"""
         <div style="font-family: Arial, sans-serif; font-size: 14px; color: {BLUE_SMBG};">
-            <h4 style="margin: 0 0 5px 0; color: {COPPER_SMBG};">Lot : {row['Ref_Format']}</h4>
+            <h4 style="margin: 0 0 5px 0; color: {COPPER_SMBG};">Lot : {lot_ref}</h4>
             <p style="margin: 0;">**{row.get('Ville', 'N/A')}** - {row.get('Departement', 'N/A')}</p>
-            <p style="margin: 0; margin-top: 5px;">**GLA :** {format_surface(row['Surface_GLA'])}</p>
-            <p style="margin: 0;">**Loyer :** {format_currency(row['Loyer_Annuel'])} / an</p>
+            <p style="margin: 0; margin-top: 5px;">**GLA :** {format_surface(row['Surface_GLA']) if format_surface(row['Surface_GLA']) else 'N/A'}</p>
+            <p style="margin: 0;">**Loyer :** {format_currency(row['Loyer_Annuel']) if format_currency(row['Loyer_Annuel']) else 'N/A'} / an</p>
+            
+            <button onclick="openPanel('{lot_ref}')" 
+                    style="background-color: {COPPER_SMBG}; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px; margin-top: 10px; width: 100%;">
+                Détails
+            </button>
         </div>
         """
         
-        # Créer un IFrame pour le popup pour s'assurer que le contenu est rendu correctement
-        iframe = folium.IFrame(popup_html, width=250, height=130)
+        iframe = folium.IFrame(popup_content, width=250, height=170)
         popup = folium.Popup(iframe, max_width=250)
         
-        # Lier le marqueur à la fonction JavaScript
         marker_lat = row['Latitude']
         marker_lon = row['Longitude']
-        lot_ref = row['Ref_Format']
         
         # Utilisation de folium.Marker pour ajouter le marqueur
-        marker = folium.Marker(
+        folium.Marker(
             [marker_lat, marker_lon],
             popup=popup,
             tooltip=f"Lot: {lot_ref} | GLA: {row['Surface_GLA']}m²",
             icon=folium.Icon(color='red', icon='info-sign')
         ).add_to(m)
-        
-        # Ajout d'une action de clic (hack)
-        # Note: La liaison directe d'un clic de marqueur à une fonction Streamlit
-        # n'est pas possible nativement avec streamlit-folium. Nous utilisons
-        # l'interaction Folium pour afficher le popup contenant l'info.
         
     st.info(f"Nombre de lots affichés : {df_filtered.shape[0]}")
 else:
@@ -970,17 +984,40 @@ else:
 
 # --- 9. HACK STREAMLIT-FOLIUM POUR GESTION DES CLICS ---
 
-# 1. Utilisation d'un hack de zone de texte invisible pour capter la référence cliquée
-# L'utilisateur ne clique pas ici, mais la valeur est mise à jour par le JS de la carte (non implémenté
-# car folium-streamlit ne supporte pas d'injecter directement des actions JS Streamlit sur Marker Click).
-# Cependant, pour simuler l'intention, nous gardons la logique d'état.
-# On utilise un simple `st.empty()` pour ne pas afficher le champ de texte
-# st.text_input(
-#     "Lot Cliqué (Hack)", 
-#     key="lot_click_handler_key", 
-#     value=st.session_state.lot_click_handler_key, 
-#     on_change=lambda: open_detail_panel(st.session_state.lot_click_handler_key)
-# )
+# 1. Ajout d'une fonction JavaScript pour ouvrir le panneau au clic sur le popup
+# Cette fonction est CRITIQUE : elle utilise le hack st.session_state
+js_panel_opener = """
+<script>
+    function openPanel(lotRef) {
+        // Envoie la référence du lot à Streamlit via un élément input invisible
+        const input = document.getElementById('lot_ref_input_hack');
+        if (input) {
+            input.value = lotRef;
+            // Déclenche un événement de changement sur l'input pour notifier Streamlit
+            input.dispatchEvent(new Event('change'));
+        }
+    }
+</script>
+"""
+st.markdown(js_panel_opener, unsafe_allow_html=True)
+
+# 2. Le champ de texte Streamlit qui capte l'action JavaScript
+# Il est invisible mais CRITIQUE pour la communication JS -> Python
+lot_ref_clicked = st.text_input(
+    "Lot Cliqué (Hack)", 
+    key="lot_ref_input_hack", 
+    value="",
+    label_visibility="hidden"
+)
+
+# 3. Logique de déclenchement du panneau
+# Si le hack est activé (un lotRef a été envoyé par le JS), on ouvre le panneau
+if lot_ref_clicked and lot_ref_clicked != st.session_state.filters.get('selected_lot_ref'):
+    # Note: L'événement 'on_change' n'est pas fiable, on le gère ici
+    open_detail_panel(lot_ref_clicked)
+    # Réinitialiser la valeur du hack après l'avoir traitée pour permettre un nouveau clic
+    # (Attention: cela peut causer un re-run inutile, mais c'est le compromis)
+    st.session_state.lot_ref_input_hack = "" # Réinitialiser le widget Streamlit
 
 # Afficher la carte Folium (occupe le reste de l'écran)
 folium_static(m, width=None, height=None)
@@ -1018,6 +1055,7 @@ if selected_ref:
                 formatted_value = str(value) if not pd.isna(value) else None
 
             # Afficher uniquement si la valeur est significative
+            # On utilise ici la fonction is_value_displayable avec la valeur brute
             if is_value_displayable(value):
                 # Traitement spécial pour le lien Google Maps
                 if internal_col == 'Lien_GMaps' and formatted_value:
@@ -1033,10 +1071,13 @@ if selected_ref:
                     """, unsafe_allow_html=True)
                 else:
                     # Affichage standard
+                    # Si formatted_value est None, on utilise quand même la valeur d'origine si elle a passé is_value_displayable
+                    display_val = formatted_value if formatted_value is not None else str(value).strip()
+                    
                     st.markdown(f"""
                         <div style="margin-top: 5px;">
                             <span class="detail-label">{display_name} :</span>
-                            {formatted_value}
+                            {display_val}
                         </div>
                     """, unsafe_allow_html=True)
         
