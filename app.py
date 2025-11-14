@@ -19,11 +19,9 @@ st.set_page_config(
 # ----------------------
 # Constantes et chemins
 # ----------------------
-ASSETS_DIR = Path("assets")
 DATA_PATH = Path("data") / "Liste des lots.xlsx"
 
 BLUE_SMBG = "#05263d"
-COPPER_SMBG = "#C67B42"
 
 
 # ----------------------
@@ -57,19 +55,6 @@ main.block-container, .block-container {{
 /* on supprime le header Streamlit */
 [data-testid="stHeader"], [data-testid="stToolbar"] {{
     display: none;
-}}
-
-/* conteneur de la carte : fixé, plein écran */
-#map-container {{
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 100vh;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    z-index: 1;
 }}
 
 /* forcer l'iframe folium à prendre toute la hauteur */
@@ -106,7 +91,7 @@ iframe[title="st_folium.smbg_map"] {{
 
 #detail-drawer .subtitle {{
     font-size: 0.9rem;
-    color: {COPPER_SMBG};
+    opacity: 0.8;
 }}
 
 #detail-drawer .close-hint {{
@@ -124,20 +109,17 @@ st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 @st.cache_data
 def load_data(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path)
-    # On garde uniquement les lignes actives si la colonne existe
     if "Actif" in df.columns:
         df = df[df["Actif"].astype(str).str.lower() == "oui"]
     return df.reset_index(drop=True)
 
 
 def format_reference(value) -> str:
-    """Formate la référence selon les règles : 0003 -> 3, 0005.1 -> 5.1"""
     if pd.isna(value):
         return ""
     s = str(value).strip().replace(" ", "")
     if s == "":
         return ""
-    # Cas nombre simple ou float avec .0
     if s.replace(".", "", 1).isdigit():
         if "." in s:
             int_part, dec_part = s.split(".", 1)
@@ -158,7 +140,6 @@ def format_reference(value) -> str:
             except ValueError:
                 return s
             return str(int_val)
-    # Cas custom style "0005.1"
     if "." in s:
         int_part, dec_part = s.split(".", 1)
         try:
@@ -195,9 +176,8 @@ if "drawer_open" not in st.session_state:
 
 
 # ----------------------
-# Carte (plein écran)
+# Carte plein écran
 # ----------------------
-# centre sur la moyenne des points (France si vide)
 if not df[["Latitude", "Longitude"]].dropna().empty:
     center_lat = df["Latitude"].mean()
     center_lon = df["Longitude"].mean()
@@ -212,7 +192,6 @@ m = folium.Map(
     zoom_control=True,
 )
 
-# Ajout des pins : 1 lot = 1 pin, pas de popup
 for _, row in df.iterrows():
     lat = row.get("Latitude")
     lon = row.get("Longitude")
@@ -250,22 +229,18 @@ for _, row in df.iterrows():
         ),
     ).add_to(m)
 
-# Rendu de la carte (plein écran)
-st.markdown('<div id="map-container">', unsafe_allow_html=True)
 map_data = st_folium(
     m,
     width=None,
-    height=600,  # surchargé par le CSS à 100vh
+    height=600,  # 100vh via CSS
     key="smbg_map",
 )
-st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ----------------------
-# Gestion des clics (pins / carte)
+# Gestion des clics
 # ----------------------
 def find_ref_from_click(lat_click, lon_click):
-    """Retrouve le lot en fonction du couple latitude/longitude cliqué."""
     tol = 1e-6
     candidates = df[
         (df["Latitude"].sub(lat_click).abs() < tol)
@@ -280,7 +255,6 @@ if map_data is not None:
     obj_clicked = map_data.get("last_object_clicked")
     map_clicked = map_data.get("last_clicked")
 
-    # Priorité au clic sur un pin
     if obj_clicked is not None:
         lat_click = obj_clicked.get("lat")
         lon_click = obj_clicked.get("lng")
@@ -290,13 +264,12 @@ if map_data is not None:
                 st.session_state.selected_ref = ref
                 st.session_state.drawer_open = True
     elif map_clicked is not None:
-        # Clic sur la carte (hors pin) -> fermeture du panneau
         st.session_state.selected_ref = None
         st.session_state.drawer_open = False
 
 
 # ----------------------
-# Panneau droit (rétractable, vide pour l'instant)
+# Panneau droit rétractable (vide)
 # ----------------------
 if st.session_state.drawer_open and st.session_state.selected_ref is not None:
     ref_display = format_reference(st.session_state.selected_ref)
@@ -304,8 +277,7 @@ if st.session_state.drawer_open and st.session_state.selected_ref is not None:
 <div id="detail-drawer">
     <p class="subtitle">Détails de l'annonce</p>
     <p class="title">{ref_display}</p>
-    <p class="close-hint">Cliquer sur la carte pour refermer ce panneau.</p>
-    <!-- Contenu détaillé à ajouter aux étapes suivantes -->
+    <p class="close-hint">Cliquer sur la carte (hors pin) pour refermer.</p>
 </div>
 """
     st.markdown(drawer_html, unsafe_allow_html=True)
