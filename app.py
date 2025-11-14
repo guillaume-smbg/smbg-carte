@@ -7,7 +7,7 @@ from streamlit_folium import st_folium
 import numpy as np
 from collections import defaultdict
 
-# ===== CONFIG =====
+# ===== CONFIGURATION DE BASE =====
 st.set_page_config(layout="wide", page_title="Carte Interactive SMBG", initial_sidebar_state="expanded")
 COLOR_SMBG_BLUE   = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42"
@@ -15,20 +15,16 @@ LOGO_FILE_PATH    = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH   = "data/Liste des lots.xlsx"
 DETAILS_PANEL_WIDTH = 360 # Largeur du panneau de détails
 
-# Colonnes attendues
+# Colonnes attendues (assurez-vous que ces noms correspondent à ceux de votre fichier Excel)
 REF_COL="Référence annonce"; REGION_COL="Région"; DEPT_COL="Département"
 EMPL_COL="Emplacement"; TYPO_COL="Typologie"; EXTRACTION_COL="Extraction"; RESTAURATION_COL="Restauration"
 SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL="Longitude"; ACTIF_COL="Actif"
 
-# Volet droit : G -> AL (H = bouton Google)
+# Plage de colonnes pour le panneau de détails
 INDEX_START, INDEX_END_EXCL = 6, 38
-# Hauteur de la carte ajustée à 100% de la fenêtre (sera gérée par CSS)
 MAP_HEIGHT = 800 
 
-# La variable show_details et la logique de bascule ont été supprimées.
-# Le panneau est toujours "visible" par défaut via le CSS.
-
-# ===== Police Futura (Code inchangé) =====
+# ===== POLICE FUTURA =====
 def _load_futura_css_from_assets():
     assets_dir = "assets"
     if not os.path.isdir(assets_dir): return ""
@@ -51,7 +47,7 @@ def _load_futura_css_from_assets():
     css.append("*{font-family:'Futura SMBG', Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif;}")
     return "\n".join(css)
 
-# ===== Helpers (Code inchangé) =====
+# ===== FONCTIONS D'AIDE =====
 def parse_ref_display(ref_str):
     s=str(ref_str).strip()
     if "." in s:
@@ -62,8 +58,10 @@ def format_value(value, unit=""):
     s=str(value).strip()
     if s.lower() in ("n/a","nan","","none","néant","-","/") or (pd.isna(value) and isinstance(value, float)): return ""
     try:
-        num=float(s.replace("€","").replace("m²","").replace("m2","").replace(" ","").replace(",","."))
-        txt=f"{num:,.0f}".replace(",", " "); return f"{txt} {unit}".strip() if unit else txt
+        # Tente de formater le nombre avec séparation des milliers
+        num=float(str(s).replace("€","").replace("m²","").replace("m2","").replace(" ","").replace(",","."))
+        txt=f"{num:,.0f}".replace(",", " "); 
+        return f"{txt} {unit}".strip() if unit else txt
     except: return s
 
 def reset_all():
@@ -73,11 +71,13 @@ def reset_all():
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"]=None
 
-# ===== Data (Code inchangé) =====
+# ===== CHARGEMENT DES DONNÉES =====
 @st.cache_data
 def load_data(path):
+    # Lecture du fichier Excel
     df=pd.read_excel(path, dtype={REF_COL:str})
     df.columns=df.columns.str.strip()
+    # Nettoyage des colonnes
     df[REF_COL]=df[REF_COL].astype(str).str.replace(".0","",regex=False).str.strip()
     df[LAT_COL]=pd.to_numeric(df.get(LAT_COL,""), errors="coerce")
     df[LON_COL]=pd.to_numeric(df.get(LON_COL,""), errors="coerce")
@@ -92,22 +92,19 @@ def load_data(path):
 data_df=load_data(EXCEL_FILE_PATH)
 
 # =======================================================
-# Variables de la portée du module (Code inchangé)
+# Variables pour les filtres (Code inchangé)
 # =======================================================
 selected_regions = []
 selected_depts_global = []
 selected_depts_by_region = defaultdict(list)
-emp_sel = []
-typo_sel = []
-ext_sel = []
-rest_sel = []
+emp_sel = []; typo_sel = []; ext_sel = []; rest_sel = []
 smin, smax = 0, 1000
 lmin, lmax = 0, 100000
 
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour le plein écran et l'anti-défilement) =====
+# ===== STYLES CSS (Nettoyés pour maximiser l'écran et la carte) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -116,47 +113,43 @@ st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* GESTION DU PLEIN ÉCRAN ET ANTI-DÉFILEMENT */
+/* --- GESTION DU PLEIN ÉCRAN ET ANTI-DÉFILEMENT --- */
+/* Bloque le défilement et force la hauteur 100% sur la fenêtre principale */
 [data-testid="stAppViewContainer"] {{
     height: 100vh !important;
-    overflow: hidden !important; /* Désactive le défilement de la page principale */
+    overflow: hidden !important; 
 }}
-
-/* Le conteneur principal de la page doit également être plein écran */
 .main {{ height: 100vh !important; }}
 
-/* Le contenu central (où se trouve la carte) ne doit pas avoir de marge en haut */
+/* Le contenu central (où se trouve la carte) */
 [data-testid="stAppViewContainer"] .main .block-container {{ 
-    padding-top: 0px !important;
-    padding-right: {right_padding + 20}px; /* Marge pour le volet de détails */
+    padding-top: 0px !important; /* Maximise l'espace pour la carte */
+    padding-right: {right_padding + 20}px; /* Réserve la marge pour le volet de détails */
 }}
 
-/* La carte doit prendre toute la hauteur restante */
-.stDataFrame, .stPlotlyChart, .stDeckGlJsonChart, .stFolium {{
+/* Force la carte à prendre toute la hauteur restante */
+.stFolium {{
     height: 100% !important;
 }}
 
-/* Sidebar : Fond bleu, titres cuivre */
+/* --- STYLES SIDEBAR ET VOLET DROIT --- */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
-
-/* Neutraliser le padding par défaut en haut de la sidebar pour éviter le vide (choix utilisateur) */
 [data-testid="stSidebarContent"] {{ padding-top: 0px !important; }}
 
-/* Sidebar : aucun bouton collapse */
+/* Cache le bouton ">>" de la sidebar */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
 
-/* Icône main sur nos pins */
+/* Style des pins Leaflet */
 .smbg-divicon {{ cursor:pointer; }}
 
-/* Suppression VISUELLE TOTALE des popups Leaflet */
-.leaflet-popup, .leaflet-popup-pane,
-.leaflet-popup-content-wrapper, .leaflet-popup-tip,
+/* Supprime les popups Leaflet pour utiliser uniquement le panneau de détails */
+.leaflet-popup, .leaflet-popup-pane, .leaflet-popup-content-wrapper, .leaflet-popup-tip,
 .leaflet-container a.leaflet-popup-close-button {{
   opacity:0 !important; width:0 !important; height:0 !important;
   padding:0 !important; margin:0 !important; border:0 !important; display:none !important;
 }}
 
-/* Panneau droit : Fixe, permanent et sans animation de rétraction */
+/* Panneau droit de détails (Fixe et défilable) */
 .details-panel {{
   position: fixed; top: 0; right: 0; width: {DETAILS_PANEL_WIDTH}px; height: 100vh;
   background:{COLOR_SMBG_BLUE}; color:#fff; z-index:1000;
@@ -172,11 +165,12 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Indentation des départements via style inline) =====
+# ===== SIDEBAR (Filtres) =====
 with st.sidebar:
     
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True) 
     
+    # Affichage du logo
     b64 = logo_base64()
     if b64:
         st.markdown(
@@ -187,7 +181,7 @@ with st.sidebar:
     else:
         st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) # Espace entre logo et filtres
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
@@ -196,6 +190,7 @@ with st.sidebar:
     selected_depts_global.clear()
     selected_depts_by_region.clear()
 
+    # Logique d'affichage et de sélection des régions/départements
     for reg in regions:
         rk = f"chk_region_{reg}"
         rchecked = st.checkbox(reg, key=rk)
@@ -205,7 +200,7 @@ with st.sidebar:
             depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
             for d in depts:
                 dk = f"chk_dept_{reg}_{d}"
-                # Indentation forcée via style inline
+                # Indentation forcée du département avec style inline
                 st.markdown("<div style='margin-left: 30px;'>", unsafe_allow_html=True)
                 dchecked = st.checkbox(d, key=dk)
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -215,6 +210,7 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Sliders de filtres numériques
     surf_num = data_df["__SURF_NUM__"].dropna()
     surf_min=int(surf_num.min()) if not surf_num.empty else 0
     surf_max=int(surf_num.max()) if not surf_num.empty else 1000
@@ -249,7 +245,7 @@ with st.sidebar:
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
-# ===== FILTRES (Code inchangé) =====
+# ===== FILTRES (Application) =====
 f = data_df.copy()
 
 if selected_regions or selected_depts_global:
@@ -275,7 +271,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Mise à jour de la hauteur pour correspondre à 100% de la fenêtre) =====
+# ===== CARTE (Affichage) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -295,7 +291,7 @@ def add_pin(lat, lon, label, ref_value):
         icon=folium.DivIcon(html=icon_html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15)),
         popup=f"<div data-ref='{ref_value}'>{ref_value}</div>"
     ).add_to(m)
-    folium.CircleMarker(
+    folium.CircleMarker( # Marqueur invisible plus grand pour faciliter le clic
         location=[lat, lon], radius=15, color="#00000000",
         fill=True, fill_color="#00000000", fill_opacity=0.0, opacity=0.0,
         popup=f"<div data-ref='{ref_value}'>{ref_value}</div>"
@@ -306,51 +302,38 @@ if not pins_df.empty:
     for _,r in pins_df.iterrows():
         add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
 
-# La hauteur de la carte est définie à 100% via CSS global, nous utilisons donc la variable MAP_HEIGHT comme référence.
 map_output = st_folium(
     m, 
-    height=MAP_HEIGHT, 
+    height=MAP_HEIGHT, # La hauteur sera écrasée par le CSS pour faire 100%
     width="100%", 
     returned_objects=["last_object_clicked", "last_click"], 
     key="map"
 )
 
+# Logique de détection du clic sur un Pin
 ref_guess = None
 coords_to_check = []
 
 if map_output:
-    # 1. Tenter par les coordonnées du dernier clic (souvent le centre du marqueur)
     if map_output.get("last_click"):
-        coords_to_check.append({
-            "lat": map_output["last_click"].get("lat"),
-            "lng": map_output["last_click"].get("lng")
-        })
-    
-    # 2. Tenter par les coordonnées de l'objet cliqué (le marqueur lui-même)
+        coords_to_check.append({ "lat": map_output["last_click"].get("lat"), "lng": map_output["last_click"].get("lng") })
     if map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
         if obj.get("lat") is not None and obj.get("lng") is not None:
-             coords_to_check.append({
-                "lat": obj.get("lat"),
-                "lng": obj.get("lng")
-            })
+             coords_to_check.append({ "lat": obj.get("lat"), "lng": obj.get("lng") })
 
-    # 3. Vérifier les coordonnées trouvées dans le DataFrame filtré
     for coords in coords_to_check:
-        clicked_lat = coords.get("lat")
-        clicked_lon = coords.get("lng")
-        
+        clicked_lat = coords.get("lat"); clicked_lon = coords.get("lng")
         if clicked_lat is not None and clicked_lon is not None:
             clicked_rows = pins_df[
                 (pins_df[LAT_COL].astype(float).round(5) == round(clicked_lat, 5)) &
                 (pins_df[LON_COL].astype(float).round(5) == round(clicked_lon, 5))
             ]
-            
             if not clicked_rows.empty:
                 ref_guess = clicked_rows.iloc[0][REF_COL]
                 break
-
-    # 4. Fallback: Ancienne méthode de lecture du HTML du popup
+    
+    # Fallback pour lecture du HTML du popup si la détection par coordonnées échoue
     if ref_guess is None and map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
         for k in ("popup", "popup_html"):
@@ -361,17 +344,15 @@ if map_output:
                     ref_guess = mref.group(1)
                     break
     
-    # Mise à jour de l'état si une référence a été trouvée
     if ref_guess:
         st.session_state["selected_ref"] = ref_guess
 
 
-# ===== VOLET DROIT (Code inchangé) =====
+# ===== VOLET DROIT (Détails de l'annonce) =====
 html=[f"<div class='details-panel'>"]
 sel_ref=st.session_state.get("selected_ref")
 
 if sel_ref:
-    # Contenu détaillé
     row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
     if not row.empty:
         r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
@@ -382,11 +363,16 @@ if sel_ref:
         cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
         for idx,champ in enumerate(cols_slice, start=INDEX_START):
             sraw=str(r.get(champ,"")).strip()
+            # Sauter les champs vides ou non significatifs
             if sraw.lower() in ("","néant","-","/") or (pd.isna(r.get(champ)) and isinstance(r.get(champ), float)): continue
+            
+            # Traitement spécial du lien Google Maps
             if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
                 html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
                             f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
                 continue
+            
+            # Détermination de l'unité
             unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
                    else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
             sval=format_value(sraw, unit)
@@ -397,12 +383,10 @@ if sel_ref:
                "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
                "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
     else:
-        # Message si la référence est sélectionnée mais introuvable (ne devrait pas arriver)
         html.append("<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>")
         html.append(f"<p style='color:#ccc; margin-top: 15px;'>Référence **{parse_ref_display(sel_ref)}** introuvable.</p>")
 
 else:
-    # Message par défaut si aucun pin n'a été cliqué
     html.append("<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>")
     html.append("<p style='color:#ccc; margin-top: 15px;'>**Cliquez sur une épingle** sur la carte pour afficher les détails du lot correspondant.</p>")
 
