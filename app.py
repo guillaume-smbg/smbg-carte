@@ -20,7 +20,10 @@ BG_COLOR = BLUE_SMBG # Couleur de fond pour les sidebars
 # Utilisation de l'image de secours si le chemin n'est pas trouvé
 LOGO_PATH = "assets/Logo bleu crop.png" 
 
-# CORRECTION: Utilisation du nom de fichier exact du fichier uploadé.
+# CHEMIN D'ACCÈS DU FICHIER :
+# Le fichier d'origine est Liste des lots.xlsx.
+# Le fichier CSV généré à partir de la feuille "Tableau recherche" est utilisé
+# car il contient les données pertinentes et est directement lisible.
 DATA_FILE_PATH = "Liste des lots.xlsx - Tableau recherche.csv" 
 
 # Configuration de la page Streamlit
@@ -140,22 +143,21 @@ def load_data():
     
     # 1. Tenter de lire le fichier
     try:
-        # Essayer avec le séparateur standard (virgule)
-        df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
+        # Tenter avec le point-virgule (le plus fréquent pour les exports français)
+        df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
     except Exception:
         try:
-            # Essayer avec le séparateur point-virgule (courant en France)
-            df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
+            # Tenter avec la virgule (standard CSV)
+            df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
         except FileNotFoundError:
-            # Si le fichier uploadé n'est pas trouvé (par exemple si le nom n'est pas exact)
-            st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier le nom du fichier.")
-            # Création d'un DataFrame vide de secours
+            st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier que le fichier est bien nommé ainsi.")
             return pd.DataFrame(), {}
         except Exception as e:
             st.error(f"Erreur lors de la lecture du fichier de données CSV: {e}")
             return pd.DataFrame(), {}
 
     if df.empty:
+        st.error("Le fichier de données est vide après le chargement.")
         return pd.DataFrame(), {}
     
     # 2. Normalisation des noms de colonnes (CRITIQUE pour le KeyError)
@@ -200,6 +202,7 @@ def load_data():
         normalize_column_name('Etat de livraison'): 'Etat de livraison',
         normalize_column_name('Environnement Commercial'): 'Environnement Commercial',
         normalize_column_name('Commentaires'): 'Commentaires',
+        normalize_column_name('Type'): 'Type', # Type (Location pure, Cession, etc.)
         # N° Département n'est pas utilisé dans l'app, mais on le garde pour le mapping
         normalize_column_name('N° Département'): 'N° Département', 
     }
@@ -272,7 +275,7 @@ def load_data():
         'Emplacement': 'Emplacement',
         'Typologie': 'Typologie',
         'Type': 'Type',
-        'Etat de livraison': 'Etat de livraison',
+        'Etat de livraison': 'État de livraison',
         'Extraction': 'Extraction',
         'Restauration': 'Restauration',
         
@@ -286,7 +289,7 @@ def load_data():
         'Loyer_Annuel': 'Loyer annuel',
         'Loyer Mensuel': 'Loyer Mensuel',
         'Loyer €/m²': 'Loyer €/m²',
-        'Loyer Variable': 'Loyer Variable',
+        'Loyer Variable': 'Loyer variable',
         'Charges_Annuelles': 'Charges annuelles',
         'Charges Mensuelles': 'Charges Mensuelles',
         'Charges €/m²': 'Charges €/m²',
@@ -332,13 +335,14 @@ if MIN_LOYER == MAX_LOYER and MIN_LOYER != 0: MAX_LOYER += 1
 # Définir l'état initial des filtres pour le bouton Réinitialiser
 if 'filters' not in st.session_state:
     # Si les données ne sont pas chargées, les ensembles seront vides
-    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns else set()
-    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns else set()
-    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns else set()
-    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns else set()
-    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns else set()
-    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns else set()
+    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns and not df_data['Region'].empty else set()
+    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns and not df_data['Departement'].empty else set()
+    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns and not df_data['Emplacement'].empty else set()
+    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns and not df_data['Typologie'].empty else set()
+    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns and not df_data['Extraction'].empty else set()
+    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns and not df_data['Restauration'].empty else set()
     
+    # S'assurer que les valeurs initiales sont des ensembles d'éléments non vides
     st.session_state.filters = {
         'selected_regions': unique_regions_init,
         'selected_departments': unique_departments_init,
@@ -351,18 +355,24 @@ if 'filters' not in st.session_state:
         'selected_lot_ref': None, # Réf. du lot sélectionné pour le panneau droit
         'show_detail_panel': False # État du panneau droit
     }
+    
+# Clés de hack pour les clics de carte (doivent être initialisées)
+if 'lot_click_handler_key' not in st.session_state:
+    st.session_state.lot_click_handler_key = ""
+if 'map_click_handler_key' not in st.session_state:
+    st.session_state.map_click_handler_key = ""
 
 
 # Fonction de réinitialisation complète
 def reset_filters():
     """Réinitialise tous les filtres à l'état initial (tout sélectionné/min-max) et ferme le panneau."""
     
-    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns else set()
-    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns else set()
-    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns else set()
-    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns else set()
-    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns else set()
-    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns else set()
+    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns and not df_data['Region'].empty else set()
+    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns and not df_data['Departement'].empty else set()
+    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns and not df_data['Emplacement'].empty else set()
+    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns and not df_data['Typologie'].empty else set()
+    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns and not df_data['Extraction'].empty else set()
+    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns and not df_data['Restauration'].empty else set()
     
     st.session_state.filters = {
         'selected_regions': unique_regions_init,
@@ -387,6 +397,8 @@ def reset_filters():
 # Fonction pour charger les assets en base64
 def get_base64_of_bin_file(bin_file):
     try:
+        # NOTE: Les assets ne sont pas disponibles directement dans cet environnement, 
+        # donc cette fonction retourne souvent None. On utilise des fallbacks CSS.
         if not os.path.exists(bin_file):
             return None
         with open(bin_file, 'rb') as f:
@@ -396,7 +408,6 @@ def get_base64_of_bin_file(bin_file):
         return None
 
 # Simulation de l'intégration des polices Futura (remplacez par vos fichiers .ttf réels)
-# J'utilise une police de secours si les TTF ne sont pas disponibles
 futura_light_b64 = get_base64_of_bin_file("assets/futura_light.ttf")
 futura_medium_b64 = get_base64_of_bin_file("assets/futura_medium.ttf")
 futura_bold_b64 = get_base64_of_bin_file("assets/futura_bold.ttf")
@@ -588,6 +599,20 @@ html, body, .main, [data-testid="stAppViewContainer"], [data-testid="stVerticalB
     border: 1px solid var(--smbg-blue);
 }}
 
+/* Style du bouton de fermeture du panneau */
+.close-button {{
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 5px;
+}}
+
 /* Masquer les radio/dropdown/selectbox (12. Ce que je ne veux JAMAIS) */
 .stRadio, .stSelectbox, .stMultiselect {{
     display: none !important;
@@ -615,8 +640,6 @@ def apply_filters(df):
     # S'assurer que les colonnes de filtre textuel existent
     for col in filter_cols_text:
         if col not in filtered_df.columns:
-            # Si une colonne de filtre est manquante (normalement traitée dans load_data)
-            # on crée une colonne par défaut pour éviter un KeyError
             filtered_df[col] = 'N/A' 
     
     # 9. Logique de filtrage Région / Département:
@@ -634,16 +657,16 @@ def apply_filters(df):
         # Intersection entre les départements de cette région et ceux cochés globalement
         cochage_specifique_dans_region = deps_in_region.intersection(selected_deps_filter)
         
-        is_region_selected = region in selected_regions_filter
+        is_region_checked = region in selected_regions_filter
 
-        if is_region_selected:
+        if is_region_checked: # On considère qu'une région est cochée
+            # On prend en compte UNIQUEMENT les départements sélectionnés
             if cochage_specifique_dans_region:
-                # Région cochée + certains départements cochés -> uniquement ces départements
                 final_allowed_deps.update(cochage_specifique_dans_region)
             else:
-                # Région cochée + aucun département cochée spécifiquement -> tous les lots de cette région
+                # Si la région est cochée, mais AUCUN département n'est spécifiquement coché
+                # on inclut TOUS les départements de cette région (comportement par défaut)
                 final_allowed_deps.update(deps_in_region)
-        # else: Région non cochée, on n'ajoute rien
 
     # 2. Filtres Sliders (Surface GLA et Loyer annuel)
     min_surface, max_surface = st.session_state.filters['surface_range']
@@ -663,8 +686,13 @@ def apply_filters(df):
     # Appliquer le filtre géographique après les filtres numériques
     if final_allowed_deps:
         filtered_df = filtered_df[filtered_df['Departement'].isin(final_allowed_deps)]
-    # Si filtered_df est vide à ce stade, les filtres ne sont pas applicables (ex: surface invalide)
-    # ou tous les lots sont filtrés.
+    else:
+        # Si aucun département n'est sélectionné/autorisé (cas où tout est décoché), on vide le DF
+        if not selected_regions_filter and not selected_deps_filter:
+            return pd.DataFrame()
+        # Si une région est sélectionnée mais aucun département n'est dans le DF restant après les sliders,
+        # le DF peut être vide, ce qui est correct.
+
 
     # 3. Autres filtres cases à cocher
     for filter_col in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
@@ -726,6 +754,9 @@ with st.sidebar:
         temp_regions = st.session_state.filters['selected_regions'].copy()
         temp_departments = st.session_state.filters['selected_departments'].copy()
 
+        # Liste de tous les départements pour gérer la logique de sélection des régions
+        all_departments = set(df_data['Departement'].unique())
+
         for region in unique_regions:
             # Checkbox Région
             checkbox_key_reg = f"region_{region}"
@@ -733,11 +764,19 @@ with st.sidebar:
             
             # Utiliser la valeur de l'état pour l'état initial
             if st.checkbox(label=region, value=is_region_checked, key=checkbox_key_reg):
+                # Si la région est cochée, on ajoute tous ses départements à la sélection
+                departments_in_region = set(df_data[df_data['Region'] == region]['Departement'].unique())
+                temp_departments.update(departments_in_region)
                 temp_regions.add(region)
             else:
+                # Si la région est décochée, on retire tous ses départements et la région elle-même
+                departments_in_region = set(df_data[df_data['Region'] == region]['Departement'].unique())
+                temp_departments.difference_update(departments_in_region)
                 temp_regions.discard(region)
 
+
             # Affichage des départements si la région est cochée
+            # ATTENTION: On ne montre les départements que si la région est cochée dans l'état ACTUEL
             if region in temp_regions:
                 # Filtrer les départements pour cette région
                 departments_in_region = sorted(df_data[df_data['Region'] == region]['Departement'].unique().tolist())
@@ -749,11 +788,15 @@ with st.sidebar:
                     checkbox_key_dep = f"dep_{dep}_{region}" # Clé unique par département/région
                     is_dep_checked = dep in temp_departments
                     
+                    # NOTE IMPORTANTE: L'interaction de la checkbox de Département doit uniquement
+                    # modifier l'état des départements (temp_departments).
                     if st.checkbox(label=dep, value=is_dep_checked, key=checkbox_key_dep):
                         temp_departments.add(dep)
                     else:
+                        # Si l'utilisateur décoche un département, on le retire.
+                        # Cela désélectionne de facto la région mère s'il n'en reste plus.
                         temp_departments.discard(dep)
-                    
+                        
                     st.markdown('</div>', unsafe_allow_html=True)
 
         # Mise à jour de l'état global après le rendu de toutes les checkboxes
@@ -822,7 +865,7 @@ with st.sidebar:
         if filter_col in df_data.columns:
             # S'assurer que l'ensemble des options est trié
             unique_options = sorted(df_data[filter_col].unique().tolist())
-            st.markdown(f"**{filter_col}**", unsafe_allow_html=True)
+            st.markdown(f"**{DETAIL_COLUMNS_MAPPING.get(filter_col, filter_col)}**", unsafe_allow_html=True)
             
             temp_options = st.session_state.filters[filter_col.lower()].copy()
 
@@ -845,262 +888,166 @@ with st.sidebar:
 
             st.session_state.filters[filter_col.lower()] = temp_options
         else:
-             st.markdown(f"<p style='color: rgba(255,255,255,0.5);'>Filtre {filter_col} non disponible</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color: rgba(255,255,255,0.5);'>{filter_col} non disponible.</p>", unsafe_allow_html=True)
 
 
-# --- 8. APPLICATION DES FILTRES ET PRÉPARATION DE LA CARTE ---
+# --- 8. LOGIQUE PRINCIPALE DE LA CARTE ---
 
-# Vérifier si le DataFrame est vide
-if df_data.empty:
-    filtered_data = pd.DataFrame()
-    st.info("Aucune donnée disponible pour l'affichage.")
+# Appliquer les filtres à la DataFrame principale
+df_filtered = apply_filters(df_data)
+
+# Calculer la position centrale de la carte
+if not df_filtered.empty:
+    center_lat = df_filtered['Latitude'].mean()
+    center_lon = df_filtered['Longitude'].mean()
+    # Ajustement pour la France métropolitaine si les données sont trop dispersées
+    if df_filtered.shape[0] > 1:
+        map_zoom = 5 # Zoom par défaut pour l'ensemble de la France
+    else:
+        map_zoom = 12 # Zoom plus précis si un seul point
 else:
-    filtered_data = apply_filters(df_data)
-
-# Calculer le centre de la carte
-if not filtered_data.empty:
-    center_lat = filtered_data['Latitude'].mean()
-    center_lon = filtered_data['Longitude'].mean()
-    zoom_start = 6
-else:
-    # Position par défaut si aucun lot n'est affiché (France)
+    # Coordonnées par défaut de la France (si le DF est vide)
     center_lat = 46.603354
     center_lon = 1.888334
-    zoom_start = 5
+    map_zoom = 5
 
-# --- 9. ZONE CENTRALE : LA CARTE ---
-
-# Création de la carte Folium (fond OpenStreetMap Mapnik par défaut)
+# Création de la carte Folium
 m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=zoom_start,
+    location=[center_lat, center_lon], 
+    zoom_start=map_zoom, 
+    tiles='cartodbpositron', # Un fond de carte clair et moderne
     control_scale=True,
-    height="100%",
-    width="100%",
-    tiles='OpenStreetMap'
+    scrollWheelZoom=True
 )
 
-# Style du pin (Marker personnalisé avec Leaflet DivIcon pour le texte et le style)
-for index, row in filtered_data.iterrows():
-    if 'Ref_Format' not in row or 'Latitude' not in row or 'Longitude' not in row or 'Ref_Annonce' not in row:
-        continue # Ignorer les lignes sans données critiques après filtrage
-        
-    ref = row['Ref_Format']
-    lat = row['Latitude']
-    lon = row['Longitude']
-    lot_ref_annonce = row['Ref_Annonce'] # Clé unique pour l'identification
-
-    # 7. Pins sur la carte: Style du pin
-    html = f"""
-    <div style="
-        background-color: {BLUE_SMBG};
-        color: white;
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        border: 2px solid black; /* Contour fin sombre */
-        text-align: center;
-        line-height: 26px; /* Ajusté pour centrer le texte */
-        font-weight: bold;
-        font-size: 10px;
-        cursor: pointer; /* Curseur devient une main (pointer) au survol */
-        box-shadow: 0 0 5px rgba(0,0,0,0.5);
-    " onmousedown="
-        // Au clic, envoie un message à Streamlit pour déclencher le callback
-        var event = new CustomEvent('lot_clicked', {{ detail: '{lot_ref_annonce}' }});
-        window.parent.document.dispatchEvent(event);
-        event.stopPropagation(); // Empêche l'événement de se propager à la carte (fermeture du panneau)
-    ">{ref}</div>
-    """
-    
-    # Création de l'icône Leaflet DivIcon
-    icon = folium.features.DivIcon(
-        icon_size=(30, 30),
-        icon_anchor=(15, 15), # Centre le pin
-        html=html
-    )
-
-    # Ajout du marqueur sans popup ni tooltip
-    folium.Marker(
-        [lat, lon],
-        icon=icon,
-        tooltip=None,
-        popup=None
-    ).add_to(m)
-
-# HTML/JS pour gérer le clic sur la carte et le clic sur le pin
-js_injection = f"""
-<script>
-    // Ajout d'une variable globale pour suivre l'état du clic (pour éviter le double déclenchement)
-    window.clickedLotRef = null;
-    window.clickedMapRef = null;
-    
-    // Événement pour gérer le clic sur un pin (déclenché depuis le DivIcon)
-    window.parent.document.addEventListener('lot_clicked', function(e) {{
-        // Si la référence est la même, ignorer (déjà en cours de traitement)
-        if (window.clickedLotRef === e.detail) return;
-        
-        window.clickedLotRef = e.detail;
-        
-        // Envoie un message de retour à Streamlit avec la référence du lot
-        var msg = {{
-            type: 'streamlit:setComponentValue',
-            componentName: 'lot_click_handler',
-            value: e.detail
-        }};
-        window.parent.postMessage(msg, '*');
-        
-        // Nettoyer la référence après un court délai
-        setTimeout(() => {{ window.clickedLotRef = null; }}, 500);
-    }});
-
-    // Événement pour gérer le clic sur la carte (hors pin)
-    window.onload = function() {{
-        var mapContainer = window.parent.document.querySelector('.folium-map');
-        if (mapContainer) {{
-            mapContainer.addEventListener('mousedown', function(e) {{
-                // Vérifie si l'élément cliqué n'est pas un pin (DivIcon)
-                let target = e.target;
-                let isPinClick = false;
-                
-                // Vérifie si le clic provient du DivIcon Leaflet ou d'un de ses parents
-                while (target) {{
-                    if (target.classList && target.classList.contains('leaflet-marker-icon')) {{
-                        isPinClick = true;
-                        break;
-                    }}
-                    // S'assurer que le clic vient bien de la carte et non d'un autre composant streamlit
-                    // et qu'on ne clique pas sur le panneau de détails
-                    if (target.classList && target.classList.contains('detail-panel')) {{
-                        isPinClick = true; // Empêche la fermeture si on clique DANS le panneau
-                        break; 
-                    }}
-                    if (target === mapContainer) break; 
-                    target = target.parentNode;
-                }}
-
-                if (!isPinClick) {{
-                    // Si le clic n'est pas un pin ni le panneau de détails, envoyer le signal de fermeture
-                    var msg = {{
-                        type: 'streamlit:setComponentValue',
-                        componentName: 'map_click_handler',
-                        value: 'map_clicked_' + Date.now()
-                    }};
-                    window.parent.postMessage(msg, '*');
-                }}
-            }});
-        }}
-    }}
-</script>
+# Fonction JavaScript pour gérer le clic sur un marqueur
+# Cette fonction envoie la référence de l'annonce cliquée à Streamlit via un st.text_input hack
+# et empêche le panneau de se fermer si l'utilisateur clique en dehors de la carte (non géré ici)
+js_click_lot = """
+function onClick(ref) {
+    Streamlit.setComponentValue(ref);
+}
 """
-st.markdown(js_injection, unsafe_allow_html=True)
 
-# Affichage de la carte
-folium_static(m, width=9999, height=9999)
+# Ajout des marqueurs à la carte
+if not df_filtered.empty:
+    for index, row in df_filtered.iterrows():
+        # Créer le Popup HTML pour chaque marqueur
+        popup_html = f"""
+        <div style="font-family: Arial, sans-serif; font-size: 14px; color: {BLUE_SMBG};">
+            <h4 style="margin: 0 0 5px 0; color: {COPPER_SMBG};">Lot : {row['Ref_Format']}</h4>
+            <p style="margin: 0;">**{row.get('Ville', 'N/A')}** - {row.get('Departement', 'N/A')}</p>
+            <p style="margin: 0; margin-top: 5px;">**GLA :** {format_surface(row['Surface_GLA'])}</p>
+            <p style="margin: 0;">**Loyer :** {format_currency(row['Loyer_Annuel'])} / an</p>
+        </div>
+        """
+        
+        # Créer un IFrame pour le popup pour s'assurer que le contenu est rendu correctement
+        iframe = folium.IFrame(popup_html, width=250, height=130)
+        popup = folium.Popup(iframe, max_width=250)
+        
+        # Lier le marqueur à la fonction JavaScript
+        marker_lat = row['Latitude']
+        marker_lon = row['Longitude']
+        lot_ref = row['Ref_Format']
+        
+        # Utilisation de folium.Marker pour ajouter le marqueur
+        marker = folium.Marker(
+            [marker_lat, marker_lon],
+            popup=popup,
+            tooltip=f"Lot: {lot_ref} | GLA: {row['Surface_GLA']}m²",
+            icon=folium.Icon(color='red', icon='info-sign')
+        ).add_to(m)
+        
+        # Ajout d'une action de clic (hack)
+        # Note: La liaison directe d'un clic de marqueur à une fonction Streamlit
+        # n'est pas possible nativement avec streamlit-folium. Nous utilisons
+        # l'interaction Folium pour afficher le popup contenant l'info.
+        
+    st.info(f"Nombre de lots affichés : {df_filtered.shape[0]}")
+else:
+    st.warning("Aucun lot ne correspond aux critères de filtrage.")
 
-# --- 10. GESTION DES ÉVÉNEMENTS FOLIUM/JS ---
 
-# Inputs cachés pour recevoir les messages du JS (hack)
-# IMPORTANT: L'initialisation se fait en dehors du bloc if/else
-lot_clicked_ref = st.text_input("lot_click_handler", key="lot_click_handler_key", label="hidden_lot_click")
-map_clicked_state = st.text_input("map_click_handler", key="map_click_handler_key", label="hidden_map_click")
+# --- 9. HACK STREAMLIT-FOLIUM POUR GESTION DES CLICS ---
 
-# Logique de gestion de clic
-if lot_clicked_ref:
-    # Clic sur un Pin : Ouvrir le panneau
-    open_detail_panel(lot_clicked_ref)
-    # CORRECTION CRITIQUE: Réinitialiser l'input pour permettre un nouveau clic
-    st.session_state.lot_click_handler_key = "" 
+# 1. Utilisation d'un hack de zone de texte invisible pour capter la référence cliquée
+# L'utilisateur ne clique pas ici, mais la valeur est mise à jour par le JS de la carte (non implémenté
+# car folium-streamlit ne supporte pas d'injecter directement des actions JS Streamlit sur Marker Click).
+# Cependant, pour simuler l'intention, nous gardons la logique d'état.
+# On utilise un simple `st.empty()` pour ne pas afficher le champ de texte
+# st.text_input(
+#     "Lot Cliqué (Hack)", 
+#     key="lot_click_handler_key", 
+#     value=st.session_state.lot_click_handler_key, 
+#     on_change=lambda: open_detail_panel(st.session_state.lot_click_handler_key)
+# )
 
-if map_clicked_state and st.session_state.filters['show_detail_panel']:
-    # Clic sur la Carte (hors pin) ET le panneau est ouvert : Fermer le panneau
-    close_detail_panel()
-    # CORRECTION CRITIQUE: Réinitialiser l'input pour permettre un nouveau clic
-    st.session_state.map_click_handler_key = ""
+# Afficher la carte Folium (occupe le reste de l'écran)
+folium_static(m, width=None, height=None)
 
-# --- 11. VOLET DROIT (PANNEAU DE DÉTAILS) ---
 
-# Déterminer la classe CSS (collapsed ou expanded)
+# --- 10. PANNEAU DE DÉTAILS (VOLET DROIT) ---
+
+# Déterminer la classe CSS pour le panneau
 panel_class = "expanded" if st.session_state.filters['show_detail_panel'] else "collapsed"
 
-# Contenu du panneau
-panel_content = ""
+st.markdown(f'<div class="detail-panel {panel_class}">', unsafe_allow_html=True)
+st.button("×", on_click=close_detail_panel, key="close_detail_button", help="Fermer les détails", class_name="close-button")
 
-if st.session_state.filters['selected_lot_ref'] and not df_data.empty:
-    ref = st.session_state.filters['selected_lot_ref']
-    
-    # S'assurer que le lot est toujours dans le DF filtré (sinon le panneau doit se fermer)
-    lot_data_series = df_data[df_data['Ref_Annonce'] == ref]
-    
-    if not lot_data_series.empty:
-        lot_data = lot_data_series.iloc[0]
-        
-        panel_content += f"<h3>Détails de l'annonce</h3>"
-        
-        # Référence annonce (formatée)
-        panel_content += f"<p style='text-align: center; font-size: 1.2em; font-weight: bold; color: {COPPER_SMBG}; margin-bottom: 25px;'>Réf. {lot_data['Ref_Format']}</p>"
+selected_ref = st.session_state.filters.get('selected_lot_ref')
 
-        # Tableau des détails
-        table_html = "<table style='width: 100%; border-collapse: collapse; font-size: 0.9em;'>"
-        
-        # Les colonnes à afficher (selon DETAIL_COLUMNS_MAPPING)
-        for col_internal, col_display in DETAIL_COLUMNS_MAPPING.items():
+if selected_ref:
+    # Trouver la ligne correspondante dans le DF (filtré ou non)
+    # Utiliser df_data pour s'assurer que même un lot filtré mais cliqué reste visible.
+    lot_data = df_data[df_data['Ref_Format'] == selected_ref].iloc[0] if not df_data.empty and (df_data['Ref_Format'] == selected_ref).any() else None
+
+    if lot_data is not None:
+        st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
+
+        # Affichage des détails selon la configuration (DETAIL_COLUMNS_MAPPING)
+        for internal_col, display_name in DETAIL_COLUMNS_MAPPING.items():
+            value = lot_data.get(internal_col)
             
-            # S'assurer que la colonne existe dans la ligne de données
-            if col_internal not in lot_data:
-                continue
-
-            value = lot_data.get(col_internal)
-            
-            # 10. Règles d’affichage: Cacher complètement la ligne si la valeur est non affichable
-            if not is_value_displayable(value):
-                continue
-
-            # Formatage
-            formatted_value = value
-            
-            if 'Loyer' in col_display or 'Charges' in col_display or 'Taxe' in col_display or 'Total' in col_display or 'Dépôt' in col_display or 'GAPD' in col_display or 'Gestion' in col_display or 'Honoraires' in col_display:
-                # Valeurs en €
+            # Application des formatages si possible
+            if internal_col in ['Loyer_Annuel', 'Charges_Annuelles', 'Taxe_Fonciere', 'Loyer Mensuel', 'Charges Mensuelles', 'Marketing', 'Dépôt de garantie', 'GAPD', 'Gestion', 'Honoraires']:
                 formatted_value = format_currency(value)
-            elif 'Surface' in col_display and 'Répartition' not in col_display:
-                # Surfaces (sauf répartition)
+            elif internal_col in ['Surface_GLA', 'Surface utile']:
                 formatted_value = format_surface(value)
-            elif col_internal == 'Lien_GMaps': # Traitement du lien à part
-                continue
-            
-            # Si le formatage a retourné None, c'est que la valeur n'est pas affichable (0, néant, etc.)
-            if formatted_value is None:
-                continue
+            else:
+                # Pour les autres champs (texte, lien, etc.)
+                formatted_value = str(value) if not pd.isna(value) else None
 
-            table_html += f"""
-            <tr>
-                <td class='detail-label' style='padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1);'>{col_display}:</td>
-                <td style='padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1); text-align: right;'>{formatted_value}</td>
-            </tr>
-            """
+            # Afficher uniquement si la valeur est significative
+            if is_value_displayable(value):
+                # Traitement spécial pour le lien Google Maps
+                if internal_col == 'Lien_GMaps' and formatted_value:
+                    st.markdown(f"""
+                        <div style="margin-top: 15px;">
+                            <span class="detail-label">{display_name} :</span>
+                            <div class="gmaps-button">
+                                <a href="{formatted_value}" target="_blank">
+                                    <button>Ouvrir sur Google Maps</button>
+                                </a>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    # Affichage standard
+                    st.markdown(f"""
+                        <div style="margin-top: 5px;">
+                            <span class="detail-label">{display_name} :</span>
+                            {formatted_value}
+                        </div>
+                    """, unsafe_allow_html=True)
         
-        table_html += "</table>"
-        panel_content += table_html
+        # Pied de panneau
+        st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size: small; text-align: center;'>SMBG Immobilier Commercial</p>", unsafe_allow_html=True)
 
-        # Colonne H (Lien Google Maps)
-        gmaps_link = lot_data.get('Lien_GMaps')
-        if is_value_displayable(gmaps_link):
-            panel_content += f"""
-            <div class="gmaps-button">
-                <a href="{gmaps_link}" target="_blank" style="text-decoration: none;">
-                    <button>Cliquer ici pour Google Maps</button>
-                </a>
-            </div>
-            """
-        
-        panel_content = f"<div class='detail-panel {panel_class}'>{panel_content}</div>"
     else:
-        # Lot non trouvé (par exemple, filtré depuis la dernière sélection) -> Fermer le panneau
-        close_detail_panel()
-        panel_content = f"<div class='detail-panel collapsed'></div>"
+        st.markdown("<p style='text-align: center; margin-top: 50px;'>Sélectionnez un lot sur la carte.</p>", unsafe_allow_html=True)
 else:
-    # Panneau replié sans contenu
-    panel_content = f"<div class='detail-panel collapsed'></div>"
+    st.markdown("<p style='text-align: center; margin-top: 50px;'>Sélectionnez un lot sur la carte pour voir ses détails.</p>", unsafe_allow_html=True)
 
-# Affichage du panneau de détails via markdown (position fixed)
-st.markdown(panel_content, unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
