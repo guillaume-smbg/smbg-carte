@@ -22,7 +22,8 @@ SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL
 
 # Volet droit : G -> AL (H = bouton Google)
 INDEX_START, INDEX_END_EXCL = 6, 38
-MAP_HEIGHT = 800
+# Hauteur de la carte ajustée à 100% de la fenêtre (sera gérée par CSS)
+MAP_HEIGHT = 800 
 
 # La variable show_details et la logique de bascule ont été supprimées.
 # Le panneau est toujours "visible" par défaut via le CSS.
@@ -106,7 +107,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Simplifié pour éviter les conflits et assurer l'affichage du volet droit) =====
+# ===== CSS global (Mise à jour pour le plein écran et l'anti-défilement) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -115,15 +116,30 @@ st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* Panneau droit réservé : La marge est toujours appliquée */
+/* GESTION DU PLEIN ÉCRAN ET ANTI-DÉFILEMENT */
+[data-testid="stAppViewContainer"] {{
+    height: 100vh !important;
+    overflow: hidden !important; /* Désactive le défilement de la page principale */
+}}
+
+/* Le conteneur principal de la page doit également être plein écran */
+.main {{ height: 100vh !important; }}
+
+/* Le contenu central (où se trouve la carte) ne doit pas avoir de marge en haut */
 [data-testid="stAppViewContainer"] .main .block-container {{ 
-    padding-right: {right_padding + 20}px; 
+    padding-top: 0px !important;
+    padding-right: {right_padding + 20}px; /* Marge pour le volet de détails */
+}}
+
+/* La carte doit prendre toute la hauteur restante */
+.stDataFrame, .stPlotlyChart, .stDeckGlJsonChart, .stFolium {{
+    height: 100% !important;
 }}
 
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* Neutraliser le padding par défaut en haut de la sidebar pour éviter le vide (si l'utilisateur veut un logo haut) */
+/* Neutraliser le padding par défaut en haut de la sidebar pour éviter le vide (choix utilisateur) */
 [data-testid="stSidebarContent"] {{ padding-top: 0px !important; }}
 
 /* Sidebar : aucun bouton collapse */
@@ -156,10 +172,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Mise à jour pour l'indentation des départements) =====
+# ===== SIDEBAR (Indentation des départements via style inline) =====
 with st.sidebar:
     
-    # Ajout d'une marge de 10px en haut pour éviter de coller le bord (choix esthétique)
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True) 
     
     b64 = logo_base64()
@@ -190,7 +205,7 @@ with st.sidebar:
             depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
             for d in depts:
                 dk = f"chk_dept_{reg}_{d}"
-                # Indentation forcée via style inline sur le conteneur du checkbox
+                # Indentation forcée via style inline
                 st.markdown("<div style='margin-left: 30px;'>", unsafe_allow_html=True)
                 dchecked = st.checkbox(d, key=dk)
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -260,7 +275,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Code inchangé) =====
+# ===== CARTE (Mise à jour de la hauteur pour correspondre à 100% de la fenêtre) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -291,6 +306,7 @@ if not pins_df.empty:
     for _,r in pins_df.iterrows():
         add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
 
+# La hauteur de la carte est définie à 100% via CSS global, nous utilisons donc la variable MAP_HEIGHT comme référence.
 map_output = st_folium(
     m, 
     height=MAP_HEIGHT, 
@@ -350,7 +366,7 @@ if map_output:
         st.session_state["selected_ref"] = ref_guess
 
 
-# ===== VOLET DROIT (Fonctionnel) =====
+# ===== VOLET DROIT (Code inchangé) =====
 html=[f"<div class='details-panel'>"]
 sel_ref=st.session_state.get("selected_ref")
 
