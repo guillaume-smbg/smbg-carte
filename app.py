@@ -24,9 +24,9 @@ SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL
 INDEX_START, INDEX_END_EXCL = 6, 38
 MAP_HEIGHT = 800
 
-# Initialisation de l'état du volet de détails (Affiché par défaut)
+# FIX #1 : Initialisation de l'état du volet de détails (Masqué par défaut)
 if "show_details" not in st.session_state:
-    st.session_state["show_details"] = True
+    st.session_state["show_details"] = False
 
 # ===== Police Futura (Code inchangé) =====
 def _load_futura_css_from_assets():
@@ -68,7 +68,7 @@ def format_value(value, unit=""):
 
 def reset_all():
     st.session_state.clear()
-    st.session_state["show_details"] = True
+    st.session_state["show_details"] = False # Masqué après réinitialisation
     st.rerun()
 
 def toggle_details():
@@ -97,24 +97,23 @@ def load_data(path):
 data_df=load_data(EXCEL_FILE_PATH)
 
 # =======================================================
-# FIX DU NAMERROR : Initialisation des variables dans la portée du module
+# Variables de la portée du module (Correction du NameError)
 # =======================================================
 selected_regions = []
 selected_depts_global = []
 selected_depts_by_region = defaultdict(list)
-# Initialisation des listes de filtres par checkbox
 emp_sel = []
 typo_sel = []
 ext_sel = []
 rest_sel = []
-smin, smax = 0, 1000 # Initialisation des bornes des sliders
+smin, smax = 0, 1000
 lmin, lmax = 0, 100000
 
 # Calcul de la marge droite dynamique
 right_padding = DETAILS_PANEL_WIDTH if st.session_state["show_details"] else 0
 TRANSITION_DURATION = "0.3s"
 
-# ===== CSS global (Code inchangé) =====
+# ===== CSS global (Code inchangé dans la structure) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -167,7 +166,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Mise à jour des variables de sélection existantes) =====
+# ===== SIDEBAR (Code inchangé dans la structure) =====
 with st.sidebar:
     # marge fixe de 25 px en haut
     st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
@@ -189,7 +188,6 @@ with st.sidebar:
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
 
-    # Les listes initialisées ci-dessus sont réutilisées et remplies ici
     selected_regions.clear()
     selected_depts_global.clear()
     selected_depts_by_region.clear()
@@ -212,18 +210,19 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Sliders aux bornes (smin, smax, lmin, lmax sont maintenant dans la portée du module)
     surf_num = data_df["__SURF_NUM__"].dropna()
     surf_min=int(surf_num.min()) if not surf_num.empty else 0
     surf_max=int(surf_num.max()) if not surf_num.empty else 1000
-    smin,smax=st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max, value=(surf_min,surf_max), step=1, key="slider_surface")
+    smin_val,smax_val=st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max, value=(surf_min,surf_max), step=1, key="slider_surface")
+    smin, smax = smin_val, smax_val
 
     loyer_num = data_df["__LOYER_NUM__"].dropna()
     loyer_min=int(loyer_num.min()) if not loyer_num.empty else 0
     loyer_max=int(loyer_num.max()) if not loyer_num.empty else 100000
-    lmin,lmax=st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max, value=(loyer_min,loyer_max), step=1000, key="slider_loyer")
+    lmin_val,lmax_val=st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max, value=(loyer_min,loyer_max), step=1000, key="slider_loyer")
+    lmin, lmax = lmin_val, lmax_val
 
-    # Autres cases
+
     def draw_checks(title, column, prefix):
         st.markdown(f"**{title}**")
         opts=sorted([x for x in data_df.get(column,pd.Series()).dropna().astype(str).unique() if x.strip()])
@@ -233,14 +232,12 @@ with st.sidebar:
             if st.checkbox(opt, key=key):
                 sels.append(opt)
         st.markdown("---")
-        # Le retour de la fonction est affecté aux variables de la portée du module
         return sels
 
-    # Affectation des résultats de la fonction (emp_sel, typo_sel, ext_sel, rest_sel sont déjà déclarées)
-    emp_sel  = draw_checks("Emplacement",  EMPL_COL, "emp")
-    typo_sel = draw_checks("Typologie",   TYPO_COL, "typo")
-    ext_sel  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
-    rest_sel = draw_checks("Restauration",RESTAURATION_COL, "rest")
+    emp_sel[:]  = draw_checks("Emplacement",  EMPL_COL, "emp")
+    typo_sel[:] = draw_checks("Typologie",   TYPO_COL, "typo")
+    ext_sel[:]  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
+    rest_sel[:] = draw_checks("Restauration",RESTAURATION_COL, "rest")
     
     # --- Contrôle du volet ---
     st.markdown("---")
@@ -252,7 +249,7 @@ with st.sidebar:
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
-# ===== FILTRES (L'erreur NameError est corrigée ici) =====
+# ===== FILTRES (Code inchangé) =====
 f = data_df.copy()
 
 if selected_regions or selected_depts_global:
@@ -269,8 +266,6 @@ if selected_regions or selected_depts_global:
     dept_mask = f[DEPT_COL].astype(str).isin(selected_depts_global)
     f = f[ reg_mask | dept_mask ]
 
-# sliders
-# smin, smax, lmin, lmax sont des variables de la portée du module grâce au slider
 f = f[
     (f["__SURF_NUM__"].isna() | ((f["__SURF_NUM__"]>=smin) & (f["__SURF_NUM__"]<=smax))) &
     (f["__LOYER_NUM__"].isna()| ((f["__LOYER_NUM__"]>=lmin) & (f["__LOYER_NUM__"]<=lmax)))
@@ -323,6 +318,9 @@ if map_output and map_output.get("last_object_clicked"):
             break
     if ref_guess:
         st.session_state["selected_ref"]=ref_guess
+        # FIX #2 : Affiche le panneau après un clic sur un marqueur
+        st.session_state["show_details"] = True
+        st.rerun() # Rerun est nécessaire pour appliquer immédiatement le changement de CSS
 
 # ===== VOLET DROIT (Code inchangé) =====
 if st.session_state["show_details"]:
