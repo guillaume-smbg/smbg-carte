@@ -48,24 +48,38 @@ def load_font_css() -> str:
 
     css_parts.append(
         f"""
-html, body, [data-testid="stAppViewContainer"] {{
+html, body {{
     margin: 0;
     padding: 0;
     height: 100%;
+    overflow: hidden;
 }}
 
-body {{
-    overflow: hidden;
+[data-testid="stAppViewContainer"] {{
+    margin: 0;
+    padding: 0 !important;
+    height: 100vh;
+}}
+
+[data-testid="stAppViewContainer"] > .main {{
+    margin: 0;
+    padding: 0 !important;
+    height: 100vh;
+}}
+
+main.block-container, .block-container {{
+    padding: 0 !important;
+    margin: 0 !important;
+}}
+
+[data-testid="stVerticalBlock"] {{
+    padding: 0 !important;
+    margin: 0 !important;
 }}
 
 /* Remove Streamlit default header, footer, and padding */
 [data-testid="stHeader"], [data-testid="stToolbar"] {{
     display: none;
-}}
-
-main.block-container {{
-    padding: 0rem;
-    margin: 0;
 }}
 
 /* Sidebar width and style */
@@ -98,6 +112,11 @@ button[title="View fullscreen"] {{
     margin: 0;
     padding: 0;
     overflow: hidden;
+}}
+
+/* Force folium iframe to fill viewport height */
+iframe[title="st_folium.smbg_map"] {{
+    height: 100vh !important;
 }}
 
 /* Right drawer */
@@ -613,7 +632,7 @@ with map_html_container:
     map_data = st_folium(
         m,
         width=None,
-        height=700,
+        height=600,  # overruled by CSS to 100vh
         key="smbg_map",
     )
     st.markdown("</div>", unsafe_allow_html=True)
