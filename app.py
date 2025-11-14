@@ -21,9 +21,8 @@ BG_COLOR = BLUE_SMBG # Couleur de fond pour les sidebars
 LOGO_PATH = "assets/Logo bleu crop.png" 
 
 # CHEMIN D'ACCÈS DU FICHIER :
-# Le fichier d'origine est Liste des lots.xlsx.
-# Le fichier CSV généré à partir de la feuille "Tableau recherche" est utilisé
-# car il contient les données pertinentes et est directement lisible.
+# Utilisation du nom du fichier que vous avez téléversé.
+# IMPORTANT : Ce fichier doit être présent dans le même dossier que l'application Streamlit.
 DATA_FILE_PATH = "Liste des lots.xlsx - Tableau recherche.csv" 
 
 # Configuration de la page Streamlit
@@ -145,13 +144,13 @@ def load_data():
     try:
         # Tenter avec le point-virgule (le plus fréquent pour les exports français)
         df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
+    except FileNotFoundError:
+        st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier que le fichier est bien nommé ainsi.")
+        return pd.DataFrame(), {}
     except Exception:
         try:
             # Tenter avec la virgule (standard CSV)
             df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
-        except FileNotFoundError:
-            st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier que le fichier est bien nommé ainsi.")
-            return pd.DataFrame(), {}
         except Exception as e:
             st.error(f"Erreur lors de la lecture du fichier de données CSV: {e}")
             return pd.DataFrame(), {}
@@ -296,7 +295,7 @@ def load_data():
         'Taxe_Fonciere': 'Taxe foncière',
         'Taxe Foncière €/m²': 'Taxe foncière €/m²',
         'Marketing': 'Marketing',
-        'Marketing €/m²': 'Marketing €/m²',
+        'Marketing €/m²', 'Marketing €/m²',
         'Total (L+C+M)': 'Total (L+C+M)',
         'Honoraires': 'Honoraires',
         'Dépôt de garantie': 'Dépôt de garantie',
