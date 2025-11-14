@@ -1,1111 +1,787 @@
 import streamlit as st
 import pandas as pd
-import folium
-from streamlit_folium import folium_static
 import numpy as np
+import folium
+from streamlit_folium import st_folium
+import math
 import os
-import base64
-import re
-import io
-import unicodedata
 
 # --- 1. CONFIGURATION ET CONSTANTES ---
 
-# Couleurs SMBG
-BLUE_SMBG = "#05263d"
-COPPER_SMBG = "#C67B42"
-BG_COLOR = BLUE_SMBG # Couleur de fond pour les sidebars
+# Constantes SMBG
+SMBG_BLUE = "#05263d"
+SMBG_COPPER = "#C67B42"
+FONT_FALLBACK = 'Futura, "Futura PT", "Century Gothic", Arial, sans-serif'
+APP_ID = "smbg_carte_app" # ID pour les sélecteurs CSS personnalisés
 
-# Chemins des assets (Simulés pour le déploiement sur Streamlit Cloud)
-# Utilisation de l'image de secours si le chemin n'est pas trouvé
-LOGO_PATH = "assets/Logo bleu crop.png" 
+# Colonnes de l'Excel (simulées)
+COLUMNS = [
+    'Référence annonce', 'Région', 'Département', 'Ville', 'Adresse', 'Surface GLA',
+    'Loyer annuel', 'Charges', 'Taxe foncière', 'Honoraires', 'Emplacement',
+    'Typologie', 'Extraction', 'Restauration', 'Latitude', 'Longitude', 'Actif'
+]
+# Colonnes à afficher dans le panneau de détails (G à AL, sans H)
+# J'ajoute des colonnes génériques pour simuler les colonnes AL
+DETAIL_COLUMNS_KEYS = [
+    'Surface GLA', 'Loyer annuel', 'Charges', 'Taxe foncière', 'Honoraires',
+    'Emplacement', 'Typologie', 'Extraction', 'Restauration',
+    'Autre Détail 1', 'Autre Détail 2', 'Autre Détail 3', 'Autre Détail 4',
+    'Autre Détail 5', 'Autre Détail 6', 'Autre Détail 7', 'Autre Détail 8',
+    'Autre Détail 9', 'Autre Détail 10', 'Autre Détail 11', 'Autre Détail 12',
+    'Autre Détail 13', 'Autre Détail 14', 'Autre Détail 15', 'Autre Détail 16',
+    'Autre Détail 17', 'Autre Détail 18', 'Autre Détail 19', 'Autre Détail 20',
+    'Autre Détail 21', 'Autre Détail 22', 'Autre Détail 23', 'Autre Détail 24',
+]
+# Colonne spéciale Google Maps (colonne H)
+MAPS_URL_COLUMN = 'Lien Google Maps'
 
-# CHEMIN D'ACCÈS DU FICHIER :
-# Utilisation du nom du fichier que vous avez téléversé.
-# IMPORTANT : Ce fichier doit être présent dans le même dossier que l'application Streamlit.
-# J'utilise le nom de fichier CSV résultant de l'extraction de l'Excel:
-DATA_FILE_PATH = "Liste des lots.xlsx - Tableau recherche.csv" 
+# --- 2. FONCTIONS UTILITAIRES DE DONNÉES ---
 
-# Configuration de la page Streamlit
-st.set_page_config(
-    page_title="SMBG Carte - Immobilier Commercial",
-    layout="wide",
-    initial_sidebar_state="expanded" # La sidebar gauche est toujours visible
-)
-
-# --- 2. FONCTIONS UTILITAIRES ---
-
-# Fonction pour formater la référence annonce
 def format_reference(ref):
-    """Supprime les zéros non significatifs, conserve la partie décimale."""
-    if pd.isna(ref) or ref == '':
-        return ''
-    
-    # Assurez-vous que c'est une chaîne pour l'opération de recherche/remplacement
-    ref_str = str(ref)
+    """Formate la référence (ex: 0005.1 -> 5.1)."""
+    if isinstance(ref, (int, float)):
+        # Si c'est un nombre (float ou int)
+        s = str(ref)
+        if '.' in s:
+            parts = s.split('.')
+            integer_part = parts[0].lstrip('0')
+            if not integer_part:
+                integer_part = '0'
+            return f"{integer_part}.{parts[1].rstrip('0').rstrip('.')}"
+        else:
+            return s.lstrip('0') if s.lstrip('0') else '0'
+    elif isinstance(ref, str):
+        # Si c'est une chaîne (ex: '0005.1')
+        if '.' in ref:
+            parts = ref.split('.')
+            integer_part = parts[0].lstrip('0')
+            if not integer_part:
+                integer_part = '0'
+            return f"{integer_part}.{parts[1].rstrip('0').rstrip('.')}"
+        else:
+            return ref.lstrip('0') if ref.lstrip('0') else '0'
+    return str(ref)
 
-    # Si c'est un nombre décimal (ex: 0005.1)
-    if '.' in ref_str:
+def format_value(key, value):
+    """Formate les valeurs pour le panneau de détails (Euro, Surface, Texte)."""
+    if pd.isna(value) or value is None:
+        return None # Sera masqué par la règle
+
+    # Règle de masquage
+    str_value = str(value).strip().lower()
+    if str_value in ["néant", "-", "/", "0"] or value == 0:
+        return None
+
+    if 'loyer' in key.lower() or 'charge' in key.lower() or 'honoraire' in key.lower() or 'taxe' in key.lower():
         try:
-            # Sépare partie entière et décimale
-            parts = ref_str.split('.')
-            entier = parts[0].lstrip('0') or '0'
-            # Conserver toute la partie décimale, sans rstrip pour la cohérence
-            decimal = parts[1] 
-            if decimal:
-                return f"{entier}.{decimal}"
-            else:
-                return entier
+            # Formatage en Euros
+            return f"{int(value):,.0f} €".replace(",", " ").replace(".", ",")
         except:
-            return ref_str.lstrip('0') # Fallback
-            
-    # Si c'est un nombre entier (ex: 0003)
-    else:
-        return ref_str.lstrip('0') or '0' # Retourne '0' si la chaîne est vide après lstrip
+            return str(value)
 
-# Fonction pour formater les valeurs monétaires
-def format_currency(value):
-    """Formate les nombres en € avec séparateur de milliers et arrondi."""
-    if pd.isna(value) or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
-        return None
-    try:
-        # Tenter de convertir en nombre (gestion des strings avec virgule)
-        if isinstance(value, str):
-            # Nettoyage des caractères non numériques avant de tenter la conversion
-            clean_value = re.sub(r'[^\d\.\,]', '', value).replace(',', '.')
-            value = float(clean_value)
-        
-        # Arrondir à l'entier le plus proche
-        rounded_value = int(round(value))
-        
-        # Retourner None si la valeur est effectivement zéro après conversion
-        if rounded_value == 0:
-            return None
-            
-        # Utiliser la locale française pour le séparateur de milliers (espace)
-        return f"{rounded_value:,.0f} €".replace(",", " ")
-    except:
-        return str(value) # Retourne la valeur originale si le formatage échoue
-
-# Fonction pour formater les surfaces
-def format_surface(value):
-    """Formate les surfaces en m²."""
-    if pd.isna(value) or str(value).strip().lower() in ["néant", "-", "/", "0", "0.0", ""]:
-        return None
-    try:
-        # Tenter de convertir en nombre
-        if isinstance(value, str):
-            clean_value = re.sub(r'[^\d\.\,]', '', value).replace(',', '.')
-            value = float(clean_value)
-        
-        rounded_value = int(round(value))
-        
-        # Retourner None si la valeur est effectivement zéro après conversion
-        if rounded_value == 0:
-            return None
-            
-        # Utiliser la locale française pour le séparateur de milliers (espace)
-        return f"{rounded_value:,.0f} m²".replace(",", " ")
-    except:
-        return str(value) # Retourne la valeur originale si le formatage échoue
-
-# Fonction pour vérifier si une ligne doit être affichée dans le panneau de détails
-def is_value_displayable(value):
-    """Vérifie si la valeur est vide, 'néant', '-', '/', '0' (texte ou nombre)"""
-    if pd.isna(value):
-        return False
-    
-    value_str = str(value).strip().lower()
-    if value_str in ["", "nan", "néant", "-", "/"]:
-        return False
-    
-    try:
-        # Vérifie si c'est un zéro numérique (y compris les strings "0" ou "0.0")
-        numeric_part = re.sub(r'[^\d\.\,]', '', value_str).replace(',', '.')
-        if numeric_part and float(numeric_part) == 0.0:
-             return False
-    except ValueError:
-        pass # Pas un nombre, on continue
-        
-    return True
-
-# Fonction pour normaliser les noms de colonnes
-def normalize_column_name(col_name):
-    """
-    Normalise les noms de colonnes: supprime les accents, les espaces, 
-    met en minuscule.
-    Ex: "Référence annonce" -> "reference_annonce"
-    """
-    col_name = str(col_name).strip().lower()
-    # Supprimer les accents
-    col_name = unicodedata.normalize('NFKD', col_name).encode('ascii', 'ignore').decode('utf-8')
-    # Remplacer les espaces et autres caractères non alphanumériques par '_'
-    col_name = re.sub(r'[^a-z0-9]+', '_', col_name)
-    return col_name.strip('_')
-
-
-# --- 3. CHARGEMENT ET PRÉPARATION DES DONNÉES ---
-
-@st.cache_data
-def load_data():
-    
-    df = pd.DataFrame()
-    
-    # 1. Tenter de lire le fichier
-    try:
-        # Tenter avec le point-virgule (le plus fréquent pour les exports français)
-        # J'ai corrigé cette ligne pour utiliser la virgule qui est plus courante
-        df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
-    except FileNotFoundError:
-        st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier que le fichier est bien nommé ainsi.")
-        return pd.DataFrame(), {}
-    except Exception:
+    if 'surface' in key.lower() or 'gla' in key.lower():
         try:
-            # Tenter avec le point-virgule (standard CSV français)
-            df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture du fichier de données CSV: {e}")
-            return pd.DataFrame(), {}
+            # Formatage en m²
+            return f"{int(value):,.0f} m²".replace(",", " ").replace(".", ",")
+        except:
+            return str(value)
 
-    if df.empty:
-        st.error("Le fichier de données est vide après le chargement.")
-        return pd.DataFrame(), {}
-    
-    # 2. Normalisation des noms de colonnes (CRITIQUE pour le KeyError)
-    # Mapping des noms originaux normalisés aux noms d'affichage désirés (simplifiés)
-    INTERNAL_COLUMNS_MAP = {
-        # Format: normalized_name_from_file: Simplified_Internal_Name
-        normalize_column_name('Référence annonce'): 'Ref_Annonce',
-        normalize_column_name('Lien Google Maps'): 'Lien_GMaps',
-        normalize_column_name('Surface GLA'): 'Surface_GLA',
-        normalize_column_name('Loyer annuel'): 'Loyer_Annuel',
-        normalize_column_name('Charges annuelles'): 'Charges_Annuelles',
-        normalize_column_name('Taxe foncière'): 'Taxe_Fonciere',
-        normalize_column_name('Emplacement'): 'Emplacement',
-        normalize_column_name('Typologie'): 'Typologie',
-        normalize_column_name('Extraction'): 'Extraction',
-        normalize_column_name('Restauration'): 'Restauration',
-        normalize_column_name('Latitude'): 'Latitude',
-        normalize_column_name('Longitude'): 'Longitude',
-        normalize_column_name('Actif'): 'Actif',
-        normalize_column_name('Région'): 'Region',
-        normalize_column_name('Département'): 'Departement',
-        normalize_column_name('Honoraires'): 'Honoraires',
+    return str(value)
+
+def load_and_prepare_data():
+    """Charge le fichier Excel (simulé) et prépare le DataFrame."""
+    try:
+        # Tente de charger le vrai fichier si possible
+        df = pd.read_excel('data/Liste des lots.xlsx')
+    except (FileNotFoundError, ValueError):
+        # Simulation des données si le fichier n'est pas trouvé
+        data = {
+            'Référence annonce': ['0003', '0005.1', '0012', '0020.5', '0025'],
+            'Région': ['Île-de-France', 'Île-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 'Île-de-France'],
+            'Département': ['Paris', 'Hauts-de-Seine', 'Rhône', 'Gironde', 'Paris'],
+            'Ville': ['Paris', 'Neuilly-sur-Seine', 'Lyon', 'Bordeaux', 'Paris 16'],
+            'Adresse': ['Rue de Rivoli', 'Av. Charles de Gaulle', 'Place Bellecour', 'Cours de l\'Intendance', 'Av. Victor Hugo'],
+            'Surface GLA': [240, 1500, 320, 50, 600],
+            'Loyer annuel': [120000, 450000, 95000, 15000, 300000],
+            MAPS_URL_COLUMN: ['https://maps.google.com/?q=Paris+Rivoli', 'https://maps.google.com/?q=Neuilly', None, 'https://maps.google.com/?q=Bordeaux', 'https://maps.google.com/?q=Paris+Hugo'],
+            'Charges': [5000, 15000, 'néant', 0, 12000],
+            'Taxe foncière': [10000, 30000, 2000, 500, '-'],
+            'Honoraires': [24000, 90000, 19000, 3000, 60000],
+            'Emplacement': ['Centre-Ville', 'Périphérie', 'Centre-Ville', 'Centre-Ville', 'Centre-Ville'],
+            'Typologie': ['Bureaux', 'Commerce', 'Commerce', 'Bureaux', 'Commerce'],
+            'Extraction': ['Oui', 'Non', 'Non', 'Oui', 'Non'],
+            'Restauration': ['Non', 'Oui', 'Non', 'Non', 'Oui'],
+            'Latitude': [48.857, 48.883, 45.759, 44.84, 48.868],
+            'Longitude': [2.35, 2.25, 4.83, -0.57, 2.28],
+            'Actif': ['oui', 'oui', 'oui', 'oui', 'non'],
+        }
+        # Ajout des colonnes de détail AL
+        for i in range(1, 25):
+             data[f'Autre Détail {i}'] = ['Valeur ' + str(i)] * 5
         
-        # Colonnes de détails
-        normalize_column_name('Ville'): 'Ville',
-        normalize_column_name('Adresse'): 'Adresse',
-        normalize_column_name('Répartition surface GLA'): 'Répartition surface GLA',
-        normalize_column_name('Surface utile'): 'Surface utile',
-        normalize_column_name('Répartition surface utile'): 'Répartition surface utile',
-        normalize_column_name('Loyer Mensuel'): 'Loyer Mensuel',
-        normalize_column_name('Loyer €/m²'): 'Loyer €/m²',
-        normalize_column_name('Loyer variable'): 'Loyer Variable',
-        normalize_column_name('Charges Mensuelles'): 'Charges Mensuelles',
-        normalize_column_name('Charges €/m²'): 'Charges €/m²',
-        normalize_column_name('Taxe foncière €/m²'): 'Taxe Foncière €/m²',
-        normalize_column_name('Marketing'): 'Marketing',
-        normalize_column_name('Marketing €/m²'): 'Marketing €/m²',
-        normalize_column_name('Total (L+C+M)'): 'Total (L+C+M)',
-        normalize_column_name('Dépôt de garantie'): 'Dépôt de garantie',
-        normalize_column_name('GAPD'): 'GAPD',
-        normalize_column_name('Gestion'): 'Gestion',
-        normalize_column_name('Etat de livraison'): 'Etat de livraison',
-        normalize_column_name('Environnement Commercial'): 'Environnement Commercial',
-        normalize_column_name('Commentaires'): 'Commentaires',
-        normalize_column_name('Type'): 'Type', # Type (Location pure, Cession, etc.)
-        # N° Département n'est pas utilisé dans l'app, mais on le garde pour le mapping
-        normalize_column_name('N° Département'): 'N° Département', 
-    }
-    
-    # 3. Renommage des colonnes du DF pour utiliser les clés internes simplifiées (Ref_Annonce, Region...)
-    df_normalized_cols = {col: normalize_column_name(col) for col in df.columns}
-    
-    rename_dict = {}
-    
-    for original_col, normalized_col in df_normalized_cols.items():
-        if normalized_col in INTERNAL_COLUMNS_MAP:
-            # Assigner le nom interne simplifié au nom original du DF
-            rename_dict[original_col] = INTERNAL_COLUMNS_MAP[normalized_col]
-        # Sinon, on garde le nom original de la colonne si non critique
+        df = pd.DataFrame(data)
+        st.warning("⚠️ **Mode de démonstration :** Le fichier Excel `data/Liste des lots.xlsx` n'a pas été trouvé. Les données sont simulées.")
 
-    df = df.rename(columns=rename_dict)
-    
-    # Création du Dictionnaire de mapping pour l'affichage des détails (Nom interne: Nom d'affichage)
-    DETAIL_COLUMNS_MAPPING = {
-        simplified_name: display_name 
-        for normalized_name, simplified_name in INTERNAL_COLUMNS_MAP.items() 
-        for display_name in [simplified_name]
-        if simplified_name in df.columns
-    }
-    
-    # Liste des colonnes critiques attendues (simplifiées)
-    REQUIRED_COLS = ['Region', 'Departement', 'Latitude', 'Longitude', 'Ref_Annonce', 'Actif', 'Surface_GLA', 'Loyer_Annuel']
-    
-    # 4. Vérification des colonnes critiques
-    missing_cols = [col for col in REQUIRED_COLS if col not in df.columns]
-    if missing_cols:
-        st.error(f"Erreur de données: Colonnes critiques manquantes après normalisation. Vérifiez que les noms originaux sont exacts et non vides. Colonnes manquantes: {', '.join(missing_cols)}. (Colonnes trouvées: {', '.join(df.columns)})")
-        return pd.DataFrame(), {}
+    # Assurer que les colonnes critiques existent et sont du bon type
+    required_map_cols = ['Latitude', 'Longitude', 'Référence annonce']
+    for col in required_map_cols:
+        if col not in df.columns:
+            st.error(f"La colonne essentielle '{col}' est manquante dans les données.")
+            return pd.DataFrame()
 
-
-    # 5. Filtrer uniquement les lots 'Actif'
-    df = df[df['Actif'].astype(str).str.lower().str.strip() == 'oui'].copy()
-    
-    # 6. S'assurer que les colonnes clés sont présentes et nettoyer les NaNs
     df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
     df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
     
-    # Convertir les valeurs numériques pour les sliders
-    df['Surface_GLA'] = pd.to_numeric(df['Surface_GLA'], errors='coerce')
-    df['Loyer_Annuel'] = pd.to_numeric(df['Loyer_Annuel'], errors='coerce')
-    
-    # Supprimer les lignes avec des coordonnées non valides
-    df = df.dropna(subset=['Latitude', 'Longitude', 'Ref_Annonce', 'Surface_GLA', 'Loyer_Annuel'])
-    
-    # Appliquer le formatage de référence une fois
-    df['Ref_Format'] = df['Ref_Annonce'].apply(format_reference)
+    # Filtrer les lots non actifs et les coordonnées invalides
+    df = df[df['Actif'].astype(str).str.lower() == 'oui']
+    df = df.dropna(subset=['Latitude', 'Longitude'])
+    df = df[(df['Latitude'] >= -90) & (df['Latitude'] <= 90)]
+    df = df[(df['Longitude'] >= -180) & (df['Longitude'] <= 180)]
 
-    # Convertir les colonnes de filtrage en chaînes pour éviter les erreurs de type
-    for col in ['Region', 'Departement', 'Emplacement', 'Typologie', 'Extraction', 'Restauration']:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-            # Remplacer les valeurs vides/non significatives dans les colonnes de filtre par 'N/A'
-            df[col] = df[col].apply(lambda x: 'N/A' if str(x).strip().lower() in ["", "nan", "néant", "-", "/", "0"] else x)
-        else:
-             # Ajouter une colonne par défaut si elle est manquante pour éviter KeyError dans les filtres
-             df[col] = 'N/A' 
-             
-    # Rétablir l'ordre pour les détails: on itère sur la liste figée des noms simplifiés
-    ordered_detail_mapping = {
-        'Ref_Annonce': 'Référence annonce',
-        'Ville': 'Ville',
-        'Adresse': 'Adresse',
-        'Region': 'Région',
-        'Departement': 'Département',
-        'Emplacement': 'Emplacement',
-        'Typologie': 'Typologie',
-        'Type': 'Type',
-        'Etat de livraison': 'État de livraison',
-        'Extraction': 'Extraction',
-        'Restauration': 'Restauration',
+    # Appliquer le formatage de la référence
+    df['Ref Formatée'] = df['Référence annonce'].apply(format_reference)
+    
+    # Créer une clé unique pour le GeoJson
+    df['lot_key'] = 'Lot_' + df['Ref Formatée'].astype(str)
+    
+    # Stocker les min/max pour les sliders
+    if 'Surface GLA' in df.columns and 'Loyer annuel' in df.columns:
+        st.session_state.gla_min_max = (df['Surface GLA'].min(), df['Surface GLA'].max())
+        st.session_state.loyer_min_max = (df['Loyer annuel'].min(), df['Loyer annuel'].max())
+
+    return df
+
+# --- 3. GESTION DES ÉTATS ET INITIALISATION ---
+
+if 'data' not in st.session_state:
+    st.session_state.data = load_and_prepare_data()
+
+if 'filtered_data' not in st.session_state:
+    st.session_state.filtered_data = st.session_state.data.copy()
+
+if 'selected_lot_key' not in st.session_state:
+    st.session_state.selected_lot_key = None
+
+if 'gla_range' not in st.session_state and 'gla_min_max' in st.session_state:
+    st.session_state.gla_range = st.session_state.gla_min_max
+
+if 'loyer_range' not in st.session_state and 'loyer_min_max' in st.session_state:
+    st.session_state.loyer_range = st.session_state.loyer_min_max
+
+# --- 4. CSS D'INJECTION (Layout et Style CRITIQUE) ---
+
+# Fonction pour injecter le CSS critique
+def inject_custom_css():
+    css = f"""
+    <style>
+        /* 3. Identité Visuelle: Font Futura (Simulation basée sur chemin assets) */
+        @font-face {{
+            font-family: 'Futura';
+            src: url('assets/Futura Book.ttf') format('truetype'); /* Chemin à ajuster */
+            font-weight: 400;
+        }}
+        @font-face {{
+            font-family: 'Futura';
+            src: url('assets/Futura Bold.ttf') format('truetype'); /* Chemin à ajuster */
+            font-weight: 700;
+        }}
         
-        # Surfaces
-        'Surface_GLA': 'Surface GLA',
-        'Répartition surface GLA': 'Répartition surface GLA',
-        'Surface utile': 'Surface utile',
-        'Répartition surface utile': 'Répartition surface utile',
+        /* Appliquer la police à toute l'application */
+        html, body, .stApp {{
+            font-family: Futura, {FONT_FALLBACK};
+            overflow: hidden !important; /* 11. Comportement général: Pas de scroll vertical/horizontal */
+        }}
 
-        # Coûts
-        'Loyer_Annuel': 'Loyer annuel',
-        'Loyer Mensuel': 'Loyer Mensuel',
-        'Loyer €/m²': 'Loyer €/m²',
-        'Loyer Variable': 'Loyer variable',
-        'Charges_Annuelles': 'Charges annuelles',
-        'Charges Mensuelles': 'Charges Mensuelles',
-        'Charges €/m²': 'Charges €/m²',
-        'Taxe_Fonciere': 'Taxe foncière',
-        'Taxe Foncière €/m²': 'Taxe foncière €/m²',
-        'Marketing': 'Marketing',
-        'Marketing €/m²': 'Marketing €/m²', 
-        'Total (L+C+M)': 'Total (L+C+M)',
-        'Honoraires': 'Honoraires',
-        'Dépôt de garantie': 'Dépôt de garantie',
-        'GAPD': 'GAPD',
-        'Gestion': 'Gestion',
+        /* 4. Layout Général (CRITIQUE) */
+
+        /* A. Volet gauche (sidebar) */
+        [data-testid="stSidebar"] {{
+            width: 275px !important; /* Largeur fixe: 275 px */
+            min-width: 275px !important;
+            max-width: 275px !important;
+            background-color: {SMBG_BLUE} !important; /* Fond: bleu SMBG */
+            transition: none; /* Empêche le slide-in/out */
+        }}
         
-        # Commentaires / Environnement
-        'Environnement Commercial': 'Environnement Commercial',
-        'Commentaires': 'Commentaires',
+        /* 12. Ce que je ne veux JAMAIS: Jamais rétractable (cacher le bouton collapse) */
+        [data-testid="stSidebarToggleButton"] {{
+            display: none !important;
+        }}
+
+        /* Masquer le bouton d'agrandissement du logo (3. Logo) */
+        .st-emotion-cache-1mnn9i2 {{ /* Sélecteur Streamlit pour le bouton d'agrandissement d'image */
+            display: none !important;
+        }}
+
+        /* B. Zone centrale (Map) */
+        /* La Map occupe tout l'espace restant */
+        [data-testid="stVerticalBlock"] {{
+            height: 100vh;
+        }}
         
-        # Lien
-        'Lien_GMaps': 'Lien Google Maps',
-    }
-    
-    # Ne garder que les colonnes existantes dans le DF final
-    final_detail_mapping = {
-        key: value for key, value in ordered_detail_mapping.items() if key in df.columns
-    }
+        /* S'assurer que le bloc principal est bien plein écran */
+        [data-testid="stAppViewBlockContainer"] {{
+            height: 100vh;
+            max-height: 100vh;
+        }}
+        
+        /* S'assurer que le conteneur de la carte prend toute la hauteur */
+        #map_container {{
+            height: 100vh; /* 4. La carte doit remplir 100 % de la hauteur de l'écran (100vh) */
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        
+        /* Retirer la bande blanche sous le footer Streamlit */
+        footer {{ visibility: hidden; }}
+        
+        /* Styling des checkboxes (pour l'indentation) */
+        .department-checkbox > div > label {{
+            margin-left: 15px; /* Indentation de 15px pour les départements */
+        }}
+        
+        /* --- C. Volet droit (Panneau de détails) --- */
+        #detail-panel {{
+            position: fixed;
+            top: 0;
+            right: var(--panel-offset, -275px); /* Contrôlé par JS/State: par défaut replié */
+            width: 275px; /* Largeur fixe: 275 px */
+            height: 100vh;
+            background-color: {SMBG_BLUE};
+            color: white;
+            padding: 20px;
+            box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            transition: right 0.3s ease-in-out; /* Animation d'ouverture/fermeture */
+            overflow-y: auto; /* Scroll interne si nécessaire */
+        }}
 
-    return df, final_detail_mapping
-
-# Charger les données
-df_data, DETAIL_COLUMNS_MAPPING = load_data()
-
-# Définir les valeurs min/max initiales
-# Utiliser 0 comme fallback si le DF est vide pour éviter des erreurs
-MIN_SURFACE = df_data['Surface_GLA'].min() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 0
-MAX_SURFACE = df_data['Surface_GLA'].max() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 100
-MIN_LOYER = df_data['Loyer_Annuel'].min() if not df_data.empty and 'Loyer_Annuel' in df_data.columns and not df_data['Loyer_Annuel'].empty else 0
-MAX_LOYER = df_data['Loyer_Annuel'].max() if not df_data.empty and 'Loyer_Annuel' in df_data.columns and not df_data['Loyer_Annuel'].empty else 100000
-
-# Pour éviter les problèmes si min == max
-if MIN_SURFACE == MAX_SURFACE and MIN_SURFACE != 0: MAX_SURFACE += 1
-if MIN_LOYER == MAX_LOYER and MIN_LOYER != 0: MAX_LOYER += 1
-    
-# Définir l'état initial des filtres pour le bouton Réinitialiser
-if 'filters' not in st.session_state:
-    # Si les données ne sont pas chargées, les ensembles seront vides
-    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns and not df_data['Region'].empty else set()
-    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns and not df_data['Departement'].empty else set()
-    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns and not df_data['Emplacement'].empty else set()
-    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns and not df_data['Typologie'].empty else set()
-    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns and not df_data['Extraction'].empty else set()
-    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns and not df_data['Restauration'].empty else set()
-    
-    # S'assurer que les valeurs initiales sont des ensembles d'éléments non vides
-    st.session_state.filters = {
-        'selected_regions': unique_regions_init,
-        'selected_departments': unique_departments_init,
-        'surface_range': (MIN_SURFACE, MAX_SURFACE),
-        'loyer_range': (MIN_LOYER, MAX_LOYER),
-        'emplacement': unique_emplacement_init,
-        'typologie': unique_typologie_init,
-        'extraction': unique_extraction_init,
-        'restauration': unique_restauration_init,
-        'selected_lot_ref': None, # Réf. du lot sélectionné pour le panneau droit
-        'show_detail_panel': False # État du panneau droit
-    }
-    
-# Clés de hack pour les clics de carte (doivent être initialisées)
-if 'lot_click_handler_key' not in st.session_state:
-    st.session_state.lot_click_handler_key = ""
-if 'map_click_handler_key' not in st.session_state:
-    st.session_state.map_click_handler_key = ""
-
-
-# Fonction de réinitialisation complète
-def reset_filters():
-    """Réinitialise tous les filtres à l'état initial (tout sélectionné/min-max) et ferme le panneau."""
-    
-    unique_regions_init = set(df_data['Region'].unique()) if 'Region' in df_data.columns and not df_data['Region'].empty else set()
-    unique_departments_init = set(df_data['Departement'].unique()) if 'Departement' in df_data.columns and not df_data['Departement'].empty else set()
-    unique_emplacement_init = set(df_data['Emplacement'].unique()) if 'Emplacement' in df_data.columns and not df_data['Emplacement'].empty else set()
-    unique_typologie_init = set(df_data['Typologie'].unique()) if 'Typologie' in df_data.columns and not df_data['Typologie'].empty else set()
-    unique_extraction_init = set(df_data['Extraction'].unique()) if 'Extraction' in df_data.columns and not df_data['Extraction'].empty else set()
-    unique_restauration_init = set(df_data['Restauration'].unique()) if 'Restauration' in df_data.columns and not df_data['Restauration'].empty else set()
-    
-    st.session_state.filters = {
-        'selected_regions': unique_regions_init,
-        'selected_departments': unique_departments_init,
-        'surface_range': (MIN_SURFACE, MAX_SURFACE),
-        'loyer_range': (MIN_LOYER, MAX_LOYER),
-        'emplacement': unique_emplacement_init,
-        'typologie': unique_typologie_init,
-        'extraction': unique_extraction_init,
-        'restauration': unique_restauration_init,
-        'selected_lot_ref': None,
-        'show_detail_panel': False
-    }
-
-    # Rétablir les inputs de clic pour permettre le nouveau clic après réinitialisation
-    st.session_state.lot_click_handler_key = ""
-    st.session_state.map_click_handler_key = ""
-
-
-# --- 4. CSS PERSONNALISÉ ET IDENTITÉ VISUELLE ---
-
-# Fonction pour charger les assets en base64
-def get_base64_of_bin_file(bin_file):
-    try:
-        # NOTE: Les assets ne sont pas disponibles directement dans cet environnement, 
-        # donc cette fonction retourne souvent None. On utilise des fallbacks CSS.
-        if not os.path.exists(bin_file):
-            return None
-        with open(bin_file, 'rb') as f:
-            data = f.read()
-        return base64.b64encode(data).decode()
-    except Exception:
-        return None
-
-# Simulation de l'intégration des polices Futura (remplacez par vos fichiers .ttf réels)
-futura_light_b64 = get_base64_of_bin_file("assets/futura_light.ttf")
-futura_medium_b64 = get_base64_of_bin_file("assets/futura_medium.ttf")
-futura_bold_b64 = get_base64_of_bin_file("assets/futura_bold.ttf")
-
-font_face_css = ""
-if futura_light_b64:
-    # Intégrer les polices uniquement si les fichiers sont trouvés
-    font_face_css = f"""
-    @font-face {{
-        font-family: 'Futura';
-        src: url(data:font/ttf;charset=utf-8;base64,{futura_light_b64}) format('truetype');
-        font-weight: 300;
-        font-style: normal;
-    }}
-    @font-face {{
-        font-family: 'Futura';
-        src: url(data:font/ttf;charset=utf-8;base64,{futura_medium_b64}) format('truetype');
-        font-weight: 500;
-        font-style: normal;
-    }}
-    @font-face {{
-        font-family: 'Futura';
-        src: url(data:font/ttf;charset=utf-8;base64,{futura_bold_b64}) format('truetype');
-        font-weight: 700;
-        font-style: normal;
-    }}
+        #detail-panel h3, #detail-panel h4 {{
+            color: white;
+            font-weight: bold;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }}
+        
+        .detail-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        
+        .detail-label {{
+            color: {SMBG_COPPER}; /* Couleur cuivre SMBG pour les labels */
+            font-weight: bold;
+            flex-shrink: 0;
+            padding-right: 10px;
+        }}
+        
+        .detail-value {{
+            text-align: right;
+            font-weight: 300;
+            word-break: break-word;
+        }}
+        
+        /* Marge haute du logo (3. Logo) */
+        .sidebar-logo {{
+            padding-top: 25px; /* Marge haute: environ 25 px */
+            padding-bottom: 25px;
+            text-align: center;
+        }}
+        
+        /* Style des sliders pour harmonisation avec le thème */
+        .stSlider > div > div > div {{
+            background-color: {SMBG_COPPER};
+        }}
+        
+        /* Style des boutons (Réinitialiser, Google Maps) */
+        .stButton button {{
+            background-color: {SMBG_COPPER};
+            color: {SMBG_BLUE};
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            width: 100%;
+            transition: background-color 0.2s;
+        }}
+        .stButton button:hover {{
+            background-color: #d18d5b;
+        }}
+        
+    </style>
     """
-    FONT_FAMILY_FALLBACK = "Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif"
-else:
-    FONT_FAMILY_FALLBACK = "'Century Gothic', Arial, sans-serif"
-
-
-# CSS CRITIQUE pour le layout et le style
-critical_css = f"""
-{font_face_css}
-
-/* 3. Identité visuelle et 4. Layout Général (CRITIQUE) */
-:root {{
-    --smbg-blue: {BLUE_SMBG};
-    --smbg-copper: {COPPER_SMBG};
-}}
-
-/* Appliquer la police Futura à toute l'application */
-html, body, [class*="st-"] {{
-    font-family: {FONT_FAMILY_FALLBACK} !important;
-}}
-
-/* 11. Comportement général: Supprimer le scroll global et définir la hauteur à 100vh */
-html, body, .main, [data-testid="stAppViewContainer"], [data-testid="stVerticalBlock"] {{
-    height: 100vh !important;
-    overflow: hidden !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}}
-
-/* Correction de la zone principale pour qu'elle prenne 100% de la hauteur restante */
-[data-testid="stAppViewContainer"] > .main {{
-    padding: 0;
-    margin: 0;
-}}
-
-.block-container {{
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    height: 100vh !important;
-}}
-
-/* A. Volet gauche (sidebar) */
-[data-testid="stSidebar"] {{
-    width: 275px !important;
-    min-width: 275px !important;
-    max-width: 275px !important;
-    background-color: var(--smbg-blue) !important;
-    transition: none !important; /* Aucun bouton de collapse, toujours visible */
-}}
-
-/* Cacher le bouton de collapse de la sidebar gauche */
-[data-testid="stSidebarUserContent"] > button {{
-    display: none !important;
-}}
-
-/* B. Zone centrale : la carte (Contenu principal) */
-.st-emotion-cache-1cypcdp {{ /* Conteneur de la carte (colonne principale) */
-    height: 100% !important;
-    min-height: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}}
-
-/* Ajuster le container de la carte (folium_static) pour qu'il prenne 100% de l'espace disponible */
-.streamlit-container {{
-    height: 100vh !important;
-    width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}}
-
-.folium-map {{
-    height: 100vh !important;
-    width: 100% !important;
-    border: none !important;
-    margin: 0 !important;
-}}
-
-/* 4. Layout général: C. Volet droit (panneau de détails) */
-/* Création du panneau de détails rétractable */
-.detail-panel {{
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: 275px;
-    height: 100vh;
-    background-color: var(--smbg-blue);
-    color: white;
-    box-shadow: -5px 0 15px rgba(0,0,0,0.5);
-    transition: transform 0.3s ease-in-out;
-    padding: 20px;
-    overflow-y: auto; /* Scroll possible dans ce volet si besoin */
-    z-index: 9999;
-}}
-.detail-panel.collapsed {{
-    transform: translateX(275px); /* Masqué par défaut */
-}}
-.detail-panel.expanded {{
-    transform: translateX(0); /* Visible */
-}}
-
-/* Style du logo dans la sidebar */
-.logo-container {{
-    padding-top: 25px; /* Marge haute: environ 25 px */
-    padding-bottom: 25px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}}
-.logo-container img {{
-    max-width: 90%;
-    height: auto;
-    pointer-events: none; /* Supprimer le bouton d’agrandissement de Streamlit */
-    user-select: none;
-}}
-
-/* Style des titres et labels de la sidebar (bleu SMBG, texte blanc) */
-[data-testid="stSidebarContent"] label,
-[data-testid="stSidebarContent"] .st-b5,
-[data-testid="stSidebarContent"] h2 {{
-    color: white !important;
-}}
-[data-testid="stSidebarContent"] .st-bp {{ /* Slider value */
-    color: var(--smbg-copper) !important;
-}}
-
-/* Style des labels dans le panneau de détails (Cuivre SMBG) */
-.detail-panel .detail-label {{
-    color: var(--smbg-copper);
-    font-weight: 500;
-    margin-right: 5px;
-}}
-
-.detail-panel h3 {{
-    color: white;
-    font-weight: 700;
-    margin-bottom: 20px;
-    text-align: center;
-}}
-
-/* Style du bouton "Cliquer ici" */
-.gmaps-button a button {{
-    background-color: var(--smbg-copper) !important;
-    color: var(--smbg-blue) !important;
-    border: none !important;
-    border-radius: 5px !important;
-    padding: 8px 15px !important;
-    font-weight: bold !important;
-    margin-top: 10px;
-    width: 100%;
-}}
-
-/* Indentation des départements (9. Logique de filtrage) */
-.department-checkbox {{
-    padding-left: 15px; /* Décalage de 15 px (indentation) */
-}}
-
-/* Style pour le bouton Réinitialiser */
-#reset-button button {{
-    background-color: #f4f4f4;
-    color: var(--smbg-blue);
-    border: 1px solid var(--smbg-blue);
-}}
-
-/* Style du bouton de fermeture du panneau */
-.close-button {{
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: none;
-    border: none;
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 5px;
-}}
-
-/* Masquer les radio/dropdown/selectbox (12. Ce que je ne veux JAMAIS) */
-.stRadio, .stSelectbox, .stMultiselect {{
-    display: none !important;
-}}
-
-/* Masquer les inputs de gestion des clics (hack) */
-[data-testid="stTextInput"] {{ display: none !important; }}
-
-"""
-st.markdown(f"<style>{critical_css}</style>", unsafe_allow_html=True)
-
-# --- 5. LOGIQUE DE FILTRAGE ---
-
-def apply_filters(df):
-    """Applique tous les filtres actifs à la DataFrame."""
-    filtered_df = df.copy()
-
-    # Colonnes de filtres textuels
-    filter_cols_text = ['Region', 'Departement', 'Emplacement', 'Typologie', 'Extraction', 'Restauration']
-    
-    # 1. Filtres Région / Département
-    selected_regions_filter = st.session_state.filters['selected_regions']
-    selected_deps_filter = st.session_state.filters['selected_departments']
-    
-    # S'assurer que les colonnes de filtre textuel existent
-    for col in filter_cols_text:
-        if col not in filtered_df.columns:
-            filtered_df[col] = 'N/A' 
-    
-    # 9. Logique de filtrage Région / Département:
-    regions_df_unique = filtered_df[['Region', 'Departement']].drop_duplicates()
-    
-    final_allowed_deps = set()
-    
-    # Itérer sur TOUTES les régions disponibles dans le DF
-    unique_regions_all = df_data['Region'].unique() if 'Region' in df_data.columns else []
-
-    for region in unique_regions_all:
-        # S'assurer que 'Region' existe dans regions_df_unique avant d'appeler .unique()
-        deps_in_region = set(regions_df_unique[regions_df_unique['Region'] == region]['Departement'].unique())
+    # JS pour contrôler la position du panneau droit via la variable CSS
+    js = f"""
+    <script>
+        function updatePanel() {{
+            const panel = document.getElementById('detail-panel');
+            if (panel) {{
+                const show = window.stPanelState === 'visible';
+                panel.style.right = show ? '0px' : '-275px';
+            }}
+        }}
         
-        # Intersection entre les départements de cette région et ceux cochés globalement
-        cochage_specifique_dans_region = deps_in_region.intersection(selected_deps_filter)
+        // Initialiser l'état Streamlit/Python dans l'environnement JS
+        window.stPanelState = '{'visible' if st.session_state.selected_lot_key else 'hidden'}';
+        updatePanel();
+    </script>
+    """
+    
+    st.html(css)
+    st.html(js)
+
+# --- 5. LOGIQUE DES FILTRES ET MISE À JOUR ---
+
+def filter_data():
+    """Applique tous les filtres actifs à la session state."""
+    df = st.session_state.data.copy()
+    
+    # --- 1. Filtre Région / Département ---
+    selected_regions = [r for r, checked in st.session_state.region_checks.items() if checked]
+    region_mask = pd.Series(False, index=df.index)
+
+    if selected_regions:
+        for region in selected_regions:
+            # Départements cochés pour cette région
+            dept_checks = st.session_state.dept_checks.get(region, {})
+            selected_departments = [d for d, checked in dept_checks.items() if checked]
+
+            if selected_departments:
+                # 9. Logique de filtrage: Région cochée + certains départements cochés
+                mask = (df['Région'] == region) & (df['Département'].isin(selected_departments))
+            else:
+                # 9. Logique de filtrage: Région cochée + aucun département cochée -> toute la région
+                mask = (df['Région'] == region)
+
+            region_mask = region_mask | mask
+
+        df = df[region_mask]
+    
+    if df.empty and not st.session_state.data.empty:
+        st.session_state.filtered_data = pd.DataFrame()
+        return
+
+    # --- 2. Filtre Sliders (Surface GLA) ---
+    min_gla, max_gla = st.session_state.gla_range
+    if 'Surface GLA' in df.columns:
+        df = df[(df['Surface GLA'] >= min_gla) & (df['Surface GLA'] <= max_gla)]
         
-        is_region_checked = region in selected_regions_filter
+    # --- 3. Filtre Sliders (Loyer annuel) ---
+    min_loyer, max_loyer = st.session_state.loyer_range
+    if 'Loyer annuel' in df.columns:
+        df = df[(df['Loyer annuel'] >= min_loyer) & (df['Loyer annuel'] <= max_loyer)]
 
-        if is_region_checked: # On considère qu'une région est cochée
-            # On prend en compte UNIQUEMENT les départements sélectionnés
-            if cochage_specifique_dans_region:
-                final_allowed_deps.update(cochage_specifique_dans_region)
-            else:
-                # Si la région est cochée, mais AUCUN département n'est spécifiquement coché
-                # on inclut TOUS les départements de cette région (comportement par défaut)
-                final_allowed_deps.update(deps_in_region)
+    # --- 4. Autres cases à cocher (Emplacement, Typologie, Extraction, Restauration) ---
+    for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
+        if col_name in df.columns:
+            selected_values = [v for v, checked in st.session_state.other_checks.get(col_name, {}).items() if checked]
+            if selected_values:
+                df = df[df[col_name].isin(selected_values)]
 
-    # 2. Filtres Sliders (Surface GLA et Loyer annuel)
-    min_surface, max_surface = st.session_state.filters['surface_range']
-    min_loyer, max_loyer = st.session_state.filters['loyer_range']
+    st.session_state.filtered_data = df
 
-    if 'Surface_GLA' in filtered_df.columns:
-        # Filtrage sur le résultat de la sélection géographique
-        filtered_df = filtered_df[
-            (filtered_df['Surface_GLA'] >= min_surface) & (filtered_df['Surface_GLA'] <= max_surface)
-        ]
+def reset_filters():
+    """Réinitialise tous les filtres et ferme le panneau droit."""
     
-    if 'Loyer_Annuel' in filtered_df.columns:
-        filtered_df = filtered_df[
-            (filtered_df['Loyer_Annuel'] >= min_loyer) & (filtered_df['Loyer_Annuel'] <= max_loyer)
-        ]
-    
-    # Appliquer le filtre géographique après les filtres numériques
-    if final_allowed_deps:
-        filtered_df = filtered_df[filtered_df['Departement'].isin(final_allowed_deps)]
-    else:
-        # Si aucun département n'est sélectionné/autorisé (cas où tout est décoché), on vide le DF
-        if not selected_regions_filter and not selected_deps_filter:
-            return pd.DataFrame()
-        # Si une région est sélectionnée mais aucun département n'est dans le DF restant après les sliders,
-        # le DF peut être vide, ce qui est correct.
-
-
-    # 3. Autres filtres cases à cocher
-    for filter_col in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
-        if filter_col in filtered_df.columns:
-            selected_options = st.session_state.filters[filter_col.lower()]
-            # Le lot doit avoir une valeur de la colonne qui est dans les options sélectionnées
-            filtered_df = filtered_df[filtered_df[filter_col].isin(selected_options)]
-            
-    return filtered_df
-
-# --- 6. GESTION DES CLICS SUR LA CARTE (Panneau de Détails) ---
-
-# Callback pour ouvrir le panneau de détails
-def open_detail_panel(lot_ref):
-    st.session_state.filters['selected_lot_ref'] = lot_ref
-    st.session_state.filters['show_detail_panel'] = True
-
-# Callback pour fermer le panneau de détails
-def close_detail_panel():
-    st.session_state.filters['selected_lot_ref'] = None
-    st.session_state.filters['show_detail_panel'] = False
-
-# --- 7. VOLET GAUCHE (SIDEBAR) ---
-
-with st.sidebar:
-    # 3. Identité visuelle: Logo
-    logo_b64 = get_base64_of_bin_file(LOGO_PATH)
-    if logo_b64:
-        st.markdown(f"""
-            <div class="logo-container">
-                <img src="data:image/png;base64,{logo_b64}" alt="Logo SMBG" />
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        # Fallback si le logo n'est pas disponible localement
-        st.markdown(f"<div class='logo-container' style='color: white; font-size: 24px; font-weight: bold;'>SMBG Carte</div>", unsafe_allow_html=True)
-
-    # Bouton Réinitialiser
-    st.markdown('<div id="reset-button">', unsafe_allow_html=True)
-    # Vérifiez si df_data n'est pas vide avant de tenter d'accéder à l'état
-    disabled_reset = df_data.empty
-    st.button("Réinitialiser les filtres", on_click=reset_filters, use_container_width=True, disabled=disabled_reset)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
-
-    # 8. Filtres
-    
-    # 1. Région / Département imbriqués
-    st.markdown("<h2>Filtres Géographiques</h2>", unsafe_allow_html=True)
-
-    # Utiliser les données chargées pour les options (gère le cas où le DF est vide)
-    unique_regions = sorted(df_data['Region'].unique().tolist()) if 'Region' in df_data.columns else []
-    
-    if df_data.empty or not unique_regions:
-        st.info("Aucune donnée géographique à filtrer.")
-    else:
-        # Copie des états pour la manipulation des checkbox
-        temp_regions = st.session_state.filters['selected_regions'].copy()
-        temp_departments = st.session_state.filters['selected_departments'].copy()
-
-        # Liste de tous les départements pour gérer la logique de sélection des régions
-        all_departments = set(df_data['Departement'].unique())
-
-        for region in unique_regions:
-            # Checkbox Région
-            checkbox_key_reg = f"region_{region}"
-            is_region_checked = region in temp_regions
-            
-            # Utiliser la valeur de l'état pour l'état initial
-            if st.checkbox(label=region, value=is_region_checked, key=checkbox_key_reg):
-                # Si la région est cochée, on ajoute tous ses départements à la sélection
-                departments_in_region = set(df_data[df_data['Region'] == region]['Departement'].unique())
-                temp_departments.update(departments_in_region)
-                temp_regions.add(region)
-            else:
-                # Si la région est décochée, on retire tous ses départements et la région elle-même
-                departments_in_region = set(df_data[df_data['Region'] == region]['Departement'].unique())
-                temp_departments.difference_update(departments_in_region)
-                temp_regions.discard(region)
-
-
-            # Affichage des départements si la région est cochée
-            # ATTENTION: On ne montre les départements que si la région est cochée dans l'état ACTUEL
-            if region in temp_regions:
-                # Filtrer les départements pour cette région
-                departments_in_region = sorted(df_data[df_data['Region'] == region]['Departement'].unique().tolist())
+    # 8. Réinitialiser: décocher toutes les cases
+    for region in st.session_state.data['Région'].unique():
+        st.session_state.region_checks[region] = False
+        if region in st.session_state.dept_checks:
+            for dept in st.session_state.dept_checks[region].keys():
+                st.session_state.dept_checks[region][dept] = False
                 
-                for dep in departments_in_region:
-                    # Checkbox Département avec indentation
-                    st.markdown(f'<div class="department-checkbox">', unsafe_allow_html=True)
-                    
-                    checkbox_key_dep = f"dep_{dep}_{region}" # Clé unique par département/région
-                    is_dep_checked = dep in temp_departments
-                    
-                    # NOTE IMPORTANTE: L'interaction de la checkbox de Département doit uniquement
-                    # modifier l'état des départements (temp_departments).
-                    if st.checkbox(label=dep, value=is_dep_checked, key=checkbox_key_dep):
-                        temp_departments.add(dep)
-                    else:
-                        # Si l'utilisateur décoche un département, on le retire.
-                        # Cela désélectionne de facto la région mère s'il n'en reste plus.
-                        temp_departments.discard(dep)
-                        
-                    st.markdown('</div>', unsafe_allow_html=True)
+    for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
+        if col_name in st.session_state.data.columns:
+            for value in st.session_state.data[col_name].unique():
+                st.session_state.other_checks.get(col_name, {})[value] = False
 
-        # Mise à jour de l'état global après le rendu de toutes les checkboxes
-        st.session_state.filters['selected_regions'] = temp_regions
-        st.session_state.filters['selected_departments'] = temp_departments
+    # 8. Réinitialiser: réinitialiser les sliders
+    if 'gla_min_max' in st.session_state:
+        st.session_state.gla_range = st.session_state.gla_min_max
+    if 'loyer_min_max' in st.session_state:
+        st.session_state.loyer_range = st.session_state.loyer_min_max
+    
+    # 8. Réinitialiser: refermer le panneau droit
+    st.session_state.selected_lot_key = None
+    
+    # 8. Réinitialiser: afficher tous les pins
+    st.session_state.filtered_data = st.session_state.data.copy()
+    
+    st.rerun() # Relancer pour mettre à jour l'UI
 
-    st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
+# --- 6. RENDU DE LA SIDEBAR (VOLET GAUCHE) ---
 
-    # --- 2. Sliders ---
-    st.markdown("<h2>Filtres Numériques</h2>", unsafe_allow_html=True)
+def render_sidebar():
+    """Affiche le logo et tous les filtres dans la sidebar."""
+    
+    # 3. Logo
+    st.markdown(f'<div class="sidebar-logo"><img src="assets/Logo bleu crop.png" alt="Logo SMBG" style="width: 200px; height: auto;"></div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # 8. Bouton Réinitialiser
+    st.button("Réinitialiser les filtres", on_click=reset_filters)
+
+    st.markdown("---")
+    
+    # --- 8.1 Filtres Région / Département imbriqués ---
+    st.markdown("#### Région / Département")
+
+    unique_regions = st.session_state.data['Région'].unique()
+    
+    # Initialisation des states si nécessaire
+    if 'region_checks' not in st.session_state:
+        st.session_state.region_checks = {r: False for r in unique_regions}
+    if 'dept_checks' not in st.session_state:
+        st.session_state.dept_checks = {}
+
+    for region in unique_regions:
+        # Checkbox Région
+        st.session_state.region_checks[region] = st.checkbox(
+            region, 
+            value=st.session_state.region_checks.get(region, False), 
+            key=f"region_check_{region}"
+        )
+
+        # Affichage des Départements si la Région est cochée
+        if st.session_state.region_checks[region]:
+            region_df = st.session_state.data[st.session_state.data['Région'] == region]
+            unique_departments = region_df['Département'].unique()
+
+            if region not in st.session_state.dept_checks:
+                st.session_state.dept_checks[region] = {d: False for d in unique_departments}
+            
+            for dept in unique_departments:
+                # Checkbox Département (avec indentation via CSS)
+                st.session_state.dept_checks[region][dept] = st.checkbox(
+                    dept, 
+                    value=st.session_state.dept_checks[region].get(dept, False), 
+                    key=f"dept_check_{region}_{dept}",
+                    # Utilisation d'un sélecteur CSS spécifique pour l'indentation
+                    help=f'<div class="department-checkbox"></div>'
+                )
+    
+    st.markdown("---")
+    
+    # --- 8.2 Filtres Sliders ---
     
     # Surface GLA
-    if 'Surface_GLA' in df_data.columns and MIN_SURFACE < MAX_SURFACE:
-        initial_gla_range = st.session_state.filters['surface_range']
-        
-        # S'assurer que les valeurs d'état sont comprises entre min et max globaux
-        current_min_gla = max(MIN_SURFACE, min(initial_gla_range[0], MAX_SURFACE))
-        current_max_gla = min(MAX_SURFACE, max(initial_gla_range[1], MIN_SURFACE))
-
-        new_gla_range = st.slider(
-            "Surface GLA (m²)",
-            min_value=float(MIN_SURFACE),
-            max_value=float(MAX_SURFACE),
-            value=(current_min_gla, current_max_gla),
-            step=1.0,
-            key="surface_slider",
-            disabled=disabled_reset,
-            format="%i m²"
+    st.markdown("#### Surface GLA (m²)")
+    if 'gla_min_max' in st.session_state:
+        min_gla_all, max_gla_all = st.session_state.gla_min_max
+        st.session_state.gla_range = st.slider(
+            "Sélectionnez la plage",
+            min_value=float(min_gla_all),
+            max_value=float(max_gla_all),
+            value=st.session_state.gla_range,
+            key='gla_range_slider',
+            label_visibility="collapsed"
         )
-        st.session_state.filters['surface_range'] = new_gla_range
-    else:
-         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Surface GLA non disponible ou données min/max identiques.</p>", unsafe_allow_html=True)
-
-
+    
     # Loyer annuel
-    if 'Loyer_Annuel' in df_data.columns and MIN_LOYER < MAX_LOYER:
-        initial_loyer_range = st.session_state.filters['loyer_range']
-        
-        # S'assurer que les valeurs d'état sont comprises entre min et max globaux
-        current_min_loyer = max(MIN_LOYER, min(initial_loyer_range[0], MAX_LOYER))
-        current_max_loyer = min(MAX_LOYER, max(initial_loyer_range[1], MIN_LOYER))
-
-        new_loyer_range = st.slider(
-            "Loyer annuel (€)",
-            min_value=float(MIN_LOYER),
-            max_value=float(MAX_LOYER),
-            value=(current_min_loyer, current_max_loyer),
-            step=1000.0,
-            key="loyer_slider",
-            format="%i €",
-            disabled=disabled_reset
+    st.markdown("#### Loyer annuel (€)")
+    if 'loyer_min_max' in st.session_state:
+        min_loyer_all, max_loyer_all = st.session_state.loyer_min_max
+        st.session_state.loyer_range = st.slider(
+            "Sélectionnez la plage",
+            min_value=float(min_loyer_all),
+            max_value=float(max_loyer_all),
+            value=st.session_state.loyer_range,
+            key='loyer_range_slider',
+            label_visibility="collapsed"
         )
-        st.session_state.filters['loyer_range'] = new_loyer_range
-    else:
-         st.markdown("<p style='color: rgba(255,255,255,0.5);'>Loyer annuel non disponible ou données min/max identiques.</p>", unsafe_allow_html=True)
+        
+    st.markdown("---")
 
+    # --- 8.3 Autres cases à cocher ---
+    
+    st.markdown("#### Autres Critères")
+    
+    if 'other_checks' not in st.session_state:
+        st.session_state.other_checks = {}
 
-    st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
-    
-    # --- 3. Autres cases à cocher ---
-    st.markdown("<h2>Filtres Thématiques</h2>", unsafe_allow_html=True)
-    
-    checkbox_filters = ['Emplacement', 'Typologie', 'Extraction', 'Restauration']
-    
-    for filter_col in checkbox_filters:
-        if filter_col in df_data.columns:
-            # S'assurer que l'ensemble des options est trié
-            unique_options = sorted(df_data[filter_col].unique().tolist())
-            st.markdown(f"**{DETAIL_COLUMNS_MAPPING.get(filter_col, filter_col)}**", unsafe_allow_html=True)
+    for col_name in ['Emplacement', 'Typologie', 'Extraction', 'Restauration']:
+        if col_name in st.session_state.data.columns:
+            st.markdown(f"**{col_name}**")
+            unique_values = st.session_state.data[col_name].unique()
             
-            temp_options = st.session_state.filters[filter_col.lower()].copy()
-
-            for option in unique_options:
-                checkbox_key = f"{filter_col.lower()}_{option.replace(' ', '_')}"
-                is_checked = option in temp_options
+            if col_name not in st.session_state.other_checks:
+                st.session_state.other_checks[col_name] = {v: False for v in unique_values}
                 
-                checked = st.checkbox(
-                    label=option,
-                    value=is_checked,
-                    key=checkbox_key,
-                    disabled=disabled_reset
+            for value in unique_values:
+                st.session_state.other_checks[col_name][value] = st.checkbox(
+                    str(value),
+                    value=st.session_state.other_checks[col_name].get(value, False),
+                    key=f"other_check_{col_name}_{value}"
                 )
-                
-                # Mise à jour de l'état temporaire
-                if checked:
-                    temp_options.add(option)
-                else:
-                    temp_options.discard(option)
 
-            st.session_state.filters[filter_col.lower()] = temp_options
-        else:
-            st.markdown(f"<p style='color: rgba(255,255,255,0.5);'>{filter_col} non disponible.</p>", unsafe_allow_html=True)
+    # Déclencher le filtrage après toutes les interactions
+    filter_data()
 
 
-# --- 8. LOGIQUE PRINCIPALE DE LA CARTE ---
+# --- 7. RENDU DE LA CARTE (ZONE CENTRALE) ---
 
-# Appliquer les filtres à la DataFrame principale
-df_filtered = apply_filters(df_data)
-
-# Calculer la position centrale de la carte
-if not df_filtered.empty:
-    center_lat = df_filtered['Latitude'].mean()
-    center_lon = df_filtered['Longitude'].mean()
-    # Ajustement pour la France métropolitaine si les données sont trop dispersées
-    if df_filtered.shape[0] > 1:
-        map_zoom = 5 # Zoom par défaut pour l'ensemble de la France
+def create_folium_map():
+    """Crée la carte Folium avec les pins personnalisés et la logique de clic."""
+    df_map = st.session_state.filtered_data
+    
+    if df_map.empty:
+        # Centre par défaut si aucune donnée filtrée
+        m = folium.Map(location=[46.603354, 1.888334], zoom_start=6, control_scale=True)
     else:
-        map_zoom = 12 # Zoom plus précis si un seul point
-else:
-    # Coordonnées par défaut de la France (si le DF est vide)
-    center_lat = 46.603354
-    center_lon = 1.888334
-    map_zoom = 5
+        # Calculer le centre de la carte en fonction des lots filtrés
+        center_lat = df_map['Latitude'].mean()
+        center_lon = df_map['Longitude'].mean()
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=10, control_scale=True)
+        # Ajuster le zoom pour contenir tous les points si trop peu de points
+        if len(df_map) > 0:
+             m.fit_bounds([[df_map['Latitude'].min(), df_map['Longitude'].min()], 
+                           [df_map['Latitude'].max(), df_map['Longitude'].max()]])
 
-# Création de la carte Folium
-m = folium.Map(
-    location=[center_lat, center_lon], 
-    zoom_start=map_zoom, 
-    tiles='cartodbpositron', # Un fond de carte clair et moderne
-    control_scale=True,
-    scrollWheelZoom=True
-)
-
-# Fonction JavaScript pour gérer le clic sur un marqueur
-# Cette fonction envoie la référence de l'annonce cliquée à Streamlit via un st.text_input hack
-# et empêche le panneau de se fermer si l'utilisateur clique en dehors de la carte (non géré ici)
-js_click_lot = """
-function onClick(ref) {
-    Streamlit.setComponentValue(ref);
-}
-"""
-
-# Ajout des marqueurs à la carte
-if not df_filtered.empty:
-    for index, row in df_filtered.iterrows():
-        # Créer le Popup HTML pour chaque marqueur
-        
-        # NOTE: On utilise une fonction de popup pour contourner le manque d'événement Marker Click
-        
-        # Référence pour le panneau de détail (on utilise ici le Lot Référence pour l'instant)
-        lot_ref = row['Ref_Format']
-        
-        # Création du contenu du Popup
-        popup_content = f"""
-        <div style="font-family: Arial, sans-serif; font-size: 14px; color: {BLUE_SMBG};">
-            <h4 style="margin: 0 0 5px 0; color: {COPPER_SMBG};">Lot : {lot_ref}</h4>
-            <p style="margin: 0;">**{row.get('Ville', 'N/A')}** - {row.get('Departement', 'N/A')}</p>
-            <p style="margin: 0; margin-top: 5px;">**GLA :** {format_surface(row['Surface_GLA']) if format_surface(row['Surface_GLA']) else 'N/A'}</p>
-            <p style="margin: 0;">**Loyer :** {format_currency(row['Loyer_Annuel']) if format_currency(row['Loyer_Annuel']) else 'N/A'} / an</p>
-            
-            <button onclick="openPanel('{lot_ref}')" 
-                    style="background-color: {COPPER_SMBG}; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px; margin-top: 10px; width: 100%;">
-                Détails
-            </button>
-        </div>
-        """
-        
-        iframe = folium.IFrame(popup_content, width=250, height=170)
-        popup = folium.Popup(iframe, max_width=250)
-        
-        marker_lat = row['Latitude']
-        marker_lon = row['Longitude']
-        
-        # Utilisation de folium.Marker pour ajouter le marqueur
-        folium.Marker(
-            [marker_lat, marker_lon],
-            popup=popup,
-            tooltip=f"Lot: {lot_ref} | GLA: {row['Surface_GLA']}m²",
-            icon=folium.Icon(color='red', icon='info-sign')
-        ).add_to(m)
-        
-    st.info(f"Nombre de lots affichés : {df_filtered.shape[0]}")
-else:
-    st.warning("Aucun lot ne correspond aux critères de filtrage.")
-
-
-# --- 9. HACK STREAMLIT-FOLIUM POUR GESTION DES CLICS ---
-
-# 1. Ajout d'une fonction JavaScript pour ouvrir le panneau au clic sur le popup
-# Cette fonction est CRITIQUE : elle utilise le hack st.session_state
-js_panel_opener = """
-<script>
-    function openPanel(lotRef) {
-        // Envoie la référence du lot à Streamlit via un élément input invisible
-        const input = document.getElementById('lot_ref_input_hack');
-        if (input) {
-            input.value = lotRef;
-            // Déclenche un événement de changement sur l'input pour notifier Streamlit
-            input.dispatchEvent(new Event('change'));
-        }
+    # 7. Pins sur la carte: ABSOLUMENT AUCUN POPUP, style personnalisé
+    
+    # Création du GeoJson pour gérer le clic sans popup
+    geojson_data = {
+        "type": "FeatureCollection",
+        "features": []
     }
-</script>
-"""
-st.markdown(js_panel_opener, unsafe_allow_html=True)
 
-# 2. Le champ de texte Streamlit qui capte l'action JavaScript
-# Il est invisible mais CRITIQUE pour la communication JS -> Python
-lot_ref_clicked = st.text_input(
-    "Lot Cliqué (Hack)", 
-    key="lot_ref_input_hack", 
-    value="",
-    label_visibility="hidden"
-)
+    for index, row in df_map.iterrows():
+        lat, lon = row['Latitude'], row['Longitude']
+        ref = row['Ref Formatée']
+        lot_key = row['lot_key']
 
-# 3. Logique de déclenchement du panneau
-# Si le hack est activé (un lotRef a été envoyé par le JS), on ouvre le panneau
-if lot_ref_clicked and lot_ref_clicked != st.session_state.filters.get('selected_lot_ref'):
-    # Note: L'événement 'on_change' n'est pas fiable, on le gère ici
-    open_detail_panel(lot_ref_clicked)
-    # Réinitialiser la valeur du hack après l'avoir traitée pour permettre un nouveau clic
-    # (Attention: cela peut causer un re-run inutile, mais c'est le compromis)
-    st.session_state.lot_ref_input_hack = "" # Réinitialiser le widget Streamlit
+        # Utilisation d'un cercle (CircleMarker) pour le pin
+        # J'ajoute le lot_key dans les propriétés pour le récupérer via st_folium
+        feature = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat] 
+            },
+            "properties": {
+                "lot_key": lot_key,
+                "ref": ref
+            }
+        }
+        geojson_data["features"].append(feature)
 
-# Afficher la carte Folium (occupe le reste de l'écran)
-try:
-    # Hack pour garantir que Folium a une hauteur minimale définie pour le rendu
-    # On ajoute une balise qui sera retirée par Streamlit, mais qui force Folium à avoir des dimensions
-    # avant le rendu.
-    m.get_root().html.add_child(folium.Element('<div style="height: 100vh;"></div>'))
-    
-    # On utilise la hauteur par défaut de la carte si elle est définie, sinon 500px comme fallback
-    # La librairie Streamlit-Folium a besoin d'une valeur non nulle.
-    map_height = 500
-    
-    # Le hack est d'utiliser m._parent.height si disponible (ce qui n'est pas garanti)
-    # Pour contourner la limitation de 'None' + 'None' dans l'opérateur OR de la librairie:
-    
-    folium_static(m, width=None, height=map_height)
-except Exception as e:
-    st.error(f"Erreur lors de l'affichage de la carte : {e}. Si le problème persiste, cela est lié à la façon dont Streamlit et Folium gèrent les dimensions des iFrames.")
+    # Style pour le CircleMarker (le cercle)
+    def style_function(feature):
+        return {
+            'fillColor': SMBG_BLUE,
+            'color': '#333333',  # Contour fin sombre
+            'weight': 1,
+            'fillOpacity': 0.8,
+            'radius': 10  # Taille du cercle
+        }
 
+    # Style pour le hover (curseur main)
+    highlight_function = lambda x: {'fillOpacity': 1, 'weight': 2, 'color': SMBG_COPPER}
 
-# --- 10. PANNEAU DE DÉTAILS (VOLET DROIT) ---
+    # GeoJson pour le marquage (le point cliquable)
+    geojson_layer = folium.GeoJson(
+        geojson_data,
+        name="Lots",
+        style_function=style_function,
+        highlight_function=highlight_function,
+        tooltip=False, # Désactiver le tooltip
+        popup=False # Désactiver le popup
+    ).add_to(m)
 
-# Déterminer la classe CSS pour le panneau
-panel_class = "expanded" if st.session_state.filters['show_detail_panel'] else "collapsed"
+    # Ajout des marqueurs Textes (pour afficher la référence)
+    for index, row in df_map.iterrows():
+        lat, lon = row['Latitude'], row['Longitude']
+        ref = row['Ref Formatée']
 
-st.markdown(f'<div class="detail-panel {panel_class}">', unsafe_allow_html=True)
-st.button("×", on_click=close_detail_panel, key="close_detail_button", help="Fermer les détails", class_name="close-button")
-
-selected_ref = st.session_state.filters.get('selected_lot_ref')
-
-if selected_ref:
-    # Trouver la ligne correspondante dans le DF (filtré ou non)
-    # Utiliser df_data pour s'assurer que même un lot filtré mais cliqué reste visible.
-    lot_data = df_data[df_data['Ref_Format'] == selected_ref].iloc[0] if not df_data.empty and (df_data['Ref_Format'] == selected_ref).any() else None
-
-    if lot_data is not None:
-        st.markdown(f"<h3>Détails du Lot : {selected_ref}</h3>", unsafe_allow_html=True)
-
-        # Affichage des détails selon la configuration (DETAIL_COLUMNS_MAPPING)
-        for internal_col, display_name in DETAIL_COLUMNS_MAPPING.items():
-            value = lot_data.get(internal_col)
-            
-            # Application des formatages si possible
-            if internal_col in ['Loyer_Annuel', 'Charges_Annuelles', 'Taxe_Fonciere', 'Loyer Mensuel', 'Charges Mensuelles', 'Marketing', 'Dépôt de garantie', 'GAPD', 'Gestion', 'Honoraires', 'Total (L+C+M)']:
-                formatted_value = format_currency(value)
-            elif internal_col in ['Surface_GLA', 'Surface utile', 'Loyer €/m²', 'Charges €/m²', 'Taxe Foncière €/m²', 'Marketing €/m²']:
-                # Les coûts au m² peuvent avoir des décimales, utilisons un formatage simple
-                formatted_value = format_surface(value).replace(' m²', ' €/m²') if format_surface(value) else None
-            else:
-                # Pour les autres champs (texte, lien, etc.)
-                formatted_value = str(value) if not pd.isna(value) else None
-
-            # Afficher uniquement si la valeur est significative
-            # On utilise ici la fonction is_value_displayable avec la valeur brute
-            if is_value_displayable(value):
-                # Traitement spécial pour le lien Google Maps
-                if internal_col == 'Lien_GMaps' and formatted_value:
-                    st.markdown(f"""
-                        <div style="margin-top: 15px;">
-                            <span class="detail-label">{display_name} :</span>
-                            <div class="gmaps-button">
-                                <a href="{formatted_value}" target="_blank">
-                                    <button>Ouvrir sur Google Maps</button>
-                                </a>
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    # Affichage standard
-                    # Si formatted_value est None, on utilise quand même la valeur d'origine si elle a passé is_value_displayable
-                    display_val = formatted_value if formatted_value is not None else str(value).strip()
-                    
-                    st.markdown(f"""
-                        <div style="margin-top: 5px;">
-                            <span class="detail-label">{display_name} :</span>
-                            {display_val}
-                        </div>
-                    """, unsafe_allow_html=True)
+        # Utilisation d'un DivIcon pour afficher le texte au centre du cercle
+        html = f"""
+        <div style="
+            font-family: Futura, {FONT_FALLBACK};
+            color: white; 
+            font-size: 10px; 
+            font-weight: bold;
+            line-height: 20px;
+            text-align: center;
+            width: 20px;
+            height: 20px;
+            pointer-events: none; /* Important pour laisser le clic passer au GeoJson */
+        ">{ref}</div>
+        """
+        icon = folium.DivIcon(html=html, icon_size=(20, 20), icon_anchor=(10, 10))
         
-        # Pied de panneau
-        st.markdown("<hr style='border-top: 1px solid rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
-        st.markdown("<p style='font-size: small; text-align: center;'>SMBG Immobilier Commercial</p>", unsafe_allow_html=True)
+        folium.Marker(
+            location=[lat, lon],
+            icon=icon,
+            tooltip=False,
+            popup=False
+        ).add_to(m)
 
+    return m, geojson_layer
+
+
+# --- 8. RENDU DU PANNEAU DE DÉTAILS (VOLET DROIT) ---
+
+def render_detail_panel():
+    """Affiche le panneau de détails rétractable."""
+    
+    lot_key = st.session_state.selected_lot_key
+    
+    # Rendre le JS pour contrôler l'ouverture/fermeture du panneau
+    if lot_key:
+        js_update = f"<script>window.stPanelState = 'visible'; updatePanel();</script>"
+        st.html(js_update)
+        
+        # Trouver le lot sélectionné
+        selected_lot = st.session_state.data[st.session_state.data['lot_key'] == lot_key].iloc[0]
+        
+        # Début du conteneur HTML fixe (Volet C)
+        st.markdown('<div id="detail-panel">', unsafe_allow_html=True)
+        
+        st.markdown("### Détails de l'annonce") # Titre
+        st.markdown(f"#### Référence : {selected_lot['Ref Formatée']}")
+        
+        st.markdown("---")
+        
+        # --- 10. Contenu: Tableau des colonnes G à AL (simulées par DETAIL_COLUMNS_KEYS) ---
+        for col_key in DETAIL_COLUMNS_KEYS:
+            value = selected_lot.get(col_key)
+            formatted_val = format_value(col_key, value)
+            
+            # 10. Règles d’affichage: Cacher complètement la ligne si la valeur est vide/néant/0...
+            if formatted_val is not None:
+                st.markdown(
+                    f"""
+                    <div class="detail-row">
+                        <span class="detail-label">{col_key}</span>
+                        <span class="detail-value">{formatted_val}</span>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+        
+        st.markdown("---")
+        
+        # --- 10. Colonne H (Lien Google Maps) ---
+        maps_url = selected_lot.get(MAPS_URL_COLUMN)
+        
+        if maps_url and format_value(MAPS_URL_COLUMN, maps_url) is not None:
+            # Devient un bouton “Cliquer ici”, ouvre dans un nouvel onglet
+            st.link_button(
+                "Cliquer ici pour Google Maps", 
+                url=maps_url, 
+                help="Ouvre le lien Google Maps dans un nouvel onglet",
+                type="primary", # Style par défaut, ajusté par le CSS
+                key="google_maps_button"
+            )
+        else:
+             st.markdown('<p style="font-style: italic; color: #aaa;">Lien Google Maps non disponible.</p>', unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+        
     else:
-        st.markdown("<p style='text-align: center; margin-top: 50px;'>Sélectionnez un lot sur la carte.</p>", unsafe_allow_html=True)
-else:
-    st.markdown("<p style='text-align: center; margin-top: 50px;'>Sélectionnez un lot sur la carte pour voir ses détails.</p>", unsafe_allow_html=True)
+        # Fermer le panneau droit
+        js_update = f"<script>window.stPanelState = 'hidden'; updatePanel();</script>"
+        st.html(js_update)
 
-st.markdown('</div>', unsafe_allow_html=True)
+
+# --- 9. LOGIQUE DE CLIC SUR LA CARTE ---
+
+def handle_map_click(map_result):
+    """Gère le clic sur la carte ou sur un pin."""
+    
+    if map_result and map_result.get('last_object_clicked'):
+        # Clic sur un GeoJson Feature (Pin)
+        clicked_data = map_result['last_object_clicked']
+        
+        # 7. Interaction: Clic sur pin → ouverture du panneau droit
+        if 'properties' in clicked_data and 'lot_key' in clicked_data['properties']:
+            lot_key = clicked_data['properties']['lot_key']
+            st.session_state.selected_lot_key = lot_key
+            st.rerun()
+            return
+            
+    # 7. Interaction: Clic sur carte hors pin → fermeture du panneau droit
+    # Cela est géré par la logique du clic sur la carte elle-même.
+    # st_folium renvoie aussi les coordonnées du clic sur la carte.
+    # Si on arrive ici et qu'un lot était sélectionné, on le ferme.
+    if st.session_state.selected_lot_key:
+        st.session_state.selected_lot_key = None
+        st.rerun()
+
+
+# --- 10. FONCTION PRINCIPALE DE L'APPLICATION ---
+
+def main():
+    # Configuration de la page (Streamlit configuration)
+    st.set_page_config(
+        page_title="SMBG Carte - Immobilier Commercial",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # --- 1. Injection du CSS critique pour le layout et le style ---
+    inject_custom_css()
+
+    # Le conteneur de la sidebar est géré par `st.sidebar`
+    with st.sidebar:
+        render_sidebar()
+        
+    # Le conteneur principal gère la carte
+    # Je force la carte à prendre la place avec un div 100vh
+    st.markdown('<div id="map_container">', unsafe_allow_html=True)
+    
+    # --- 7. Rendu de la Carte (Zone B) ---
+    m, geojson_layer = create_folium_map()
+    
+    # Rendre la carte et récupérer l'état du clic
+    map_result = st_folium(
+        m, 
+        width='100%', 
+        height='100%', 
+        key="smbg_map", 
+        # Propriétés importantes pour le clic (éviter les popups)
+        returned_objects=["last_object_clicked", "last_click"], 
+        # Déclencher le JS pour gérer la fermeture du panneau au clic sur la carte
+        # sans affecter la carte elle-même.
+        js_callback="""
+            function(e) { 
+                if (e.last_click && !e.last_object_clicked) {
+                    // Clic sur la carte (hors pin)
+                    if (window.stPanelState === 'visible') {
+                        // Simuler la fermeture du panneau via Streamlit
+                        Streamlit.set
+                        Streamlit.setComponentValue({
+                            'action': 'close_panel' 
+                        });
+                        return 'close_panel_event';
+                    }
+                }
+                return e; 
+            }
+        """
+    )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- 8. Rendu du Panneau de Détails (Zone C) ---
+    # Le panneau est un élément en position fixe géré par HTML/CSS
+    render_detail_panel()
+    
+    # --- 9. Post-traitement du clic sur la carte ---
+    
+    # 1. Traiter le clic sur un pin via 'last_object_clicked'
+    if map_result and map_result.get('last_object_clicked'):
+        # handle_map_click s'occupe de l'ouverture
+        handle_map_click(map_result) 
+        
+    # 2. Traiter le clic de fermeture (clic sur la carte hors pin) via 'last_click' ou le callback JS
+    # Si le callback JS a été déclenché, il envoie un objet spécial
+    if map_result and map_result.get('action') == 'close_panel' and st.session_state.selected_lot_key:
+        st.session_state.selected_lot_key = None
+        st.rerun()
+
+
+if __name__ == "__main__":
+    main()
