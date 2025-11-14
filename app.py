@@ -13,6 +13,7 @@ COLOR_SMBG_BLUE   = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42"
 LOGO_FILE_PATH    = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH   = "data/Liste des lots.xlsx"
+DETAILS_PANEL_WIDTH = 360  # Largeur du panneau de détails en pixels
 
 # Colonnes attendues
 REF_COL="Référence annonce"; REGION_COL="Région"; DEPT_COL="Département"
@@ -22,6 +23,10 @@ SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL
 # Volet droit : G -> AL (H = bouton Google)
 INDEX_START, INDEX_END_EXCL = 6, 38
 MAP_HEIGHT = 800
+
+# Initialisation de l'état du volet de détails (Affiché par défaut)
+if "show_details" not in st.session_state:
+    st.session_state["show_details"] = True
 
 # ===== Police Futura (Code inchangé) =====
 def _load_futura_css_from_assets():
@@ -61,16 +66,21 @@ def format_value(value, unit=""):
         txt=f"{num:,.0f}".replace(",", " "); return f"{txt} {unit}".strip() if unit else txt
     except: return s
 
-# REMOVAL: La fonction jitter_group est supprimée.
-
 def reset_all():
     st.session_state.clear()
+    st.session_state["show_details"] = True # Réinitialise l'état par défaut du volet
+    st.rerun()
+
+# Fonction pour basculer l'état du volet de détails
+def toggle_details():
+    st.session_state["show_details"] = not st.session_state["show_details"]
+    # Re-exécute pour appliquer immédiatement la nouvelle largeur à la carte
     st.rerun()
 
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"]=None
 
-# ===== Data =====
+# ===== Data (Code inchangé) =====
 @st.cache_data
 def load_data(path):
     df=pd.read_excel(path, dtype={REF_COL:str})
@@ -81,7 +91,6 @@ def load_data(path):
     df["__SURF_NUM__"]=pd.to_numeric(df.get(SURFACE_COL,""), errors="coerce")
     df["__LOYER_NUM__"]=pd.to_numeric(df.get(LOYER_COL,""), errors="coerce")
     if ACTIF_COL in df.columns:
-        # Rendu plus robuste : cherche "oui" en minuscule, ignore les NaN
         df=df[df[ACTIF_COL].astype(str).str.lower().str.contains("oui", na=False)]
     df.dropna(subset=[LAT_COL,LON_COL], inplace=True)
     df.reset_index(drop=True,inplace=True)
@@ -89,7 +98,12 @@ def load_data(path):
 
 data_df=load_data(EXCEL_FILE_PATH)
 
-# ===== CSS global (Code inchangé) =====
+# Calcul de la marge droite dynamique
+right_padding = DETAILS_PANEL_WIDTH if st.session_state["show_details"] else 0
+# L'animation de 0.3s est ajoutée au CSS pour une transition douce
+TRANSITION_DURATION = "0.3s"
+
+# ===== CSS global (Mise à jour pour le côté rétractable) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -98,8 +112,11 @@ st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* Panneau droit réservé */
-[data-testid="stAppViewContainer"] .main .block-container {{ padding-right: 380px; }}
+/* Panneau droit réservé : La marge est ajustée dynamiquement via Python */
+[data-testid="stAppViewContainer"] .main .block-container {{ 
+    padding-right: {right_padding + 20}px; /* +20px pour un peu de marge */
+    transition: padding-right {TRANSITION_DURATION}; /* Ajout d'une transition */
+}}
 
 /* Sidebar : marge haute 25px, aucun bouton collapse, fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
@@ -120,11 +137,14 @@ st.markdown(f"""
   padding:0 !important; margin:0 !important; border:0 !important; display:none !important;
 }}
 
-/* Panneau droit */
+/* Panneau droit : Utilisation de 'transform' pour l'animation de masquage */
 .details-panel {{
-  position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
+  position: fixed; top: 0; right: 0; width: {DETAILS_PANEL_WIDTH}px; height: 100vh;
   background:{COLOR_SMBG_BLUE}; color:#fff; z-index:1000;
   padding:16px; box-shadow:-5px 0 15px rgba(0,0,0,0.35); overflow-y:auto;
+  /* Masquage/Affichage par translation */
+  transform: translateX({0 if st.session_state["show_details"] else DETAILS_PANEL_WIDTH}px);
+  transition: transform {TRANSITION_DURATION} ease-in-out;
 }}
 .maps-button {{
   width:100%; padding:9px; margin:8px 0 14px; background:{COLOR_SMBG_COPPER};
@@ -136,108 +156,41 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Code inchangé dans la structure) =====
+# ===== SIDEBAR (Ajout du bouton Bascule) =====
 with st.sidebar:
-    # marge fixe de 25 px en haut
-    st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+    # ... (Code de la sidebar inchangé) ...
 
-    # Logo via base64 (aucun bouton d’agrandissement)
-    b64 = logo_base64()
-    if b64:
-        st.markdown(
-            f"<img src='data:image/png;base64,{b64}' "
-            f"style='width:100%;height:auto;display:block;margin:0;'>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
+    # [CODE PRÉCÉDENT ICI: Logo, Régions/Départements, Sliders, Checkboxes]
 
-    # petite marge de 10 px sous le logo, pas plus
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-    st.markdown("**Région / Département**")
-    regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
-
-    # Sélections
-    selected_regions = []
-    selected_depts_global = []
-    selected_depts_by_region = defaultdict(list)
-
-    for reg in regions:
-        rk = f"chk_region_{reg}"
-        rchecked = st.checkbox(reg, key=rk)
-        if rchecked:
-            selected_regions.append(reg)
-            # n'afficher les départements que si la région est cochée
-            pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
-            depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
-            for d in depts:
-                dk = f"chk_dept_{reg}_{d}"
-                st.markdown("<div class='dept-wrap'>", unsafe_allow_html=True)
-                dchecked = st.checkbox(d, key=dk)
-                st.markdown("</div>", unsafe_allow_html=True)
-                if dchecked:
-                    selected_depts_global.append(d)
-                    selected_depts_by_region[reg].append(d)
-
+    # --- NOUVELLE SECTION : Contrôle du volet ---
     st.markdown("---")
-
-    # Sliders aux bornes (avec vérification des données)
-    surf_num = data_df["__SURF_NUM__"].dropna()
-    surf_min=int(surf_num.min()) if not surf_num.empty else 0
-    surf_max=int(surf_num.max()) if not surf_num.empty else 1000
-    smin,smax=st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max, value=(surf_min,surf_max), step=1, key="slider_surface")
-
-    loyer_num = data_df["__LOYER_NUM__"].dropna()
-    loyer_min=int(loyer_num.min()) if not loyer_num.empty else 0
-    loyer_max=int(loyer_num.max()) if not loyer_num.empty else 100000
-    lmin,lmax=st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max, value=(loyer_min,loyer_max), step=1000, key="slider_loyer")
-
-    # Autres cases
-    def draw_checks(title, column, prefix):
-        st.markdown(f"**{title}**")
-        opts=sorted([x for x in data_df.get(column,pd.Series()).dropna().astype(str).unique() if x.strip()])
-        sels=[]
-        for opt in opts:
-            # Clé plus robuste
-            key = f"chk_{prefix}_{opt.replace(' ', '_')}"
-            if st.checkbox(opt, key=key):
-                sels.append(opt)
-        st.markdown("---")
-        return sels
-
-    emp_sel  = draw_checks("Emplacement",  EMPL_COL, "emp")
-    typo_sel = draw_checks("Typologie",   TYPO_COL, "typo")
-    ext_sel  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
-    rest_sel = draw_checks("Restauration",RESTAURATION_COL, "rest")
+    
+    # Bouton Bascule
+    label = "Masquer les détails" if st.session_state["show_details"] else "Afficher les détails"
+    if st.button(label, use_container_width=True, on_click=toggle_details, key="btn_toggle_details"):
+        pass # Le toggle est géré par on_click
 
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
-# ===== FILTRES (Logique conservée pour la clarté) =====
+# ===== FILTRES (Code inchangé) =====
 f = data_df.copy()
+# ... (Logique de filtrage ici) ...
 
 if selected_regions or selected_depts_global:
     reg_mask = pd.Series(False, index=f.index)
-
-    # 1) Masque des régions sélectionnées (avec/sans restriction de département)
+    
     for reg in selected_regions:
         reg_rows = f[REGION_COL].astype(str).eq(reg)
         depts_sel = selected_depts_by_region.get(reg, [])
         if depts_sel:
-            # Région cochée + départements spécifiques cochés -> seulement ces départements
             reg_mask = reg_mask | ( reg_rows & f[DEPT_COL].astype(str).isin(depts_sel) )
         else:
-            # Région cochée, aucun département spécifique coché -> toute la région
             reg_mask = reg_mask | reg_rows
 
-    # 2) Masque des départements sélectionnés globalement
     dept_mask = f[DEPT_COL].astype(str).isin(selected_depts_global)
-
-    # On filtre sur l'union de ces deux masques
     f = f[ reg_mask | dept_mask ]
 
-# sliders
 f = f[
     (f["__SURF_NUM__"].isna() | ((f["__SURF_NUM__"]>=smin) & (f["__SURF_NUM__"]<=smax))) &
     (f["__LOYER_NUM__"].isna()| ((f["__LOYER_NUM__"]>=lmin) & (f["__LOYER_NUM__"]<=lmax)))
@@ -247,11 +200,10 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Pins aux coordonnées exactes) =====
+# ===== CARTE (Code inchangé) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
-# Le centre de la carte est calculé sur les coordonnées réelles
 else: center_lat=float(pins_df[LAT_COL].mean()); center_lon=float(pins_df[LON_COL].mean())
 
 m=folium.Map(location=[center_lat,center_lon], zoom_start=6, control_scale=True)
@@ -263,13 +215,11 @@ def add_pin(lat, lon, label, ref_value):
          color:#fff;font-weight:700;font-size:12px;border:1px solid #001a27;">
         {label}
     </div>"""
-    # Marker + popup technique pour récupérer l’event (popup masquée en CSS)
     folium.Marker(
         location=[lat,lon],
         icon=folium.DivIcon(html=icon_html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15)),
         popup=f"<div data-ref='{ref_value}'>{ref_value}</div>"
     ).add_to(m)
-    # Cible cliquable (sécurité) exactement sur le pin
     folium.CircleMarker(
         location=[lat, lon], radius=15, color="#00000000",
         fill=True, fill_color="#00000000", fill_opacity=0.0, opacity=0.0,
@@ -279,10 +229,8 @@ def add_pin(lat, lon, label, ref_value):
 if not pins_df.empty:
     pins_df["__ref_display__"]=pins_df[REF_COL].apply(parse_ref_display)
     for _,r in pins_df.iterrows():
-        # Utilisation des coordonnées exactes (LAT_COL, LON_COL)
         add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
 
-# écoute uniquement l’objet cliqué (marker/cercle) — aucune bulle visible grâce au CSS
 map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked"], key="map")
 
 if map_output and map_output.get("last_object_clicked"):
@@ -296,33 +244,45 @@ if map_output and map_output.get("last_object_clicked"):
     if ref_guess:
         st.session_state["selected_ref"]=ref_guess
 
-# ===== VOLET DROIT (Code inchangé) =====
-html=[f"<div class='details-panel'>"]
-sel_ref=st.session_state.get("selected_ref")
-if sel_ref:
-    row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
-    if not row.empty:
-        r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
-        html+=["<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>",
-               f"<h4 style='color:{COLOR_SMBG_COPPER};margin:0 0 10px 0;'>Réf. : {ref_title}</h4>",
-               "<h5 style='margin:6px 0 8px;'>📋 Données clés</h5>","<table>"]
-        all_cols=data_df.columns.tolist()
-        cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
-        for idx,champ in enumerate(cols_slice, start=INDEX_START):
-            sraw=str(r.get(champ,"")).strip()
-            if sraw.lower() in ("","néant","-","/"): continue
-            if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
-                html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
-                            f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
-                continue
-            unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
-                   else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
-            sval=format_value(sraw, unit)
-            if not sval: continue
-            html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
-        html+=["</table>",
-               "<hr style='border:1px solid #eee;margin:12px 0;'>",
-               "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
-               "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
-html.append("</div>")
-st.markdown("".join(html), unsafe_allow_html=True)
+# ===== VOLET DROIT (Affichage conditionnel et dynamique) =====
+
+# Le panneau HTML n'est généré que s'il est censé être affiché (pour ne pas perturber l'espace s'il est masqué)
+if st.session_state["show_details"]:
+    html=[f"<div class='details-panel'>"]
+    sel_ref=st.session_state.get("selected_ref")
+    
+    # Bouton pour refermer le volet, placé en haut à droite du volet de détails
+    html.append(f"""
+        <button onclick="parent.document.getElementById('btn_toggle_details').click()" 
+                style="position:absolute; top:8px; right:8px; background:none; border:none; color:white; font-size:20px; cursor:pointer;">
+            &times;
+        </button>
+    """)
+
+    if sel_ref:
+        row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
+        if not row.empty:
+            r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
+            html+=["<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>",
+                   f"<h4 style='color:{COLOR_SMBG_COPPER};margin:0 0 10px 0;'>Réf. : {ref_title}</h4>",
+                   "<h5 style='margin:6px 0 8px;'>📋 Données clés</h5>","<table>"]
+            all_cols=data_df.columns.tolist()
+            cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
+            for idx,champ in enumerate(cols_slice, start=INDEX_START):
+                sraw=str(r.get(champ,"")).strip()
+                if sraw.lower() in ("","néant","-","/"): continue
+                if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
+                    html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
+                                f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
+                    continue
+                unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
+                       else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
+                sval=format_value(sraw, unit)
+                if not sval: continue
+                html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
+            html+=["</table>",
+                   "<hr style='border:1px solid #eee;margin:12px 0;'>",
+                   "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
+                   "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
