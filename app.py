@@ -256,7 +256,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Mise à jour de la détection de clic) =====
+# ===== CARTE (Logique de détection de clic améliorée) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -287,21 +287,40 @@ if not pins_df.empty:
     for _,r in pins_df.iterrows():
         add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
 
-# On demande à Streamlit non seulement le dernier objet cliqué (last_object_clicked), 
-# mais aussi les coordonnées du dernier clic (last_click), qui sont plus fiables.
-map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked", "last_click"], key="map")
+map_output = st_folium(
+    m, 
+    height=MAP_HEIGHT, 
+    width="100%", 
+    returned_objects=["last_object_clicked", "last_click"], # Récupération des deux objets de clic
+    key="map"
+)
 
 ref_guess = None
+coords_to_check = []
 
 if map_output:
-    # --- 1. Tentative par coordonnées (La plus fiable) ---
+    # 1. Tenter par les coordonnées du dernier clic (souvent le centre du marqueur)
     if map_output.get("last_click"):
-        click_coords = map_output["last_click"]
-        clicked_lat = click_coords.get("lat")
-        clicked_lon = click_coords.get("lng")
+        coords_to_check.append({
+            "lat": map_output["last_click"].get("lat"),
+            "lng": map_output["last_click"].get("lng")
+        })
+    
+    # 2. Tenter par les coordonnées de l'objet cliqué (le marqueur lui-même)
+    if map_output.get("last_object_clicked"):
+        obj = map_output["last_object_clicked"]
+        coords_to_check.append({
+            "lat": obj.get("lat"),
+            "lng": obj.get("lng")
+        })
+
+    # 3. Vérifier les coordonnées trouvées dans le DataFrame filtré
+    for coords in coords_to_check:
+        clicked_lat = coords.get("lat")
+        clicked_lon = coords.get("lng")
         
         if clicked_lat is not None and clicked_lon is not None:
-            # Chercher le pin le plus proche dans pins_df (tolérance d'arrondi à 5 décimales)
+            # Recherche de l'annonce par coordonnées exactes (arrondies à 5 décimales)
             clicked_rows = pins_df[
                 (pins_df[LAT_COL].astype(float).round(5) == round(clicked_lat, 5)) &
                 (pins_df[LON_COL].astype(float).round(5) == round(clicked_lon, 5))
@@ -309,11 +328,11 @@ if map_output:
             
             if not clicked_rows.empty:
                 ref_guess = clicked_rows.iloc[0][REF_COL]
+                break # Référence trouvée, on arrête la recherche
 
-    # --- 2. Tentative par last_object_clicked (Solution de secours) ---
+    # 4. Fallback: Ancienne méthode de lecture du HTML du popup
     if ref_guess is None and map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
-        
         for k in ("popup", "popup_html"):
             if k in obj and obj[k]:
                 txt = str(obj[k])
@@ -321,11 +340,6 @@ if map_output:
                 mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
                 if mref:
                     ref_guess = mref.group(1)
-                    break
-                # Fallback sur le texte (seulement si la référence est propre)
-                text_content = re.sub(r"<.*?>","",txt).strip()
-                if text_content:
-                    ref_guess = text_content
                     break
     
     # Mise à jour de l'état si une référence a été trouvée
