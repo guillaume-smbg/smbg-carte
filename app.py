@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Neutralisation agressive) =====
+# ===== CSS global (Mise à jour pour l'indentation et nettoyage des anciennes règles) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -123,17 +123,14 @@ st.markdown(f"""
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* Neutralisation agressive de l'espace par défaut de Streamlit */
-[data-testid="stSidebarContent"] {{ padding-top: 0px !important; }}
-[data-testid="stSidebarContent"] > div:first-child {{ margin-top: 0px !important; }}
+/* Fix du padding Streamlit (revert partiel) */
 [data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
 
+/* AJUSTEMENT : Indentation départements à 30px pour un meilleur décalage */
+.dept-wrap {{ margin-left:30px !important; }}
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
-
-/* Indentation départements 15px */
-.dept-wrap {{ margin-left:15px; }}
 
 /* Icône main sur nos pins */
 .smbg-divicon {{ cursor:pointer; }}
@@ -162,10 +159,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Marge de 20px via HTML) =====
+# ===== SIDEBAR (Nettoyage de l'ancienne marge supérieure) =====
 with st.sidebar:
-    # AJOUT : Marge explicite de 20px en haut de la barre latérale pour prendre le relais
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True) 
+    # Suppression de la marge de 20px demandée précédemment
     
     b64 = logo_base64()
     if b64:
@@ -177,7 +173,7 @@ with st.sidebar:
     else:
         st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) # Espace entre logo et filtres (inchangé)
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) # Espace entre logo et filtres
 
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
@@ -195,6 +191,7 @@ with st.sidebar:
             depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
             for d in depts:
                 dk = f"chk_dept_{reg}_{d}"
+                # Le conteneur .dept-wrap est toujours utilisé ici
                 st.markdown("<div class='dept-wrap'>", unsafe_allow_html=True)
                 dchecked = st.checkbox(d, key=dk)
                 st.markdown("</div>", unsafe_allow_html=True)
