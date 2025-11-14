@@ -57,8 +57,8 @@ main.block-container, .block-container {{
     display: none;
 }}
 
-/* forcer l'iframe folium à prendre toute la hauteur */
-iframe[title="st_folium.smbg_map"] {{
+/* forcer tous les iframes (dont folium) à prendre toute la hauteur */
+iframe {{
     height: 100vh !important;
     width: 100% !important;
     border: none;
@@ -232,8 +232,10 @@ for _, row in df.iterrows():
 map_data = st_folium(
     m,
     width=None,
-    height=600,  # 100vh via CSS
+    height=600,  # sera forcé à 100vh par le CSS
     key="smbg_map",
+    return_clicks=True,
+    return_objects=True,
 )
 
 
@@ -255,6 +257,7 @@ if map_data is not None:
     obj_clicked = map_data.get("last_object_clicked")
     map_clicked = map_data.get("last_clicked")
 
+    # Clic sur un pin
     if obj_clicked is not None:
         lat_click = obj_clicked.get("lat")
         lon_click = obj_clicked.get("lng")
@@ -263,6 +266,7 @@ if map_data is not None:
             if ref is not None:
                 st.session_state.selected_ref = ref
                 st.session_state.drawer_open = True
+    # Clic sur la carte hors pin -> fermeture
     elif map_clicked is not None:
         st.session_state.selected_ref = None
         st.session_state.drawer_open = False
