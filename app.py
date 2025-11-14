@@ -23,6 +23,7 @@ LOGO_PATH = "assets/Logo bleu crop.png"
 # CHEMIN D'ACCÈS DU FICHIER :
 # Utilisation du nom du fichier que vous avez téléversé.
 # IMPORTANT : Ce fichier doit être présent dans le même dossier que l'application Streamlit.
+# J'utilise le nom de fichier CSV résultant de l'extraction de l'Excel:
 DATA_FILE_PATH = "Liste des lots.xlsx - Tableau recherche.csv" 
 
 # Configuration de la page Streamlit
@@ -153,14 +154,15 @@ def load_data():
     # 1. Tenter de lire le fichier
     try:
         # Tenter avec le point-virgule (le plus fréquent pour les exports français)
-        df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
+        # J'ai corrigé cette ligne pour utiliser la virgule qui est plus courante
+        df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
     except FileNotFoundError:
         st.error(f"Erreur : Le fichier de données '{DATA_FILE_PATH}' n'a pas été trouvé. Veuillez vérifier que le fichier est bien nommé ainsi.")
         return pd.DataFrame(), {}
     except Exception:
         try:
-            # Tenter avec la virgule (standard CSV)
-            df = pd.read_csv(DATA_FILE_PATH, sep=',', encoding='utf-8')
+            # Tenter avec le point-virgule (standard CSV français)
+            df = pd.read_csv(DATA_FILE_PATH, sep=';', encoding='utf-8')
         except Exception as e:
             st.error(f"Erreur lors de la lecture du fichier de données CSV: {e}")
             return pd.DataFrame(), {}
@@ -305,7 +307,7 @@ def load_data():
         'Taxe_Fonciere': 'Taxe foncière',
         'Taxe Foncière €/m²': 'Taxe foncière €/m²',
         'Marketing': 'Marketing',
-        'Marketing €/m²': 'Marketing €/m²', # Correction de la syntaxe
+        'Marketing €/m²': 'Marketing €/m²', 
         'Total (L+C+M)': 'Total (L+C+M)',
         'Honoraires': 'Honoraires',
         'Dépôt de garantie': 'Dépôt de garantie',
@@ -331,7 +333,7 @@ def load_data():
 df_data, DETAIL_COLUMNS_MAPPING = load_data()
 
 # Définir les valeurs min/max initiales
-# Utilisez min/max uniquement des données après NaN/0 removal pour des sliders pertinents
+# Utiliser 0 comme fallback si le DF est vide pour éviter des erreurs
 MIN_SURFACE = df_data['Surface_GLA'].min() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 0
 MAX_SURFACE = df_data['Surface_GLA'].max() if not df_data.empty and 'Surface_GLA' in df_data.columns and not df_data['Surface_GLA'].empty else 100
 MIN_LOYER = df_data['Loyer_Annuel'].min() if not df_data.empty and 'Loyer_Annuel' in df_data.columns and not df_data['Loyer_Annuel'].empty else 0
@@ -1020,7 +1022,22 @@ if lot_ref_clicked and lot_ref_clicked != st.session_state.filters.get('selected
     st.session_state.lot_ref_input_hack = "" # Réinitialiser le widget Streamlit
 
 # Afficher la carte Folium (occupe le reste de l'écran)
-folium_static(m, width=None, height=None)
+try:
+    # Hack pour garantir que Folium a une hauteur minimale définie pour le rendu
+    # On ajoute une balise qui sera retirée par Streamlit, mais qui force Folium à avoir des dimensions
+    # avant le rendu.
+    m.get_root().html.add_child(folium.Element('<div style="height: 100vh;"></div>'))
+    
+    # On utilise la hauteur par défaut de la carte si elle est définie, sinon 500px comme fallback
+    # La librairie Streamlit-Folium a besoin d'une valeur non nulle.
+    map_height = 500
+    
+    # Le hack est d'utiliser m._parent.height si disponible (ce qui n'est pas garanti)
+    # Pour contourner la limitation de 'None' + 'None' dans l'opérateur OR de la librairie:
+    
+    folium_static(m, width=None, height=map_height)
+except Exception as e:
+    st.error(f"Erreur lors de l'affichage de la carte : {e}. Si le problème persiste, cela est lié à la façon dont Streamlit et Folium gèrent les dimensions des iFrames.")
 
 
 # --- 10. PANNEAU DE DÉTAILS (VOLET DROIT) ---
@@ -1046,10 +1063,11 @@ if selected_ref:
             value = lot_data.get(internal_col)
             
             # Application des formatages si possible
-            if internal_col in ['Loyer_Annuel', 'Charges_Annuelles', 'Taxe_Fonciere', 'Loyer Mensuel', 'Charges Mensuelles', 'Marketing', 'Dépôt de garantie', 'GAPD', 'Gestion', 'Honoraires']:
+            if internal_col in ['Loyer_Annuel', 'Charges_Annuelles', 'Taxe_Fonciere', 'Loyer Mensuel', 'Charges Mensuelles', 'Marketing', 'Dépôt de garantie', 'GAPD', 'Gestion', 'Honoraires', 'Total (L+C+M)']:
                 formatted_value = format_currency(value)
-            elif internal_col in ['Surface_GLA', 'Surface utile']:
-                formatted_value = format_surface(value)
+            elif internal_col in ['Surface_GLA', 'Surface utile', 'Loyer €/m²', 'Charges €/m²', 'Taxe Foncière €/m²', 'Marketing €/m²']:
+                # Les coûts au m² peuvent avoir des décimales, utilisons un formatage simple
+                formatted_value = format_surface(value).replace(' m²', ' €/m²') if format_surface(value) else None
             else:
                 # Pour les autres champs (texte, lien, etc.)
                 formatted_value = str(value) if not pd.isna(value) else None
