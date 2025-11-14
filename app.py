@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour neutraliser le padding de Streamlit) =====
+# ===== CSS global (Neutralisation agressive) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -123,10 +123,11 @@ st.markdown(f"""
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* RÈGLE RENFORCÉE : Suppression de tout padding par défaut sur les conteneurs de la sidebar */
-[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
+/* Neutralisation agressive de l'espace par défaut de Streamlit */
 [data-testid="stSidebarContent"] {{ padding-top: 0px !important; }}
 [data-testid="stSidebarContent"] > div:first-child {{ margin-top: 0px !important; }}
+[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
+
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
@@ -161,10 +162,10 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Marge de 10px via HTML maintenue) =====
+# ===== SIDEBAR (Marge de 20px via HTML) =====
 with st.sidebar:
-    # Marge explicite de 10px en haut de la barre latérale
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) 
+    # AJOUT : Marge explicite de 20px en haut de la barre latérale pour prendre le relais
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True) 
     
     b64 = logo_base64()
     if b64:
@@ -176,7 +177,7 @@ with st.sidebar:
     else:
         st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) # Espace entre logo et filtres
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True) # Espace entre logo et filtres (inchangé)
 
     st.markdown("**Région / Département**")
     regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
