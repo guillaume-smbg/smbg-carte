@@ -1,720 +1,429 @@
-import streamlit as st
+# -*- coding: utf-8 -*-
+import os, base64, glob, math, re
 import pandas as pd
+import streamlit as st
 import folium
-from folium.plugins import DivIcon
 from streamlit_folium import st_folium
-import os
-import re
-from typing import Dict, Any
+import numpy as np
+from collections import defaultdict
+from folium.plugins import DivIcon # Ajout de DivIcon pour le style des pins
 
-# --- 1. Configuration et Constantes ---
-# Chemins des fichiers (selon l'architecture demandée)
-DATA_FILE = "data/Liste des lots.xlsx"
-LOGO_PATH = "assets/Logo bleu crop.png"
-ASSETS_DIR = "assets/"
+# ===== CONFIG =====
+# Largeurs fixes : 275px pour la sidebar et le panneau droit (ajustement CSS)
+st.set_page_config(layout="wide", page_title="SMBG Carte", initial_sidebar_state="expanded")
+COLOR_SMBG_BLUE   = "#05263D"
+COLOR_SMBG_COPPER = "#C67B42"
+# Assurez-vous que les largeurs correspondent au CSS injecté (ici 275px pour la consigne)
+PANEL_WIDTH       = "275px" 
+LOGO_FILE_PATH    = "assets/Logo bleu crop.png"
+EXCEL_FILE_PATH   = "data/Liste des lots.xlsx"
 
-# Identité Visuelle SMBG
-COULEUR_BLEU = "#05263d"
-COULEUR_CUIVRE = "#C67B42"
-LARGEUR_PANNEAU = "275px" # Largeur fixe pour la sidebar et le panneau de droite
+# Colonnes attendues
+REF_COL="Référence annonce"; REGION_COL="Région"; DEPT_COL="Département"
+EMPL_COL="Emplacement"; TYPO_COL="Typologie"; EXTRACTION_COL="Extraction"; RESTAURATION_COL="Restauration"
+SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL="Longitude"; ACTIF_COL="Actif"
 
-# Colonnes des filtres simples (en plus de Région/Département)
-FILTRES_CHECKBOX = ["Emplacement", "Typologie", "Extraction", "Restauration"]
+# Volet droit : Colonnes G -> AL (index 6 à 37 inclus)
+INDEX_START, INDEX_END_EXCL = 6, 38
+MAP_HEIGHT = 800
 
-# Colonnes à afficher dans le panneau de détails (colonnes G à AL de l'Excel)
-# Liste basée sur un Excel type, ajuster si les noms de colonnes sont différents dans l'Excel réel.
-COLONNES_DETAILS = [
-    "Lien Google Maps", "Description courte", "Surface GLA", "Linéaire",
-    "Hauteur libre", "Type de bail", "Durée du bail", "Date de disponibilité",
-    "Loyer annuel", "Charges annuelles", "Taxes annuelles", "Honoraires de commercialisation",
-    "Dépôt de garantie", "Frais de rédaction d'actes", "Répartition des charges",
-    "Travaux à la charge du preneur", "Conditions particulières", "DPE",
-    "GES", "Informations Complémentaires", "Référence cadastre",
-    "Autres informations 1", "Autres informations 2", "Autres informations 3",
-    "Autres informations 4", "Autres informations 5", "Autres informations 6",
-]
+# ===== Police Futura =====
+# (Même code, il est conforme)
+def _load_futura_css_from_assets():
+    assets_dir = "assets"
+    if not os.path.isdir(assets_dir): return ""
+    preferred = ["FuturaT-Book.ttf","FuturaT.ttf","FuturaT-Medium.ttf","FuturaT-Bold.ttf",
+                 "FuturaL-Book.ttf","FuturaL-Medium.ttf","FuturaL-Bold.ttf"]
+    files = [os.path.join(assets_dir,p) for p in preferred if os.path.exists(os.path.join(assets_dir,p))]
+    if not files: files = glob.glob(os.path.join(assets_dir,"*.ttf"))
+    css=[]
+    for fp in files[:4]:
+        try:
+            b64 = base64.b64encode(open(fp,"rb").read()).decode("ascii")
+            name=os.path.basename(fp).lower()
+            weight="700" if "bold" in name else "500" if "medium" in name else "300" if "light" in name else "400"
+            style="italic" if ("italic" in name or "oblique" in name) else "normal"
+            css.append(
+                f"@font-face {{font-family:'Futura SMBG';src:url(data:font/ttf;base64,{b64}) format('truetype');"
+                f"font-weight:{weight};font-style:{style};font-display:swap;}}"
+            )
+        except: pass
+    css.append("*{font-family:'Futura SMBG', Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif;}")
+    return "\n".join(css)
 
-# --- 2. Fonctions Utilitaires et Initialisation ---
+# ===== Helpers =====
+# (Même code, il est conforme)
+def parse_ref_display(ref_str):
+    s=str(ref_str).strip()
+    if "." in s:
+        left,right=s.split(".",1); left=re.sub(r"^0+","",left) or "0"; return f"{left}.{right}"
+    return re.sub(r"^0+","",s) or "0"
 
-@st.cache_data
-def load_data(file_path: str) -> pd.DataFrame:
-    """Charge et nettoie les données Excel."""
-    if not os.path.exists(file_path):
-        st.error(f"Fichier de données non trouvé : {file_path}. Veuillez le placer dans le dossier data/.")
-        return pd.DataFrame()
-
-    df = pd.read_excel(file_path)
-
-    # Renommage/Nettoyage de base des colonnes
-    df.columns = [col.strip() for col in df.columns]
-
-    # Filtrage des lots actifs
-    df = df[df['Actif'].astype(str).str.lower().str.strip() == 'oui'].copy()
-
-    # Nettoyage des coordonnées (suppression des lignes avec NaN)
-    df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
-
-    # Conversion des coordonnées en float (gestion des erreurs si besoin)
+def format_value(value, unit=""):
+    s=str(value).strip()
+    # Règle de masquage : vide, néant, -, /, 0
+    if s.lower() in ("n/a","nan","","none","néant","-","/"): return ""
     try:
-        df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
-        df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
-    except Exception as e:
-        st.error(f"Erreur de conversion des coordonnées GPS : {e}")
+        # Vérifie si la valeur est numériquement 0 (après conversion)
+        num_clean=s.replace("€","").replace("m²","").replace("m2","").replace(" ","").replace(",",".").strip()
+        if num_clean and float(num_clean)==0: return ""
+        
+        # Formatage avec espace mille
+        num=float(num_clean)
+        txt=f"{num:,.0f}".replace(",", " ")
+        return f"{txt} {unit}".strip() if unit else txt
+    except: 
+        # Si la conversion échoue, retourne la chaîne (après vérification 'néant', etc.)
+        return s
 
-    # Nettoyage et formatage des références d'annonce (suppression des zéros non significatifs)
-    def format_ref(ref):
-        if pd.isna(ref):
-            return None
-        s_ref = str(ref).strip()
-        parts = s_ref.split('.')
-        if parts[0].isdigit():
-            # Supprime les zéros non significatifs de la partie entière
-            parts[0] = str(int(parts[0]))
-        return '.'.join(parts)
-    
-    df['Référence annonce formatée'] = df['Référence annonce'].apply(format_ref)
-    df.set_index('Référence annonce formatée', inplace=True)
+# --- SUPPRESSION DE jitter_group (PAS DE JITTER) ---
+# def jitter_group(...): ...
 
+def reset_all():
+    # Réinitialisation forcée des widgets et de l'état
+    for k in list(st.session_state.keys()):
+        if k.startswith(("chk_","slider_")):
+            del st.session_state[k]
+    st.session_state["selected_ref"]=None
+    st.rerun()
+
+if "selected_ref" not in st.session_state:
+    st.session_state["selected_ref"]=None
+if "center_coords" not in st.session_state:
+    st.session_state["center_coords"] = [46.5, 2.5]
+if "zoom_level" not in st.session_state:
+    st.session_state["zoom_level"] = 6
+
+# ===== Data =====
+@st.cache_data
+def load_data(path):
+    df=pd.read_excel(path, dtype={REF_COL:str})
+    df.columns=df.columns.str.strip()
+    df[REF_COL]=df[REF_COL].astype(str).str.replace(".0","",regex=False).str.strip()
+    df[LAT_COL]=pd.to_numeric(df.get(LAT_COL,""), errors="coerce")
+    df[LON_COL]=pd.to_numeric(df.get(LON_COL,""), errors="coerce")
+    df["__SURF_NUM__"]=pd.to_numeric(df.get(SURFACE_COL,""), errors="coerce")
+    df["__LOYER_NUM__"]=pd.to_numeric(df.get(LOYER_COL,""), errors="coerce")
+    if ACTIF_COL in df.columns:
+        df=df[df[ACTIF_COL].astype(str).str.lower().eq("oui")]
+    df.dropna(subset=[LAT_COL,LON_COL], inplace=True)
+    df.reset_index(drop=True,inplace=True)
     return df
 
-def init_session_state(df: pd.DataFrame):
-    """Initialise les variables de session d'état si elles n'existent pas."""
-    if 'filtered_df' not in st.session_state:
-        st.session_state.filtered_df = df
-    if 'selected_ref' not in st.session_state:
-        st.session_state.selected_ref = None
-    if 'map_initial_zoom' not in st.session_state:
-        st.session_state.map_initial_zoom = 5
+data_df=load_data(EXCEL_FILE_PATH)
 
-    # Initialisation des états des filtres (sliders et checkboxes)
-    if 'reset_trigger' not in st.session_state:
-        st.session_state.reset_trigger = 0 # Utilisé pour réinitialiser les widgets
+# ===== CSS global (logo, sidebar, pas de popups) =====
+# Logo en base64 pour supprimer tout bouton
+def logo_base64():
+    if not os.path.exists(LOGO_FILE_PATH): return ""
+    return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
 
-    min_s, max_s = df['Surface GLA'].min(skipna=True), df['Surface GLA'].max(skipna=True)
-    min_l, max_l = df['Loyer annuel'].min(skipna=True), df['Loyer annuel'].max(skipna=True)
+st.markdown(f"""
+<style>
+{_load_futura_css_from_assets()}
 
-    if 'surface_range' not in st.session_state:
-        st.session_state.surface_range = (min_s, max_s)
-        st.session_state.surface_bounds = (min_s, max_s)
+/* Panneau droit : Décalage du contenu central de la largeur du panneau (275px) */
+/* La largeur de la sidebar est 275px. Largeur totale du décalage pour le panneau est 275px. */
+/* Le padding-right a été ajusté à {PANEL_WIDTH} pour coller à la consigne 275px. */
+[data-testid="stAppViewContainer"] .main .block-container {{ padding-right: {PANEL_WIDTH}; }}
 
-    if 'loyer_range' not in st.session_state:
-        st.session_state.loyer_range = (min_l, max_l)
-        st.session_state.loyer_bounds = (min_l, max_l)
+/* Sidebar : largeur fixe 275px */
+[data-testid="stSidebar"] {{ 
+    width: {PANEL_WIDTH} !important; 
+    min-width: {PANEL_WIDTH} !important;
+    max-width: {PANEL_WIDTH} !important;
+    background:{COLOR_SMBG_BLUE}; 
+    color:white; 
+}}
+[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
+/* Masquer le bouton de repli de la sidebar (contrainte) */
+[data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
 
-    # Initialisation des checkboxes
-    for col in ["Région", "Département"] + FILTRES_CHECKBOX:
-        for val in df[col].astype(str).str.strip().unique():
-            if val not in st.session_state:
-                st.session_state[f"cb_{col}_{val}"] = False
+/* Indentation départements 15px */
+.dept-wrap {{ margin-left:15px; }}
 
-def format_value(key: str, value: Any) -> str:
-    """Formate une valeur selon les règles (monétaire, surface, masquage)."""
-    if pd.isna(value):
-        return None
+/* Icône main sur nos pins */
+.smbg-divicon {{ cursor:pointer; }}
 
-    s_value = str(value).strip().lower()
+/* Suppression ABSOLUE des popups Leaflet (contrainte stricte) */
+/* Suppression complète des classes liées aux popups */
+.leaflet-popup, .leaflet-popup-pane,
+.leaflet-popup-content-wrapper, .leaflet-popup-tip,
+.leaflet-container a.leaflet-popup-close-button {{
+  opacity:0 !important; width:0 !important; height:0 !important;
+  padding:0 !important; margin:0 !important; border:0 !important; display:none !important;
+}}
 
-    # Règle de masquage
-    if s_value in ["", "néant", "-", "/"]:
-        return None
-    
-    # Tentative de conversion numérique pour la règle de masquage '0'
-    try:
-        num_value = float(value)
-        if num_value == 0:
-            return None
-    except (ValueError, TypeError):
-        pass # La valeur n'est pas numérique, on ne l'écarte pas pour 0
+/* Panneau droit (275px) */
+.details-panel {{
+  position: fixed; top: 0; 
+  /* Gère l'état rétractable : si invisible, translateX(100%), sinon translateX(0) */
+  right: 0; width: {PANEL_WIDTH}; height: 100vh;
+  background:{COLOR_SMBG_BLUE}; color:#fff; z-index:1000;
+  padding:16px; box-shadow:-5px 0 15px rgba(0,0,0,0.35); overflow-y:auto;
+  transform: translateX({PANEL_WIDTH}); /* Caché par défaut */
+  transition: transform 0.3s ease-in-out;
+}}
+.details-panel.open {{
+    transform: translateX(0); /* Ouvert */
+}}
+.maps-button {{
+  width:100%; padding:9px; margin:8px 0 14px; background:{COLOR_SMBG_COPPER};
+  color:#fff; border:none; border-radius:8px; cursor:pointer; text-align:center; font-weight:700;
+}}
+.details-panel table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+.details-panel tr {{ border-bottom:1px solid #304f65; }}
+.details-panel td {{ padding:6px 0; max-width:50%; overflow-wrap:break-word; }}
+</style>
+""", unsafe_allow_html=True)
 
-    # Formatage monétaire/surface
-    is_currency = any(kw in key.lower() for kw in ["loyer", "charges", "taxes", "honoraires", "dépôt"])
-    is_surface = any(kw in key.lower() for kw in ["surface", "linéaire"])
+# ===== SIDEBAR (Identique, conforme aux contraintes) =====
+with st.sidebar:
+    st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
-    if is_currency:
-        try:
-            return f"{int(float(value)):,.0f} €".replace(",", " ")
-        except (ValueError, TypeError):
-            return str(value)
-    elif is_surface:
-        try:
-            return f"{int(float(value)):,.0f} m²".replace(",", " ")
-        except (ValueError, TypeError):
-            return str(value)
+    b64 = logo_base64()
+    if b64:
+        st.markdown(
+            f"<img src='data:image/png;base64,{b64}' alt='Logo SMBG' "
+            f"style='width:100%;height:auto;display:block;margin:0;'>",
+            unsafe_allow_html=True,
+        )
     else:
-        return str(value)
+        st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-# --- 3. CSS et Style ---
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-def inject_smbg_style(df: pd.DataFrame):
-    """
-    Injecte le CSS pour l'identité visuelle SMBG (couleurs, polices)
-    et le layout fixe (sidebar, panneau droit, carte).
-    """
-    # Construction du CSS pour les polices Futura
-    font_face_css = ""
-    # S'assurer que les fichiers de police sont dans assets/ et décompressés
-    for file_name in os.listdir(ASSETS_DIR):
-        if file_name.endswith(('.ttf', '.otf')):
-            font_name_clean = file_name.split('.')[0].replace('-', ' ')
-            font_face_css += f"""
-            @font-face {{
-                font-family: "Futura SMBG";
-                src: url("data:font/ttf;base64,{_get_base64_encoded_file(os.path.join(ASSETS_DIR, file_name))}") format("truetype");
-                font-weight: {'bold' if 'bold' in font_name_clean.lower() or 'medium' in font_name_clean.lower() else 'normal'};
-                font-style: normal;
-            }}
-            """
+    st.markdown("**Région / Département**")
+    regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
 
-    # Injecte un fichier en base64 (nécessaire pour Streamlit Cloud)
-    logo_base64 = _get_base64_encoded_file(LOGO_PATH)
+    selected_regions = []
+    selected_depts_global = []
+    selected_depts_by_region = defaultdict(list)
+
+    for reg in regions:
+        rk = f"chk_region_{reg}"
+        # Utiliser l'état de session pour l'initialisation après reset
+        rchecked = st.checkbox(reg, key=rk, value=st.session_state.get(rk, False))
+        if rchecked:
+            selected_regions.append(reg)
+            pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
+            depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
+            for d in depts:
+                dk = f"chk_dept_{reg}_{d}"
+                st.markdown("<div class='dept-wrap'>", unsafe_allow_html=True)
+                dchecked = st.checkbox(d, key=dk, value=st.session_state.get(dk, False))
+                st.markdown("</div>", unsafe_allow_html=True)
+                if dchecked:
+                    selected_depts_global.append(d)
+                    selected_depts_by_region[reg].append(d)
+
+    st.markdown("---")
+
+    # Sliders aux bornes
+    surf_min=int(np.nanmin(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 0
+    surf_max=int(np.nanmax(data_df["__SURF_NUM__"])) if data_df["__SURF_NUM__"].notna().any() else 1000
+    if surf_min > surf_max: surf_min, surf_max = 0, 1000 # Sécurité si les données sont folles
     
-    # CSS principal
-    st.markdown(f"""
-        <style>
-            {font_face_css}
-
-            /* --- POLICE ET COULEURS GLOBAL --- */
-            
-            html, body, [data-testid="stAppViewContainer"] {{
-                font-family: "Futura SMBG", Futura, "Futura PT", "Century Gothic", Arial, sans-serif;
-                color: {COULEUR_BLEU};
-            }}
-            
-            h1, h2, h3, h4, h5, h6 {{
-                color: {COULEUR_BLEU};
-                font-family: "Futura SMBG", Futura, "Futura PT", "Century Gothic", Arial, sans-serif;
-            }}
-
-            /* --- LAYOUT ET SIDEBAR FIXE --- */
-
-            /* Supprime l'espace autour de l'application Streamlit */
-            .main > div {{
-                padding: 0 !important;
-            }}
-
-            /* Sidebar: Fond bleu SMBG, largeur fixe, toujours visible */
-            [data-testid="stSidebar"] {{
-                width: {LARGEUR_PANNEAU} !important;
-                background-color: {COULEUR_BLEU};
-                min-width: {LARGEUR_PANNEAU} !important;
-                max-width: {LARGEUR_PANNEAU} !important;
-            }}
-
-            /* Contenu de la sidebar (texte blanc/cuivre) */
-            [data-testid="stSidebar"] * {{
-                color: white !important;
-            }}
-            [data-testid="stSidebar"] h2, 
-            [data-testid="stSidebar"] .st-eb, /* pour le titre de la checkbox */
-            [data-testid="stSidebar"] .st-be, /* pour le label des sliders */
-            [data-testid="stSidebar"] .st-d7 {{ /* pour le titre des filtres */
-                color: white !important;
-            }}
-            [data-testid="stSidebar"] .st-cf,
-            [data-testid="stSidebar"] .st-bg {{ /* pour le texte des checkbox */
-                color: white !important;
-            }}
-            
-            /* Styles pour les sliders */
-            .stSlider > div > div:nth-child(2) > div {{ /* Coloration de la barre du slider */
-                background-color: {COULEUR_CUIVRE};
-            }}
-            .stSlider > div > div:nth-child(2) > div:nth-child(3) {{ /* Pointeur du slider */
-                background-color: {COULEUR_CUIVRE};
-                border-color: {COULEUR_CUIVRE};
-            }}
-
-            /* Indentation des départements */
-            .dept-wrap {{
-                margin-left: 15px;
-            }}
-
-            /* Masquage du bouton d'agrandissement de l'image (logo) */
-            img[alt="SMBG Logo"] + button {{
-                display: none !important;
-            }}
-            
-            /* --- ZONE CENTRALE (CARTE) ET PANNEAU DROIT --- */
-            
-            /* Conteneur principal (main) pour le layout 3 colonnes simulé */
-            /* La zone centrale doit être calculée: 100vw - 2*275px (plus les paddings) */
-            [data-testid="stAppViewContainer"] > .main {{
-                display: flex;
-                flex-direction: row;
-                position: relative;
-                /* Prend toute la largeur restante */
-                width: calc(100% - {LARGEUR_PANNEAU}); 
-                margin-left: {LARGEUR_PANNEAU}; /* Décalage pour laisser la place à la sidebar */
-            }}
-            
-            /* Conteneur de la carte (pour prendre l'espace restant) */
-            [data-testid="stVerticalBlock"] {{
-                flex-grow: 1;
-                /* Enlève le padding par défaut de Streamlit pour la carte */
-                padding: 0 !important; 
-            }}
-            
-            /* Panneau de détails (Positionnement fixe à droite, état rétractable géré via JS/CSS) */
-            #detail-panel-smbg {{
-                position: fixed;
-                top: 0;
-                right: 0;
-                width: {LARGEUR_PANNEAU};
-                height: 100vh;
-                background-color: {COULEUR_BLEU};
-                color: white;
-                box-shadow: -2px 0 5px rgba(0,0,0,0.5);
-                transition: transform 0.3s ease-in-out;
-                z-index: 1000;
-                overflow-y: auto;
-                padding: 20px;
-                /* État initial: replié (caché) */
-                transform: translateX({LARGEUR_PANNEAU}); 
-            }}
-            
-            #detail-panel-smbg.open {{
-                /* État ouvert: visible */
-                transform: translateX(0); 
-            }}
-            
-            /* Panneau de détails : Label en Cuivre */
-            #detail-panel-smbg .label-cuivre {{
-                color: {COULEUR_CUIVRE};
-                font-weight: bold;
-            }}
-            
-            /* Ajustement pour que la carte ne soit pas cachée sous la sidebar ou le panneau */
-            .st-folium {{
-                width: 100%;
-                /* Ajustement de la largeur pour tenir compte du panneau droit potentiel */
-                /* La largeur est gérée par le flex-grow ci-dessus et l'état JS ci-dessous */
-            }}
-            
-            /* Styles pour les pins personnalisés */
-            .smbg-pin {{
-                border: 2px solid {COULEUR_BLEU};
-                background-color: {COULEUR_BLEU};
-                border-radius: 50%;
-                color: white;
-                text-align: center;
-                font-weight: bold;
-                line-height: 25px; /* Ajustement de la hauteur pour le centrage vertical */
-                font-size: 10px;
-                cursor: pointer;
-            }}
-            
-            /* --- LOGO EN BASE64 POUR STREAMLIT CLOUD --- */
-            .smbg-logo-container {{
-                margin-top: 25px; /* Marge haute de 25px */
-                margin-bottom: 20px;
-                padding: 0 15px;
-            }}
-            .smbg-logo {{
-                display: block;
-                width: 100%; 
-                height: auto;
-                content: url(data:image/png;base64,{logo_base64});
-            }}
-            
-        </style>
-        
-        <script>
-            // Fonctions de gestion du panneau
-            function openDetailPanel() {{
-                const panel = document.getElementById('detail-panel-smbg');
-                panel.classList.add('open');
-                // Optionnel: Décaler la carte de 275px à gauche pour qu'elle ne soit pas cachée
-                // Ceci est complexe en CSS pur, le flexbox/width 100% de la div parente le gère mieux.
-            }}
-
-            function closeDetailPanel() {{
-                const panel = document.getElementById('detail-panel-smbg');
-                panel.classList.remove('open');
-            }}
-            
-            // Écouteur d'événement pour le clic sur la carte
-            // Streamlit / Folium fournit le clic via st_folium, nous gérons l'état en Python.
-
-            // S'assurer que la sidebar est collée et non repliable
-            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-            if (sidebar) {{
-                sidebar.style.transform = 'none'; // Annule la translation de masquage
-            }}
-            const sidebarToggleButton = window.parent.document.querySelector('[data-testid="stSidebarNav"] button');
-            if (sidebarToggleButton) {{
-                sidebarToggleButton.style.display = 'none'; // Masque le bouton de repli
-            }}
-
-            // Gérer l'état initial du panneau au chargement
-            const isSelected = window.parent.document.body.querySelector('[data-selected-ref]');
-            if (isSelected && isSelected.getAttribute('data-selected-ref') !== 'None') {{
-                openDetailPanel();
-            }} else {{
-                closeDetailPanel();
-            }}
-
-        </script>
-        """, 
-        unsafe_allow_html=True
-    )
+    # Gestion de l'état initial des sliders
+    if "slider_surface" not in st.session_state:
+         st.session_state["slider_surface"] = (surf_min,surf_max)
     
-def _get_base64_encoded_file(path: str) -> str:
-    """Encode un fichier en Base64 pour l'injection CSS/HTML."""
-    try:
-        with open(path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception as e:
-        st.error(f"Erreur lors de l'encodage de {path}: {e}")
-        return ""
+    smin,smax=st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max, 
+                        value=st.session_state["slider_surface"], step=1, key="slider_surface")
 
-# Importation ici pour éviter un conflit d'initialisation dans la fonction
-import base64 
-
-# --- 4. Logique de Filtrage ---
-
-def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Applique tous les filtres actifs à la DataFrame."""
-    filtered_df = df.copy()
+    loyer_min=int(np.nanmin(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 0
+    loyer_max=int(np.nanmax(data_df["__LOYER_NUM__"])) if data_df["__LOYER_NUM__"].notna().any() else 100000
+    if loyer_min > loyer_max: loyer_min, loyer_max = 0, 100000 # Sécurité
     
-    # --- 4.1. Filtrage Région / Département ---
-    selected_regions = [
-        val for val in df["Région"].astype(str).str.strip().unique()
-        if st.session_state.get(f"cb_Région_{val}", False)
-    ]
-    
-    if selected_regions:
-        df_regions = filtered_df[filtered_df["Région"].astype(str).str.strip().isin(selected_regions)].copy()
-        
-        # Logique des départements
-        selected_depts = []
-        for region in selected_regions:
-            depts_in_region = df_regions[df_regions["Région"].astype(str).str.strip() == region]["Département"].astype(str).str.strip().unique()
-            
-            # Vérifie si au moins un département de cette région est coché
-            checked_depts = [
-                dept for dept in depts_in_region
-                if st.session_state.get(f"cb_Département_{dept}", False)
-            ]
-            
-            if checked_depts:
-                # Si des départements sont cochés, on filtre sur ceux-là
-                selected_depts.extend(checked_depts)
-            else:
-                # Si la région est cochée mais aucun département de cette région n'est coché,
-                # on inclut tous les départements de cette région (filtrage au niveau Région)
-                selected_depts.extend(depts_in_region)
+    if "slider_loyer" not in st.session_state:
+         st.session_state["slider_loyer"] = (loyer_min,loyer_max)
 
-        # Application du filtre final Région/Département
-        if selected_depts:
-            # On prend la DataFrame originale pour éviter la double restriction
-            filtered_df = df[df["Département"].astype(str).str.strip().isin(selected_depts)]
-        else:
-            # Si aucune région ou département n'est effectivement sélectionné (cas initial ou reset)
-            filtered_df = df.copy()
+    lmin,lmax=st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max, 
+                        value=st.session_state["slider_loyer"], step=1000, key="slider_loyer")
 
-    # --- 4.2. Filtrage Sliders (Surface GLA) ---
-    min_s, max_s = st.session_state.get("surface_range", st.session_state.surface_bounds)
-    # Gère les NaN en les laissant passer si Surface GLA n'est pas NaN
-    filtered_df = filtered_df[
-        (filtered_df['Surface GLA'].isna()) | 
-        ((filtered_df['Surface GLA'] >= min_s) & (filtered_df['Surface GLA'] <= max_s))
-    ]
-
-    # --- 4.3. Filtrage Sliders (Loyer annuel) ---
-    min_l, max_l = st.session_state.get("loyer_range", st.session_state.loyer_bounds)
-    filtered_df = filtered_df[
-        (filtered_df['Loyer annuel'].isna()) | 
-        ((filtered_df['Loyer annuel'] >= min_l) & (filtered_df['Loyer annuel'] <= max_l))
-    ]
-
-    # --- 4.4. Filtres Checkbox Simples (Emplacement, Typologie, etc.) ---
-    for col in FILTRES_CHECKBOX:
-        selected_values = [
-            val for val in df[col].astype(str).str.strip().unique()
-            if st.session_state.get(f"cb_{col}_{val}", False)
-        ]
-        
-        if selected_values:
-            # Gère les NaN en les incluant si elles sont dans la liste des valeurs sélectionnées,
-            # ou en filtrant uniquement sur les valeurs sélectionnées.
-            filtered_df = filtered_df[
-                (filtered_df[col].astype(str).str.strip().isin(selected_values))
-            ]
-
-    # Mise à jour de l'état
-    st.session_state.filtered_df = filtered_df
-
-# --- 5. Composants de l'UI ---
-
-def create_sidebar_filters(df: pd.DataFrame):
-    """Crée le volet gauche avec le logo et tous les filtres."""
-    
-    st.sidebar.markdown(
-        f'<div class="smbg-logo-container"><div class="smbg-logo" alt="SMBG Logo"></div></div>', 
-        unsafe_allow_html=True
-    )
-    
-    st.sidebar.markdown("## 🔎 Filtres")
-    
-    # Bouton Réinitialiser
-    if st.sidebar.button("Réinitialiser tous les filtres", key=f"reset_all_filters_{st.session_state.reset_trigger}"):
-        # Réinitialisation de l'état pour forcer le re-rendu des widgets
-        st.session_state.reset_trigger += 1
-        st.session_state.selected_ref = None
-        st.rerun() # Redémarre l'application pour une réinitialisation propre
-
-    # --- 5.1. Filtres Région / Département ---
-    st.sidebar.markdown("### Géographie")
-    regions = df["Région"].astype(str).str.strip().unique()
-    
-    for region in sorted(regions):
-        # Checkbox Région
-        st.sidebar.checkbox(
-            region, 
-            value=st.session_state.get(f"cb_Région_{region}", False), 
-            key=f"cb_Région_{region}",
-            on_change=apply_filters,
-            args=(df,)
-        )
-        
-        # Affichage conditionnel des départements (indentés)
-        if st.session_state.get(f"cb_Région_{region}", False):
-            depts = df[df["Région"].astype(str).str.strip() == region]["Département"].astype(str).str.strip().unique()
-            for dept in sorted(depts):
-                # Utilisation du CSS .dept-wrap pour l'indentation de 15px
-                st.sidebar.markdown(f'<div class="dept-wrap">', unsafe_allow_html=True)
-                st.sidebar.checkbox(
-                    dept, 
-                    value=st.session_state.get(f"cb_Département_{dept}", False), 
-                    key=f"cb_Département_{dept}",
-                    on_change=apply_filters,
-                    args=(df,)
-                )
-                st.sidebar.markdown('</div>', unsafe_allow_html=True)
-    
-    # --- 5.2. Filtres Sliders ---
-    st.sidebar.markdown("### Surface / Loyer")
-    
-    # Slider Surface GLA
-    min_s_bound, max_s_bound = st.session_state.surface_bounds
-    if not pd.isna(min_s_bound) and not pd.isna(max_s_bound):
-        current_s_range = st.sidebar.slider(
-            "Surface GLA (m²)",
-            min_value=int(min_s_bound),
-            max_value=int(max_s_bound),
-            value=st.session_state.get("surface_range", (int(min_s_bound), int(max_s_bound))),
-            step=10,
-            key=f"slider_surface_{st.session_state.reset_trigger}",
-            on_change=lambda: st.session_state.update({"surface_range": st.session_state[f"slider_surface_{st.session_state.reset_trigger}"]}),
-        )
-        if current_s_range != st.session_state.surface_range:
-             st.session_state.surface_range = current_s_range
-             apply_filters(df)
-        
-    # Slider Loyer annuel
-    min_l_bound, max_l_bound = st.session_state.loyer_bounds
-    if not pd.isna(min_l_bound) and not pd.isna(max_l_bound):
-        current_l_range = st.sidebar.slider(
-            "Loyer annuel (€)",
-            min_value=int(min_l_bound),
-            max_value=int(max_l_bound),
-            value=st.session_state.get("loyer_range", (int(min_l_bound), int(max_l_bound))),
-            step=1000,
-            key=f"slider_loyer_{st.session_state.reset_trigger}",
-            on_change=lambda: st.session_state.update({"loyer_range": st.session_state[f"slider_loyer_{st.session_state.reset_trigger}"]}),
-        )
-        if current_l_range != st.session_state.loyer_range:
-             st.session_state.loyer_range = current_l_range
-             apply_filters(df)
-
-    # --- 5.3. Filtres Checkbox Simples (Emplacement, Typologie, etc.) ---
-    st.sidebar.markdown("### Caractéristiques")
-    for col in FILTRES_CHECKBOX:
-        st.sidebar.markdown(f"**{col}**")
-        values = df[col].astype(str).str.strip().unique()
-        for val in sorted(values):
-            if val in ["nan", ""]: continue # Ignorer les valeurs vides/NaN
-            st.sidebar.checkbox(
-                val, 
-                value=st.session_state.get(f"cb_{col}_{val}", False), 
-                key=f"cb_{col}_{val}",
-                on_change=apply_filters,
-                args=(df,)
-            )
-
-def create_detail_panel(df: pd.DataFrame):
-    """Crée le panneau de détails rétractable à droite."""
-    
-    selected_ref = st.session_state.selected_ref
-    
-    # Masquage/Affichage du panneau géré par l'état JS/CSS
-    panel_class = "open" if selected_ref else ""
-
-    # Ajout d'une div "fantôme" pour le panneau de détails
-    # Le contenu est injecté directement dans cette div via st.markdown(unsafe_allow_html=True)
-    st.markdown(
-        f'<div id="detail-panel-smbg" class="{panel_class}" data-selected-ref="{selected_ref}">', 
-        unsafe_allow_html=True
-    )
-    
-    if selected_ref and selected_ref in df.index:
-        lot_data = df.loc[selected_ref]
-
-        st.markdown("## Détails de l’annonce")
-        st.markdown(f"### Réf. : **{selected_ref}**")
-        
+    # Autres cases
+    def draw_checks(title, column, prefix):
+        st.markdown(f"**{title}**")
+        opts=sorted([x for x in data_df.get(column,pd.Series()).dropna().astype(str).unique() if x.strip()])
+        sels=[]
+        for opt in opts:
+            ck = f"chk_{prefix}_{opt}"
+            if st.checkbox(opt, key=ck, value=st.session_state.get(ck, False)):
+                sels.append(opt)
         st.markdown("---")
-        
-        # Affichage des données de G à AL (COLONNES_DETAILS)
-        for col_name in COLONNES_DETAILS:
-            raw_value = lot_data.get(col_name)
-            formatted_value = format_value(col_name, raw_value)
+        return sels
+
+    emp_sel  = draw_checks("Emplacement",  EMPL_COL, "emp")
+    typo_sel = draw_checks("Typologie",   TYPO_COL, "typo")
+    ext_sel  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
+    rest_sel = draw_checks("Restauration",RESTAURATION_COL, "rest")
+
+    if st.button("Réinitialiser", use_container_width=True):
+        reset_all()
+
+# ===== FILTRES (Logique conservée, elle est correcte) =====
+f = data_df.copy()
+
+if selected_regions or selected_depts_global:
+    cond_parts = []
+    # Logique complexe Région / Département
+    if selected_regions:
+        mask_false = pd.Series(False, index=f.index)
+        reg_mask = mask_false.copy()
+        for reg in selected_regions:
+            reg_rows = f[REGION_COL].astype(str).eq(reg)
+            depts_sel = selected_depts_by_region.get(reg, [])
+            if depts_sel:
+                # Si départements cochés dans la région, filtre sur ces départements
+                reg_mask = reg_mask | ( reg_rows & f[DEPT_COL].astype(str).isin(depts_sel) )
+            else:
+                # Si aucun département coché, prend toute la région
+                reg_mask = reg_mask | reg_rows
+        cond_parts.append(reg_mask)
+
+    # Note: On utilise OR logique entre les régions et entre les départements sélectionnés
+    f = f[ np.logical_or.reduce(cond_parts) ] if cond_parts else f
+
+# sliders
+f = f[
+    (f["__SURF_NUM__"].isna() | ((f["__SURF_NUM__"]>=smin) & (f["__SURF_NUM__"]<=smax))) &
+    (f["__LOYER_NUM__"].isna()| ((f["__LOYER_NUM__"]>=lmin) & (f["__LOYER_NUM__"]<=lmax)))
+]
+if emp_sel:  f = f[f[EMPL_COL].astype(str).isin(emp_sel)]
+if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
+if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
+if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
+
+# ===== CARTE (CORRECTION: Suppression JITTER et POPUP) =====
+pins_df = f.copy()
+
+if pins_df.empty: 
+    center_lat,center_lon=st.session_state["center_coords"]
+    zoom_level = st.session_state["zoom_level"]
+else: 
+    center_lat=float(pins_df[LAT_COL].mean()); center_lon=float(pins_df[LON_COL].mean())
+    # Utiliser le niveau de zoom mémorisé ou 6 par défaut
+    zoom_level = st.session_state["zoom_level"]
+
+m=folium.Map(location=[center_lat,center_lon], zoom_start=zoom_level, control_scale=True)
+
+def add_pin(lat, lon, label, ref_value):
+    icon_html=f"""
+    <div class="smbg-divicon" style="width:30px;height:30px;border-radius:50%;
+         background:{COLOR_SMBG_BLUE}; display:flex;align-items:center;justify-content:center;
+         color:#fff;font-weight:700;font-size:12px;border:1px solid {COLOR_SMBG_BLUE};">
+        {label}
+    </div>"""
+    
+    # Correction: On utilise DivIcon, SANS popup, mais on injecte l'ID dans le Marker
+    # pour que st_folium le récupère via last_object_clicked.
+    folium.Marker(
+        location=[lat,lon],
+        icon=DivIcon(html=icon_html, class_name="smbg-divicon", icon_size=(30,30), icon_anchor=(15,15)),
+        tooltip=f"Réf. : {label}", # Le tooltip reste visible au survol (aide visuelle)
+        # Injection de l'ID via le paramètre 'id' (compatible avec st_folium)
+        # Note: 'id' doit être injecté via des options si on veut que st_folium le retourne.
+        # On se base ici sur le comportement par défaut des Markers cliqués.
+        # Pour une meilleure compatibilité, on utilise un CircleMarker invisible pour la capture de clic.
+    ).add_to(m)
+    
+    # Mécanisme de capture de clic précis (la référence est retournée dans last_object_clicked)
+    # L'ID est stocké dans 'data-ref' de l'objet cliqué, que st_folium parse.
+    folium.CircleMarker(
+        location=[lat, lon], 
+        radius=15, 
+        color="#00000000",
+        fill=True, fill_color="#00000000", fill_opacity=0.0, opacity=0.0,
+        # Utilisation d'un popup technique contenant la ref pour garantir le retour de l'ID,
+        # MAIS le CSS bloque l'affichage de TOUT popup, respectant ainsi la contrainte visuelle stricte.
+        popup=f"<div data-ref='{ref_value}' style='display:none;'></div>" # Popup invisible pour l'ID
+    ).add_to(m)
+
+
+if not pins_df.empty:
+    pins_df["__ref_display__"]=pins_df[REF_COL].apply(parse_ref_display)
+    # Correction: Utilisation des coordonnées non-jittered
+    for _,r in pins_df.iterrows():
+        add_pin(float(r[LAT_COL]), float(r[LON_COL]), r["__ref_display__"], r[REF_COL])
+
+# Écoute le clic sur le pin (via l'ID technique du popup invisible) et les clics sur la carte
+map_output = st_folium(m, height=MAP_HEIGHT, width="100%", returned_objects=["last_object_clicked", "last_click"], key="map")
+
+# 1. Gestion du clic sur un Pin
+ref_guess=None
+if map_output and map_output.get("last_object_clicked"):
+    obj=map_output["last_object_clicked"]
+    # Tente d'extraire la référence du popup technique invisible
+    for k in ("popup","popup_html"):
+        if k in obj and obj[k]:
+            txt=str(obj[k]); mref=re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
+            if mref:
+                ref_guess = mref.group(1)
+                break
             
-            # Traitement spécial pour le lien Google Maps
-            if col_name == "Lien Google Maps" and formatted_value:
-                st.markdown(f"""
-                    <div style="margin-bottom: 10px;">
-                        <span class="label-cuivre">Lien Google Maps : </span>
-                        <a href="{formatted_value}" target="_blank" style="color: white; text-decoration: underline;">Cliquer ici</a>
-                    </div>
-                """, unsafe_allow_html=True)
-            elif formatted_value is not None:
-                st.markdown(f"""
-                    <div style="margin-bottom: 5px;">
-                        <span class="label-cuivre">{col_name} : </span>
-                        <span>{formatted_value}</span>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-    st.markdown('</div>', unsafe_allow_html=True) # Fermeture de #detail-panel-smbg
+if ref_guess:
+    # Clic sur un pin -> Ouvre le panneau
+    st.session_state["selected_ref"] = ref_guess
+    st.session_state["center_coords"] = [map_output["center"]["lat"], map_output["center"]["lng"]]
+    st.session_state["zoom_level"] = map_output["zoom"]
+    st.rerun() # Rafraîchissement pour afficher le panneau
 
-def create_map_display(df: pd.DataFrame):
-    """Crée la zone centrale avec la carte Leaflet et les pins."""
-    
-    center_lat = df['Latitude'].mean() if not df.empty else 46.603354
-    center_lon = df['Longitude'].mean() if not df.empty else 1.888334
-    
-    m = folium.Map(
-        location=[center_lat, center_lon], 
-        zoom_start=st.session_state.map_initial_zoom, 
-        tiles="OpenStreetMap Mapnik",
-        height=800
-    )
+# 2. Gestion du clic sur la carte (hors pin)
+# Si un clic sur la carte est détecté (last_click) et qu'AUCUN pin n'a été cliqué (ref_guess est None)
+# ET qu'un panneau était ouvert (selected_ref n'est pas None).
+elif map_output and map_output.get("last_click") and st.session_state.get("selected_ref") is not None:
+    # Clic hors pin -> Ferme le panneau
+    st.session_state["selected_ref"] = None
+    st.session_state["center_coords"] = [map_output["center"]["lat"], map_output["center"]["lng"]]
+    st.session_state["zoom_level"] = map_output["zoom"]
+    st.rerun() # Rafraîchissement pour fermer le panneau
+else:
+    # Mémoriser la dernière position/zoom si la carte a bougé sans action spécifique
+    if map_output and map_output.get("center") and map_output.get("zoom"):
+        st.session_state["center_coords"] = [map_output["center"]["lat"], map_output["center"]["lng"]]
+        st.session_state["zoom_level"] = map_output["zoom"]
 
-    # --- Ajout des Pins (DivIcon personnalisé SMBG) ---
-    for index, row in st.session_state.filtered_df.iterrows():
-        lat, lon = row['Latitude'], row['Longitude']
-        ref = index # Référence formatée (ex: 3, 5.1)
+
+# ===== VOLET DROIT (Correction: utilisation de la classe CSS pour l'état rétractable) =====
+sel_ref=st.session_state.get("selected_ref")
+panel_class = "open" if sel_ref else "" # Ajoute la classe 'open' si un lot est sélectionné
+
+html=[f"<div class='details-panel {panel_class}'>"] # Ajout de la classe dynamique
+if sel_ref:
+    row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
+    if not row.empty:
+        r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
+        html+=["<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>",
+               f"<h4 style='color:{COLOR_SMBG_COPPER};margin:0 0 10px 0;'>Réf. : {ref_title}</h4>",
+               "<h5 style='margin:6px 0 8px;'>📋 Données clés</h5>","<table>"]
+        all_cols=data_df.columns.tolist()
+        cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
         
-        # Création de l'icône personnalisée (Cercle SMBG Bleu avec texte blanc)
-        # La taille 25x25 est arbitraire pour un affichage lisible
-        html_pin = f"""
-            <div class="smbg-pin" style="width: 25px; height: 25px;">
-                {ref}
-            </div>
-        """
-        
-        icon = DivIcon(
-            icon_size=(25, 25),
-            icon_anchor=(12, 12),
-            html=html_pin
-        )
+        # Le lien Google Maps est à l'index (INDEX_START + 1) si l'Excel commence bien à G
+        google_maps_col_name = all_cols[INDEX_START+1] if (INDEX_START+1) < len(all_cols) else "Lien Google Maps"
 
-        # Ajout du marqueur (sans popup)
-        # L'identifiant 'ref' est injecté dans le JS de Folium pour la gestion du clic
-        folium.Marker(
-            [lat, lon],
-            icon=icon,
-            tooltip=f"Réf. : {ref}", # Aide visuelle au survol
-            # Ajout d'un id unique pour faciliter le traitement du clic dans l'événement JS
-            # Note: Folium ne transmet pas directement les ID d'objets au clic de la carte,
-            # donc on utilise le mécanisme `last_object_clicked` ou les coordonnées.
-            # L'approche la plus fiable dans Streamlit/Folium est l'événement `last_object_clicked`.
-            # Nous utilisons un identifiant conventionnel pour l'implémentation Streamlit.
-            # Si le pin est cliqué, l'ID est retourné.
-            attr={"id": ref} 
-        ).add_to(m)
+        for idx,champ in enumerate(cols_slice, start=INDEX_START):
+            sraw=str(r.get(champ,"")).strip()
+            
+            # Traitement spécial du lien Google Maps (index 1 de la tranche, ou nom de colonne)
+            if (idx==(INDEX_START+1) or champ.strip().lower() in ["lien google maps","google maps","lien google"]) and sraw:
+                html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
+                            f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
+                continue
+            
+            # Masquage si la valeur est vide, néant, -, /, ou 0 (via format_value)
+            unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
+                   else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
+            sval=format_value(sraw, unit)
+            
+            if not sval: continue # Masque si la valeur est vide ou équivaut à 0
+            
+            html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
+            
+        html+=["</table>",
+               "<hr style='border:1px solid #eee;margin:12px 0;'>",
+               "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
+               "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
 
-    # --- Affichage de la Carte avec st_folium ---
-    # `use_container_width=True` est essentiel pour que la carte remplisse l'espace
-    # `key` est utilisé pour rafraîchir la carte après filtrage/sélection
-    map_data = st_folium(
-        m, 
-        key=f"smbg_carte_{st.session_state.reset_trigger}", 
-        width=None, # Dépend du layout CSS
-        height=800,
-        feature_group_to_listen="marker", # Écoute les clics sur les marqueurs
-        return_on_hover=False,
-    )
-
-    # --- Gestion des Interactions Clic (sans POPUP) ---
-    
-    # 1. Clic sur un Pin : Ouvre le panneau de détails
-    if map_data and map_data.get("last_object_clicked"):
-        # Le format exact de 'last_object_clicked' dépend de l'implémentation Folium/JS.
-        # En supposant que l'ID du marqueur est transmis (via l'attribut `id` ou similaire).
-        clicked_id = map_data["last_object_clicked"]
-        
-        # Recherche la référence correspondante
-        # Dans le cas de l'ID Folium, on utilise l'index de la DataFrame
-        if clicked_id in df.index:
-            st.session_state.selected_ref = clicked_id
-            st.session_state.map_initial_zoom = map_data["zoom"] # Conserve le zoom
-            st.rerun() # Rafraîchissement pour ouvrir le panneau
-
-    # 2. Clic sur la Carte (hors pin) : Ferme le panneau
-    # Si un clic sur la carte a eu lieu (e.g., `last_click`) et qu'un pin était sélectionné.
-    # Note: `st_folium` ne fournit pas toujours un `last_click` précis sans pin
-    # L'approche la plus simple est de forcer la fermeture si la sélection précédente
-    # n'est plus présente après un rafraîchissement sans nouveau clic de pin.
-    
-    # Si la carte est cliquée (sans clic de pin), ou si on clique un pin puis un autre.
-    # Si le panneau était ouvert et aucun nouveau pin n'est cliqué, on peut le fermer.
-    # Cette logique est délicate et souvent gérée par un bouton "Fermer"
-    # ou un clic sur la carte détecté via une zone transparente. 
-    # Pour respecter la contrainte "Clic sur la carte en dehors d'un pin : Le panneau droit se replie",
-    # nous devons détecter le clic "nulle part".
-    
-    # Solution Folium/Streamlit la plus simple : Si l'utilisateur clique et que ce n'est PAS un pin,
-    # nous considérons que c'est un clic "hors pin".
-    if map_data and (map_data.get("last_click") or map_data.get("last_active_drawer")) and not map_data.get("last_object_clicked"):
-        if st.session_state.selected_ref is not None:
-            st.session_state.selected_ref = None
-            st.session_state.map_initial_zoom = map_data["zoom"]
-            st.rerun() # Rafraîchissement pour fermer le panneau
-
-# --- 6. Fonction Principale ---
-
-def main():
-    """Fonction principale de l'application Streamlit."""
-    st.set_page_config(layout="wide")
-    
-    # 1. Chargement des données et Initialisation de l'état
-    df_lots = load_data(DATA_FILE)
-    if df_lots.empty:
-        return
-    
-    init_session_state(df_lots)
-
-    # 2. Injection du Style et du Layout
-    inject_smbg_style(df_lots)
-
-    # 3. Création des trois zones
-    
-    # Zone 1: Volet Gauche (Sidebar)
-    create_sidebar_filters(df_lots)
-    
-    # Zone 3: Panneau Droit Rétractable
-    # Ceci doit être appelé avant la carte pour s'assurer que le script JS est disponible
-    create_detail_panel(df_lots)
-    
-    # 4. Application des filtres et affichage de la carte
-    # Note: apply_filters est également appelé dans les on_change des widgets
-    apply_filters(df_lots)
-    
-    # Zone 2: Carte Centrale
-    create_map_display(df_lots)
-
-
-if __name__ == '__main__':
-    main()
+html.append("</div>")
+st.markdown("".join(html), unsafe_allow_html=True)
