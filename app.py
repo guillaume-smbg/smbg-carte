@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour l'indentation renforcée) =====
+# ===== CSS global (Simplifié pour éviter les conflits et assurer l'affichage du volet droit) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -123,25 +123,8 @@ st.markdown(f"""
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* Fix du padding Streamlit (revert partiel) */
-[data-testid="stSidebar"] .block-container {{ padding-top:0 !important; }}
-
-/* AJUSTEMENT RENFORCÉ : Indentation départements à 30px */
-.dept-wrap {{ 
-    margin-left: 30px !important; 
-}}
-
-/* Neutralise le padding interne des cases à cocher Streamlit pour les forcer à respecter le margin-left du .dept-wrap */
-.dept-wrap [data-testid="stBlock"] {{ 
-    margin-left: 0px !important; 
-    padding-left: 0px !important; 
-}}
-/* Cible l'ancienne classe Streamlit au cas où */
-.dept-wrap .stCheckbox {{
-    padding-left: 0px !important;
-    margin-left: 0px !important;
-}}
-
+/* Neutraliser le padding par défaut en haut de la sidebar pour éviter le vide (si l'utilisateur veut un logo haut) */
+[data-testid="stSidebarContent"] {{ padding-top: 0px !important; }}
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
@@ -173,8 +156,11 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Code inchangé) =====
+# ===== SIDEBAR (Mise à jour pour l'indentation des départements) =====
 with st.sidebar:
+    
+    # Ajout d'une marge de 10px en haut pour éviter de coller le bord (choix esthétique)
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True) 
     
     b64 = logo_base64()
     if b64:
@@ -204,8 +190,8 @@ with st.sidebar:
             depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
             for d in depts:
                 dk = f"chk_dept_{reg}_{d}"
-                # Le conteneur .dept-wrap est toujours utilisé ici
-                st.markdown("<div class='dept-wrap'>", unsafe_allow_html=True)
+                # Indentation forcée via style inline sur le conteneur du checkbox
+                st.markdown("<div style='margin-left: 30px;'>", unsafe_allow_html=True)
                 dchecked = st.checkbox(d, key=dk)
                 st.markdown("</div>", unsafe_allow_html=True)
                 if dchecked:
@@ -364,7 +350,7 @@ if map_output:
         st.session_state["selected_ref"] = ref_guess
 
 
-# ===== VOLET DROIT (Code inchangé) =====
+# ===== VOLET DROIT (Fonctionnel) =====
 html=[f"<div class='details-panel'>"]
 sel_ref=st.session_state.get("selected_ref")
 
@@ -380,7 +366,7 @@ if sel_ref:
         cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
         for idx,champ in enumerate(cols_slice, start=INDEX_START):
             sraw=str(r.get(champ,"")).strip()
-            if sraw.lower() in ("","néant","-","/") or (pd.isna(value) and isinstance(value, float)): continue
+            if sraw.lower() in ("","néant","-","/") or (pd.isna(r.get(champ)) and isinstance(r.get(champ), float)): continue
             if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
                 html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
                             f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
