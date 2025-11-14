@@ -1,6 +1,6 @@
-streamlit
-pandas
+streamlit>=1.30.0
+pandas>=2.0.0
 requests
-openpyxl
-folium
-streamlit-folium
+openpyxl>=3.0.0
+folium>=0.15.0
+streamlit-folium>=0.17.0
