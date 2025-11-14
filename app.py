@@ -68,7 +68,7 @@ def format_value(value, unit=""):
 
 def reset_all():
     st.session_state.clear()
-    st.session_state["show_details"] = False # Masqué après réinitialisation
+    st.session_state["show_details"] = False
     st.rerun()
 
 def toggle_details():
@@ -168,10 +168,8 @@ st.markdown(f"""
 
 # ===== SIDEBAR (Code inchangé dans la structure) =====
 with st.sidebar:
-    # marge fixe de 25 px en haut
     st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
-    # Logo via base64 (aucun bouton d’agrandissement)
     b64 = logo_base64()
     if b64:
         st.markdown(
@@ -182,7 +180,6 @@ with st.sidebar:
     else:
         st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-    # petite marge de 10 px sous le logo, pas plus
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     st.markdown("**Région / Département**")
@@ -318,9 +315,9 @@ if map_output and map_output.get("last_object_clicked"):
             break
     if ref_guess:
         st.session_state["selected_ref"]=ref_guess
-        # FIX #2 : Affiche le panneau après un clic sur un marqueur
+        # FIX : Affiche le panneau après un clic sur un marqueur
         st.session_state["show_details"] = True
-        st.rerun() # Rerun est nécessaire pour appliquer immédiatement le changement de CSS
+        # st.rerun() a été retiré, car le clic sur la carte déclenche déjà le relancement complet.
 
 # ===== VOLET DROIT (Code inchangé) =====
 if st.session_state["show_details"]:
