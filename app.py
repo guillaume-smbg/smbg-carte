@@ -67,14 +67,14 @@ def format_value(value, unit=""):
         return s
 
 def reset_all():
-    # Décocher/réinitialiser tous les filtres (cases et sliders)
-    # L'utilisation de st.session_state.clear() est la façon la plus simple de réinitialiser tous les widgets.
+    # Décocher/réinitialiser tous les filtres
     st.session_state.clear() 
     st.rerun()
 
 # Initialisation de l'état
 if "selected_ref" not in st.session_state:
-    st.session_state["selected_ref"]=None
+    # Rétablissement du comportement normal : le panneau est masqué au démarrage.
+    st.session_state["selected_ref"] = None
 
 # ===== Data =====
 @st.cache_data
@@ -120,7 +120,7 @@ st.markdown(f"""
 /* Indentation départements 15px */
 .dept-wrap {{ margin-left:15px; }}
 
-/* --- PINS CORRIGÉS : STYLE CIRCULAIRE BLEU SMBG (L'ÉLÉMENT MANQUANT) --- */
+/* --- PINS CORRIGÉS : STYLE CIRCULAIRE BLEU SMBG --- */
 
 /* Icône main au survol */
 .smbg-divicon {{ cursor:pointer; }}
@@ -132,9 +132,9 @@ st.markdown(f"""
     color:#fff;font-weight:700;font-size:12px;border:1px solid #001a27;
     box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
 }}
-/* -------------------------------------------------------------------------- */
+/* ------------------------------------------------ */
 
-/* Suppression VISUELLE TOTALE des popups Leaflet (pour gérer le clic sans interface) */
+/* Suppression VISUELLE TOTALE des popups Leaflet */
 .leaflet-popup, .leaflet-popup-pane,
 .leaflet-popup-content-wrapper, .leaflet-popup-tip,
 .leaflet-container a.leaflet-popup-close-button {{
@@ -360,7 +360,7 @@ if sel_ref:
             
             sval=format_value(sraw, unit)
             
-            if not sval: continue # Masqué si vide, néant, -, /, 0
+            if not sval: continue 
             
             html_content.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
         
