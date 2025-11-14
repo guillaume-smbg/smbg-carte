@@ -159,8 +159,10 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Code inchangé) =====
+# ===== SIDEBAR (Retrait du div de 25px, car géré par CSS) =====
 with st.sidebar:
+    # Retiré : st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+
     b64 = logo_base64()
     if b64:
         st.markdown(
@@ -258,7 +260,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Code inchangé) =====
+# ===== CARTE (Logique de détection de clic améliorée - Code inchangé) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -293,7 +295,7 @@ map_output = st_folium(
     m, 
     height=MAP_HEIGHT, 
     width="100%", 
-    returned_objects=["last_object_clicked", "last_click"], 
+    returned_objects=["last_object_clicked", "last_click"], # Récupération des deux objets de clic
     key="map"
 )
 
@@ -311,6 +313,7 @@ if map_output:
     # 2. Tenter par les coordonnées de l'objet cliqué (le marqueur lui-même)
     if map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
+        # Ajout des coordonnées du marqueur ou objet cliqué
         if obj.get("lat") is not None and obj.get("lng") is not None:
              coords_to_check.append({
                 "lat": obj.get("lat"),
@@ -323,6 +326,7 @@ if map_output:
         clicked_lon = coords.get("lng")
         
         if clicked_lat is not None and clicked_lon is not None:
+            # Recherche de l'annonce par coordonnées exactes (arrondies à 5 décimales)
             clicked_rows = pins_df[
                 (pins_df[LAT_COL].astype(float).round(5) == round(clicked_lat, 5)) &
                 (pins_df[LON_COL].astype(float).round(5) == round(clicked_lon, 5))
@@ -330,7 +334,7 @@ if map_output:
             
             if not clicked_rows.empty:
                 ref_guess = clicked_rows.iloc[0][REF_COL]
-                break
+                break # Référence trouvée, on arrête la recherche
 
     # 4. Fallback: Ancienne méthode de lecture du HTML du popup
     if ref_guess is None and map_output.get("last_object_clicked"):
@@ -338,6 +342,7 @@ if map_output:
         for k in ("popup", "popup_html"):
             if k in obj and obj[k]:
                 txt = str(obj[k])
+                # Recherche de l'attribut data-ref
                 mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
                 if mref:
                     ref_guess = mref.group(1)
