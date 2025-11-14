@@ -106,7 +106,7 @@ lmin, lmax = 0, 100000
 # Calcul de la marge droite statique
 right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Mise à jour pour la marge de 25px) =====
+# ===== CSS global (Mise à jour pour la marge de 10px) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -123,8 +123,8 @@ st.markdown(f"""
 /* Sidebar : Fond bleu, titres cuivre */
 [data-testid="stSidebar"] {{ background:{COLOR_SMBG_BLUE}; color:white; }}
 
-/* AJUSTEMENT : Marge haute de 25px pour le logo et les filtres */
-[data-testid="stSidebar"] .block-container {{ padding-top:25px !important; }}
+/* AJUSTEMENT : Marge haute de 10px pour le logo et les filtres */
+[data-testid="stSidebar"] .block-container {{ padding-top:10px !important; }}
 
 /* Sidebar : aucun bouton collapse */
 [data-testid="stSidebarCollapseButton"], button[kind="headerNoPadding"] {{ display:none !important; }}
@@ -159,10 +159,8 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Retrait du div de 25px, car géré par CSS) =====
+# ===== SIDEBAR (Code inchangé) =====
 with st.sidebar:
-    # Retiré : st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
-
     b64 = logo_base64()
     if b64:
         st.markdown(
@@ -260,7 +258,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Logique de détection de clic améliorée - Code inchangé) =====
+# ===== CARTE (Code inchangé) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -295,7 +293,7 @@ map_output = st_folium(
     m, 
     height=MAP_HEIGHT, 
     width="100%", 
-    returned_objects=["last_object_clicked", "last_click"], # Récupération des deux objets de clic
+    returned_objects=["last_object_clicked", "last_click"], 
     key="map"
 )
 
@@ -313,7 +311,6 @@ if map_output:
     # 2. Tenter par les coordonnées de l'objet cliqué (le marqueur lui-même)
     if map_output.get("last_object_clicked"):
         obj = map_output["last_object_clicked"]
-        # Ajout des coordonnées du marqueur ou objet cliqué
         if obj.get("lat") is not None and obj.get("lng") is not None:
              coords_to_check.append({
                 "lat": obj.get("lat"),
@@ -326,7 +323,6 @@ if map_output:
         clicked_lon = coords.get("lng")
         
         if clicked_lat is not None and clicked_lon is not None:
-            # Recherche de l'annonce par coordonnées exactes (arrondies à 5 décimales)
             clicked_rows = pins_df[
                 (pins_df[LAT_COL].astype(float).round(5) == round(clicked_lat, 5)) &
                 (pins_df[LON_COL].astype(float).round(5) == round(clicked_lon, 5))
@@ -334,7 +330,7 @@ if map_output:
             
             if not clicked_rows.empty:
                 ref_guess = clicked_rows.iloc[0][REF_COL]
-                break # Référence trouvée, on arrête la recherche
+                break
 
     # 4. Fallback: Ancienne méthode de lecture du HTML du popup
     if ref_guess is None and map_output.get("last_object_clicked"):
@@ -342,7 +338,6 @@ if map_output:
         for k in ("popup", "popup_html"):
             if k in obj and obj[k]:
                 txt = str(obj[k])
-                # Recherche de l'attribut data-ref
                 mref = re.search(r"data-ref=['\"]([^'\"]+)['\"]", txt)
                 if mref:
                     ref_guess = mref.group(1)
