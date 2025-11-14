@@ -13,7 +13,7 @@ COLOR_SMBG_BLUE   = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42"
 LOGO_FILE_PATH    = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH   = "data/Liste des lots.xlsx"
-DETAILS_PANEL_WIDTH = 360  # Largeur du panneau de détails en pixels
+DETAILS_PANEL_WIDTH = 360
 
 # Colonnes attendues
 REF_COL="Référence annonce"; REGION_COL="Région"; DEPT_COL="Département"
@@ -51,7 +51,7 @@ def _load_futura_css_from_assets():
     css.append("*{font-family:'Futura SMBG', Futura, 'Futura PT', 'Century Gothic', Arial, sans-serif;}")
     return "\n".join(css)
 
-# ===== Helpers =====
+# ===== Helpers (Code inchangé) =====
 def parse_ref_display(ref_str):
     s=str(ref_str).strip()
     if "." in s:
@@ -68,13 +68,11 @@ def format_value(value, unit=""):
 
 def reset_all():
     st.session_state.clear()
-    st.session_state["show_details"] = True # Réinitialise l'état par défaut du volet
+    st.session_state["show_details"] = True
     st.rerun()
 
-# Fonction pour basculer l'état du volet de détails
 def toggle_details():
     st.session_state["show_details"] = not st.session_state["show_details"]
-    # Re-exécute pour appliquer immédiatement la nouvelle largeur à la carte
     st.rerun()
 
 if "selected_ref" not in st.session_state:
@@ -98,12 +96,25 @@ def load_data(path):
 
 data_df=load_data(EXCEL_FILE_PATH)
 
+# =======================================================
+# FIX DU NAMERROR : Initialisation des variables dans la portée du module
+# =======================================================
+selected_regions = []
+selected_depts_global = []
+selected_depts_by_region = defaultdict(list)
+# Initialisation des listes de filtres par checkbox
+emp_sel = []
+typo_sel = []
+ext_sel = []
+rest_sel = []
+smin, smax = 0, 1000 # Initialisation des bornes des sliders
+lmin, lmax = 0, 100000
+
 # Calcul de la marge droite dynamique
 right_padding = DETAILS_PANEL_WIDTH if st.session_state["show_details"] else 0
-# L'animation de 0.3s est ajoutée au CSS pour une transition douce
 TRANSITION_DURATION = "0.3s"
 
-# ===== CSS global (Mise à jour pour le côté rétractable) =====
+# ===== CSS global (Code inchangé) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -156,26 +167,93 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Ajout du bouton Bascule) =====
+# ===== SIDEBAR (Mise à jour des variables de sélection existantes) =====
 with st.sidebar:
-    # ... (Code de la sidebar inchangé) ...
+    # marge fixe de 25 px en haut
+    st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
-    # [CODE PRÉCÉDENT ICI: Logo, Régions/Départements, Sliders, Checkboxes]
+    # Logo via base64 (aucun bouton d’agrandissement)
+    b64 = logo_base64()
+    if b64:
+        st.markdown(
+            f"<img src='data:image/png;base64,{b64}' "
+            f"style='width:100%;height:auto;display:block;margin:0;'>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div style='color:#fff;'>Logo introuvable</div>", unsafe_allow_html=True)
 
-    # --- NOUVELLE SECTION : Contrôle du volet ---
+    # petite marge de 10 px sous le logo, pas plus
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("**Région / Département**")
+    regions = sorted([x for x in data_df.get(REGION_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
+
+    # Les listes initialisées ci-dessus sont réutilisées et remplies ici
+    selected_regions.clear()
+    selected_depts_global.clear()
+    selected_depts_by_region.clear()
+
+    for reg in regions:
+        rk = f"chk_region_{reg}"
+        rchecked = st.checkbox(reg, key=rk)
+        if rchecked:
+            selected_regions.append(reg)
+            pool = data_df[data_df[REGION_COL].astype(str).eq(reg)]
+            depts = sorted([x for x in pool.get(DEPT_COL,pd.Series()).dropna().astype(str).unique() if x.strip()])
+            for d in depts:
+                dk = f"chk_dept_{reg}_{d}"
+                st.markdown("<div class='dept-wrap'>", unsafe_allow_html=True)
+                dchecked = st.checkbox(d, key=dk)
+                st.markdown("</div>", unsafe_allow_html=True)
+                if dchecked:
+                    selected_depts_global.append(d)
+                    selected_depts_by_region[reg].append(d)
+
+    st.markdown("---")
+
+    # Sliders aux bornes (smin, smax, lmin, lmax sont maintenant dans la portée du module)
+    surf_num = data_df["__SURF_NUM__"].dropna()
+    surf_min=int(surf_num.min()) if not surf_num.empty else 0
+    surf_max=int(surf_num.max()) if not surf_num.empty else 1000
+    smin,smax=st.slider("Surface GLA (m²)", min_value=surf_min, max_value=surf_max, value=(surf_min,surf_max), step=1, key="slider_surface")
+
+    loyer_num = data_df["__LOYER_NUM__"].dropna()
+    loyer_min=int(loyer_num.min()) if not loyer_num.empty else 0
+    loyer_max=int(loyer_num.max()) if not loyer_num.empty else 100000
+    lmin,lmax=st.slider("Loyer annuel (€)", min_value=loyer_min, max_value=loyer_max, value=(loyer_min,loyer_max), step=1000, key="slider_loyer")
+
+    # Autres cases
+    def draw_checks(title, column, prefix):
+        st.markdown(f"**{title}**")
+        opts=sorted([x for x in data_df.get(column,pd.Series()).dropna().astype(str).unique() if x.strip()])
+        sels=[]
+        for opt in opts:
+            key = f"chk_{prefix}_{opt.replace(' ', '_')}"
+            if st.checkbox(opt, key=key):
+                sels.append(opt)
+        st.markdown("---")
+        # Le retour de la fonction est affecté aux variables de la portée du module
+        return sels
+
+    # Affectation des résultats de la fonction (emp_sel, typo_sel, ext_sel, rest_sel sont déjà déclarées)
+    emp_sel  = draw_checks("Emplacement",  EMPL_COL, "emp")
+    typo_sel = draw_checks("Typologie",   TYPO_COL, "typo")
+    ext_sel  = draw_checks("Extraction",  EXTRACTION_COL, "ext")
+    rest_sel = draw_checks("Restauration",RESTAURATION_COL, "rest")
+    
+    # --- Contrôle du volet ---
     st.markdown("---")
     
-    # Bouton Bascule
     label = "Masquer les détails" if st.session_state["show_details"] else "Afficher les détails"
     if st.button(label, use_container_width=True, on_click=toggle_details, key="btn_toggle_details"):
-        pass # Le toggle est géré par on_click
+        pass
 
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
-# ===== FILTRES (Code inchangé) =====
+# ===== FILTRES (L'erreur NameError est corrigée ici) =====
 f = data_df.copy()
-# ... (Logique de filtrage ici) ...
 
 if selected_regions or selected_depts_global:
     reg_mask = pd.Series(False, index=f.index)
@@ -191,6 +269,8 @@ if selected_regions or selected_depts_global:
     dept_mask = f[DEPT_COL].astype(str).isin(selected_depts_global)
     f = f[ reg_mask | dept_mask ]
 
+# sliders
+# smin, smax, lmin, lmax sont des variables de la portée du module grâce au slider
 f = f[
     (f["__SURF_NUM__"].isna() | ((f["__SURF_NUM__"]>=smin) & (f["__SURF_NUM__"]<=smax))) &
     (f["__LOYER_NUM__"].isna()| ((f["__LOYER_NUM__"]>=lmin) & (f["__LOYER_NUM__"]<=lmax)))
@@ -244,14 +324,11 @@ if map_output and map_output.get("last_object_clicked"):
     if ref_guess:
         st.session_state["selected_ref"]=ref_guess
 
-# ===== VOLET DROIT (Affichage conditionnel et dynamique) =====
-
-# Le panneau HTML n'est généré que s'il est censé être affiché (pour ne pas perturber l'espace s'il est masqué)
+# ===== VOLET DROIT (Code inchangé) =====
 if st.session_state["show_details"]:
     html=[f"<div class='details-panel'>"]
     sel_ref=st.session_state.get("selected_ref")
     
-    # Bouton pour refermer le volet, placé en haut à droite du volet de détails
     html.append(f"""
         <button onclick="parent.document.getElementById('btn_toggle_details').click()" 
                 style="position:absolute; top:8px; right:8px; background:none; border:none; color:white; font-size:20px; cursor:pointer;">
