@@ -13,7 +13,7 @@ COLOR_SMBG_BLUE   = "#05263D"
 COLOR_SMBG_COPPER = "#C67B42"
 LOGO_FILE_PATH    = "assets/Logo bleu crop.png"
 EXCEL_FILE_PATH   = "data/Liste des lots.xlsx"
-DETAILS_PANEL_WIDTH = 360
+DETAILS_PANEL_WIDTH = 360 # Largeur du panneau de détails
 
 # Colonnes attendues
 REF_COL="Référence annonce"; REGION_COL="Région"; DEPT_COL="Département"
@@ -24,9 +24,8 @@ SURFACE_COL="Surface GLA"; LOYER_COL="Loyer annuel"; LAT_COL="Latitude"; LON_COL
 INDEX_START, INDEX_END_EXCL = 6, 38
 MAP_HEIGHT = 800
 
-# FIX #1 : Initialisation de l'état du volet de détails (Masqué par défaut)
-if "show_details" not in st.session_state:
-    st.session_state["show_details"] = False
+# La variable show_details et la logique de bascule ont été supprimées.
+# Le panneau est toujours "visible" par défaut via le CSS.
 
 # ===== Police Futura (Code inchangé) =====
 def _load_futura_css_from_assets():
@@ -68,12 +67,9 @@ def format_value(value, unit=""):
 
 def reset_all():
     st.session_state.clear()
-    st.session_state["show_details"] = False
     st.rerun()
 
-def toggle_details():
-    st.session_state["show_details"] = not st.session_state["show_details"]
-    st.rerun()
+# Fonction toggle_details a été supprimée
 
 if "selected_ref" not in st.session_state:
     st.session_state["selected_ref"]=None
@@ -97,7 +93,7 @@ def load_data(path):
 data_df=load_data(EXCEL_FILE_PATH)
 
 # =======================================================
-# Variables de la portée du module (Correction du NameError)
+# Variables de la portée du module (Code inchangé)
 # =======================================================
 selected_regions = []
 selected_depts_global = []
@@ -109,11 +105,10 @@ rest_sel = []
 smin, smax = 0, 1000
 lmin, lmax = 0, 100000
 
-# Calcul de la marge droite dynamique
-right_padding = DETAILS_PANEL_WIDTH if st.session_state["show_details"] else 0
-TRANSITION_DURATION = "0.3s"
+# Calcul de la marge droite statique
+right_padding = DETAILS_PANEL_WIDTH
 
-# ===== CSS global (Code inchangé dans la structure) =====
+# ===== CSS global (Mise à jour pour un panneau fixe) =====
 def logo_base64():
     if not os.path.exists(LOGO_FILE_PATH): return ""
     return base64.b64encode(open(LOGO_FILE_PATH,"rb").read()).decode("ascii")
@@ -122,10 +117,9 @@ st.markdown(f"""
 <style>
 {_load_futura_css_from_assets()}
 
-/* Panneau droit réservé : La marge est ajustée dynamiquement via Python */
+/* Panneau droit réservé : La marge est toujours appliquée */
 [data-testid="stAppViewContainer"] .main .block-container {{ 
-    padding-right: {right_padding + 20}px; /* +20px pour un peu de marge */
-    transition: padding-right {TRANSITION_DURATION}; /* Ajout d'une transition */
+    padding-right: {right_padding + 20}px; 
 }}
 
 /* Sidebar : marge haute 25px, aucun bouton collapse, fond bleu, titres cuivre */
@@ -147,14 +141,12 @@ st.markdown(f"""
   padding:0 !important; margin:0 !important; border:0 !important; display:none !important;
 }}
 
-/* Panneau droit : Utilisation de 'transform' pour l'animation de masquage */
+/* Panneau droit : Fixe, permanent et sans animation de rétraction */
 .details-panel {{
   position: fixed; top: 0; right: 0; width: {DETAILS_PANEL_WIDTH}px; height: 100vh;
   background:{COLOR_SMBG_BLUE}; color:#fff; z-index:1000;
   padding:16px; box-shadow:-5px 0 15px rgba(0,0,0,0.35); overflow-y:auto;
-  /* Masquage/Affichage par translation */
-  transform: translateX({0 if st.session_state["show_details"] else DETAILS_PANEL_WIDTH}px);
-  transition: transform {TRANSITION_DURATION} ease-in-out;
+  /* La transformation et la transition sont retirées */
 }}
 .maps-button {{
   width:100%; padding:9px; margin:8px 0 14px; background:{COLOR_SMBG_COPPER};
@@ -166,7 +158,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== SIDEBAR (Code inchangé dans la structure) =====
+# ===== SIDEBAR (Suppression du bouton de contrôle du volet) =====
 with st.sidebar:
     st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
 
@@ -239,10 +231,6 @@ with st.sidebar:
     # --- Contrôle du volet ---
     st.markdown("---")
     
-    label = "Masquer les détails" if st.session_state["show_details"] else "Afficher les détails"
-    if st.button(label, use_container_width=True, on_click=toggle_details, key="btn_toggle_details"):
-        pass
-
     if st.button("Réinitialiser", use_container_width=True):
         reset_all()
 
@@ -272,7 +260,7 @@ if typo_sel: f = f[f[TYPO_COL].astype(str).isin(typo_sel)]
 if ext_sel:  f = f[f[EXTRACTION_COL].astype(str).isin(ext_sel)]
 if rest_sel: f = f[f[RESTAURATION_COL].astype(str).isin(rest_sel)]
 
-# ===== CARTE (Code inchangé) =====
+# ===== CARTE (Mise à jour pour ne plus toucher à show_details) =====
 pins_df = f.copy()
 
 if pins_df.empty: center_lat,center_lon=46.5,2.5
@@ -315,46 +303,50 @@ if map_output and map_output.get("last_object_clicked"):
             break
     if ref_guess:
         st.session_state["selected_ref"]=ref_guess
-        # FIX : Affiche le panneau après un clic sur un marqueur
-        st.session_state["show_details"] = True
-        # st.rerun() a été retiré, car le clic sur la carte déclenche déjà le relancement complet.
+        # Suppression des lignes st.session_state["show_details"] = True et st.rerun()
 
-# ===== VOLET DROIT (Code inchangé) =====
-if st.session_state["show_details"]:
-    html=[f"<div class='details-panel'>"]
-    sel_ref=st.session_state.get("selected_ref")
-    
-    html.append(f"""
-        <button onclick="parent.document.getElementById('btn_toggle_details').click()" 
-                style="position:absolute; top:8px; right:8px; background:none; border:none; color:white; font-size:20px; cursor:pointer;">
-            &times;
-        </button>
-    """)
+# ===== VOLET DROIT (Toujours affiché) =====
+html=[f"<div class='details-panel'>"]
+sel_ref=st.session_state.get("selected_ref")
 
-    if sel_ref:
-        row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
-        if not row.empty:
-            r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
-            html+=["<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>",
-                   f"<h4 style='color:{COLOR_SMBG_COPPER};margin:0 0 10px 0;'>Réf. : {ref_title}</h4>",
-                   "<h5 style='margin:6px 0 8px;'>📋 Données clés</h5>","<table>"]
-            all_cols=data_df.columns.tolist()
-            cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
-            for idx,champ in enumerate(cols_slice, start=INDEX_START):
-                sraw=str(r.get(champ,"")).strip()
-                if sraw.lower() in ("","néant","-","/"): continue
-                if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
-                    html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
-                                f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
-                    continue
-                unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
-                       else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
-                sval=format_value(sraw, unit)
-                if not sval: continue
-                html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
-            html+=["</table>",
-                   "<hr style='border:1px solid #eee;margin:12px 0;'>",
-                   "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
-                   "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
-    html.append("</div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+# Le bouton de fermeture a été retiré, le volet est fixe.
+
+if sel_ref:
+    # Contenu détaillé
+    row=data_df[data_df[REF_COL].astype(str).str.strip()==str(sel_ref).strip()]
+    if not row.empty:
+        r=row.iloc[0]; ref_title=parse_ref_display(sel_ref)
+        html+=["<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>",
+               f"<h4 style='color:{COLOR_SMBG_COPPER};margin:0 0 10px 0;'>Réf. : {ref_title}</h4>",
+               "<h5 style='margin:6px 0 8px;'>📋 Données clés</h5>","<table>"]
+        all_cols=data_df.columns.tolist()
+        cols_slice=all_cols[INDEX_START:INDEX_END_EXCL] if len(all_cols)>=INDEX_END_EXCL else all_cols[INDEX_START:]
+        for idx,champ in enumerate(cols_slice, start=INDEX_START):
+            sraw=str(r.get(champ,"")).strip()
+            if sraw.lower() in ("","néant","-","/"): continue
+            if champ.lower().strip() in ["lien google maps","google maps","lien google"]:
+                html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>Lien Google Maps</td>"
+                            f"<td><a class='maps-button' href='{sraw}' target='_blank'>Cliquer ici</a></td></tr>")
+                continue
+            unit = "€" if any(k in champ for k in ["Loyer","Charges","garantie","Taxe","Marketing","Gestion","BP","annuel","Mensuel","foncière","Honoraires"]) \
+                   else ("m²" if any(k in champ for k in ["Surface","GLA","utile","Vitrine","Linéaire"]) else "")
+            sval=format_value(sraw, unit)
+            if not sval: continue
+            html.append(f"<tr><td style='color:{COLOR_SMBG_COPPER};font-weight:bold;'>{champ}</td><td>{sval}</td></tr>")
+        html+=["</table>",
+               "<hr style='border:1px solid #eee;margin:12px 0;'>",
+               "<h5 style='margin:6px 0 8px;'>📷 Photos</h5>",
+               "<div class='small-note'>Les photos seront affichées ici dès qu'elles seront en ligne.</div>"]
+    else:
+        # Message si la référence est sélectionnée mais introuvable (ne devrait pas arriver)
+        html.append("<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>")
+        html.append(f"<p style='color:#ccc; margin-top: 15px;'>Référence **{parse_ref_display(sel_ref)}** introuvable.</p>")
+
+else:
+    # Message par défaut si aucun pin n'a été cliqué
+    html.append("<h3 style='margin:0 0 6px 0;'>🔍 Détails de l'annonce</h3>")
+    html.append("<p style='color:#ccc; margin-top: 15px;'>**Cliquez sur une épingle** sur la carte pour afficher les détails du lot correspondant.</p>")
+
+
+html.append("</div>")
+st.markdown("".join(html), unsafe_allow_html=True)
