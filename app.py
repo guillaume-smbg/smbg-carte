@@ -87,6 +87,8 @@ main.block-container, .block-container {{
     background-color: {BLUE_SMBG};
     min-width: 275px;
     max-width: 275px;
+    z-index: 10000;
+    position: relative;
 }}
 
 /* Remove sidebar collapse button */
@@ -104,19 +106,23 @@ button[title="View fullscreen"] {{
     display: none !important;
 }}
 
-/* Map container full height */
+/* Map container: fixed, full viewport height, behind panels */
 #map-container {{
-    position: relative;
-    width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
     height: 100vh;
     margin: 0;
     padding: 0;
     overflow: hidden;
+    z-index: 1;
 }}
 
 /* Force folium iframe to fill viewport height */
 iframe[title="st_folium.smbg_map"] {{
     height: 100vh !important;
+    width: 100% !important;
 }}
 
 /* Right drawer */
@@ -153,26 +159,31 @@ iframe[title="st_folium.smbg_map"] {{
     margin-bottom: 0.75rem;
 }}
 
-#detail-drawer table {{
-    width: 100%;
-    border-collapse: collapse;
+/* Detail rows */
+#detail-drawer .detail-rows {{
+    margin-top: 0.5rem;
+}}
+
+#detail-drawer .detail-row {{
+    display: flex;
+    align-items: flex-start;
     font-size: 0.8rem;
+    margin-bottom: 0.25rem;
 }}
 
-#detail-drawer td {{
-    padding: 0.15rem 0.2rem;
-    vertical-align: top;
-}}
-
-#detail-drawer td.label {{
+#detail-drawer .detail-label {{
     color: {COPPER_SMBG};
     font-weight: 600;
     width: 45%;
+    padding-right: 0.3rem;
 }}
 
-#detail-drawer td.value {{
+#detail-drawer .detail-value {{
     color: #ffffff;
     width: 55%;
+    word-wrap: break-word;
+    word-break: break-word;
+    white-space: normal;
 }}
 
 #detail-drawer .gmaps-button {{
@@ -536,7 +547,6 @@ if selected_regions:
     # For each selected region, check if any département is selected
     region_masks = []
     for region in selected_regions:
-        region_df = filtered[filtered["Région"] == region]
         selected_depts = [
             dept for dept in dept_by_region[region] if st.session_state.get(f"dept_{region}_{dept}", False)
         ]
@@ -626,16 +636,14 @@ for _, row in filtered.iterrows():
     ).add_to(m)
 
 # Display map full page (center)
-map_html_container = st.container()
-with map_html_container:
-    st.markdown('<div id="map-container">', unsafe_allow_html=True)
-    map_data = st_folium(
-        m,
-        width=None,
-        height=600,  # overruled by CSS to 100vh
-        key="smbg_map",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown('<div id="map-container">', unsafe_allow_html=True)
+map_data = st_folium(
+    m,
+    width=None,
+    height=600,  # overruled by CSS to 100vh
+    key="smbg_map",
+)
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ----------------------
@@ -703,7 +711,7 @@ def render_detail_drawer():
         if pd.isna(gmaps_url):
             gmaps_url = None
 
-    # Build detail table rows (columns G -> AL, except H)
+    # Build detail rows (columns G -> AL, except H)
     rows_html = []
     for idx in range(DETAIL_START_IDX, DETAIL_END_IDX + 1):
         if idx == GMAPS_COL_IDX:
@@ -726,7 +734,7 @@ def render_detail_drawer():
             continue
 
         rows_html.append(
-            f"<tr><td class='label'>{col_name}</td><td class='value'>{value_str}</td></tr>"
+            f"<div class='detail-row'><div class='detail-label'>{col_name}</div><div class='detail-value'>{value_str}</div></div>"
         )
 
     rows_html_str = "\n".join(rows_html)
@@ -746,11 +754,9 @@ def render_detail_drawer():
     <div class="ref-label">Détails de l'annonce</div>
     <div class="ref-value">{ref_display}</div>
     {gmaps_button_html}
-    <table>
-        <tbody>
-            {rows_html_str}
-        </tbody>
-    </table>
+    <div class="detail-rows">
+        {rows_html_str}
+    </div>
 </div>
 """
 
