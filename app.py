@@ -234,8 +234,6 @@ map_data = st_folium(
     width=None,
     height=600,  # sera forcé à 100vh par le CSS
     key="smbg_map",
-    return_clicks=True,
-    return_objects=True,
 )
 
 
